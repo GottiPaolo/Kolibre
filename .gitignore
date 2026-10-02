@@ -1,0 +1,105 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.venv/
+var/
+.env
+
+# Docker: .env holds the admin password + JWT secret for a real instance —
+# only .env.example (the template) is ever committed. kolibre-data/ is
+# .env.example's own default DATA_PATH, in case someone runs docker compose
+# without customizing it first.
+kolibre-data/
+
+# SQLite databases
+app.db
+app.db-shm
+app.db-wal
+data/
+*.log
+
+# Full-text search index — regenerable per-library data (see "Reindicizza
+# tutto"), not source content.
+fulltext.db
+
+# Dev-only test fixture (a whole personal toy library, tens of MB) — was
+# committed by mistake early on; never belongs in the repo. If you need one
+# for local testing, keep it outside the repo, or import it directly into
+# data/libraries/ (already gitignored above) rather than at the repo root.
+toyLibrary/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.cache/
+frontend/npm-debug.log*
+
+# Stessa cosa per frontend-react (mancava — senza questa riga oxlint scansiona
+# anche node_modules/dist, riportando centinaia di warning irrilevanti da
+# codice di terze parti su "npm run lint").
+frontend-react/node_modules/
+frontend-react/dist/
+frontend-react/npm-debug.log*
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Reference-only checkouts of OTHER people's/earlier projects (full Calibre
+# source, prior prototypes, etc.) used for research during development —
+# never part of Kolibre itself, must never be committed (was, by mistake,
+# for the first several commits — since scrubbed from history).
+altri_progetti/
+
+# Reference screenshots (Calibre UI, Obsidian shortcuts, etc.) pasted in
+# during planning to match against — design input, not project source.
+ImmaginiRiferimento/
+
+# Ad-hoc scratch notes/task briefs dropped at the repo root during a work
+# session — not documentation, belongs in chat history instead.
+new_task.txt
+
+# Script di rilascio: appartengono alla MACCHINA che rilascia, non al
+# progetto. Sul server il punto d'ingresso vero e' deploy_with_notification,
+# che a sua volta chiama deploy.sh — cose che dipendono da come quel server
+# e' fatto (notifiche, percorsi, tag) e che nessun altro clone del repo puo'
+# usare. Tenerli tracciati produceva solo attrito: il file sul server aveva
+# modifiche mai committate, e ogni commit che lo toccava faceva abortire il
+# `git pull` del deploy stesso — "Your local changes would be overwritten by
+# merge" (18/09). Il meccanismo che invece E' del progetto resta tracciato:
+# scripts/set_deploy_version.sh, che definisce come nasce KOLIBRE_VERSION.
+deploy.sh
+deploy_with_notification*
+update.sh
+
+# La configurazione Vite della biblioteca dimostrativa in locale: contiene un
+# un percorso assoluto della macchina di sviluppo e punta al backend demo
+# sulla 8099.
+# Serve solo a fare le schermate del README, e frontend-react/ si pubblica.
+frontend-react/vite.demo.config.ts
+# Tutti i .md stanno fuori: appunti, analisi, storico, roadmap. Le eccezioni
+# si dichiarano qui sotto una per una, perché un file dimenticato qui è un file
+# che non finisce nel repo pubblico e di cui non se ne accorge nessuno —
+# README.md fino al 03/10/2026 sopravviveva solo perché era già tracciato
+# prima che questa riga esistesse, il che non è una regola, è una coincidenza.
+*.md
+# Ancorate alla radice (lo slash davanti): senza, «!README.md» vale a
+# qualunque livello e si porta dietro anche il README di default di Vite.
+!/README.md
+!/SECURITY.md
+# NON aggiungere qui una riga «.gitignore»: c'e' stata fino al 02/10/2026 e
+# nel repo privato non si vedeva, perche' le regole di ignoranza non valgono
+# per i file gia' tracciati. Si e' visto alla prima pubblicazione: l'albero
+# dell'istantanea e' un repo nuovo, dove quella riga faceva sparire il
+# .gitignore stesso — e chi avesse clonato si sarebbe committato dentro
+# node_modules, .env e la propria biblioteca.

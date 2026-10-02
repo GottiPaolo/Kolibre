@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Kolibre</title>
+
+    <!-- Salvato sulla schermata iniziale, il sito diventa un'applicazione a
+         se': queste righe sono quelle che le danno il logo e il nome invece
+         di una miniatura della pagina.
+
+         L'icona ha uno SFONDO OPACO di proposito, anche se il logo e'
+         trasparente: iOS non supporta la trasparenza qui e compone su nero,
+         quindi il fondo va deciso noi invece di subirlo. Il margine e' nel
+         file, perche' iOS ritaglia l'icona con gli angoli arrotondati senza
+         aggiungere aria (vedi lo script che genera public/icons/). -->
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Kolibre" />
+    <!-- Barra di stato scura: il tema predefinito e' scuro, e "default"
+         (chiara) ci starebbe sopra come una striscia bianca. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="theme-color" content="#121011" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
