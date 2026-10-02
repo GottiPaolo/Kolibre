@@ -1,0 +1,5 @@
+This file's presence (and exact name) tells Calibre's zip plugin loader to
+expose this plugin's modules as the "calibre_plugins.kolibre_sync" package
+(see calibre/customize/zipplugin.py, _locate_code: it parses the trailing
+"-<name>" out of "plugin-import-name-<name>.txt" and uses it as the import
+name — the file's content is never read). Do not rename this file.

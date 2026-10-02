@@ -1,0 +1,10 @@
+{
+  "id": "kolibre-highlights",
+  "name": "Kolibre Highlights",
+  "version": "1.1.1",
+  "minAppVersion": "1.4.10",
+  "description": "Imports your Kolibre highlights as Markdown notes, with the book's own structure as headings and real incremental updates.",
+  "author": "Kolibre",
+  "authorUrl": "",
+  "isDesktopOnly": true
+}

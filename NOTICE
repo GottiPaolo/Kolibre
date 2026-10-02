@@ -1,0 +1,78 @@
+Kolibre
+Copyright (C) 2026 Paolo Gotti
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU Affero General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option) any
+later version. The full text is in the LICENSE file.
+
+This program is distributed in the hope that it will be useful, but WITHOUT
+ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.
+
+--------------------------------------------------------------------------
+Why AGPL-3.0 and not a permissive licence
+--------------------------------------------------------------------------
+
+This isn't a preference between licences. It follows from what Kolibre
+contains, and any one of the three reasons below would be enough on its own.
+
+  * Three files carry Calibre's algorithms and database schema (GPL-3.0,
+    (C) Kovid Goyal), ported line by line, because a Kolibre library has to
+    open in Calibre Desktop with no conversion step:
+
+        backend/app/calibre/functions.py       title_sort, author_to_author_sort,
+                                               sortconcat, concat, uuid4
+        backend/app/calibre/schema.sql         the metadata.db schema
+        backend/app/calibre/calibre_naming.py  how folders and files are named
+
+    Each file cites in its own comments the exact place it came from.
+    Calibre: https://calibre-ebook.com — https://github.com/kovidgoyal/calibre
+
+  * The KOReader plugin (plugins/koreader/) is not a separate program talking
+    to the server over HTTP: it imports thirty-five of KOReader's internal
+    modules and extends its widgets, so it only exists inside it. That makes
+    it a derivative work, and KOReader is AGPL-3.0:
+    https://github.com/koreader/koreader
+
+  * The `unidecode` dependency (transliterating folder names, the way Calibre
+    does) is GPL.
+
+The first and third reasons would call for the GPL-3.0; it is KOReader that
+makes it the *Affero* GPL. GPL-3.0 section 13 expressly permits combining
+GPLv3 code with AGPLv3 code, which is what lets a single licence cover all
+three instead of licensing this project file by file.
+
+The Affero clause is also the right fit, not merely the required one. The
+plain GPL is triggered by distributing a program, and a web application is
+never distributed — it runs on the server of whoever offers it. Section 13 of
+the AGPL closes that gap: if you let people use a modified version of Kolibre
+over a network, you have to offer them its source.
+
+--------------------------------------------------------------------------
+Other third-party material
+--------------------------------------------------------------------------
+
+  * Interface components generated with shadcn/ui (MIT), which is designed to
+    be copied into your own project: https://ui.shadcn.com
+  * Lucide icons (ISC): https://lucide.dev
+  * Geist font (SIL Open Font License 1.1): https://vercel.com/font
+    The OFL requires its text to travel with the font, and the font files do
+    ship inside the built site, so the licence ships with them: see
+    frontend-react/public/licenses/Geist-OFL.txt, served at /licenses/.
+  * The remaining dependencies (npm and Python) are under permissive licences
+    — MIT, ISC, BSD, Apache-2.0 — and their licence texts ship with the
+    packages themselves.
+
+--------------------------------------------------------------------------
+Content downloaded while the program is used
+--------------------------------------------------------------------------
+
+Kolibre ships no third-party text or images, but it can fetch them on request
+into your own installation:
+
+  * Author biographies from Wikipedia (CC BY-SA 4.0). The interface shows the
+    source and the licence next to every biography.
+  * Biographical data from Wikidata (CC0).
+  * Author photographs from Wikimedia Commons: each image carries its own
+    licence, stated on its page on Commons.

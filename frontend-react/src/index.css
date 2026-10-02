@@ -1,0 +1,586 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --font-heading: var(--font-sans);
+    --font-sans: 'Geist Variable', sans-serif;
+    --font-serif: var(--font-display);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar: var(--sidebar);
+    --color-chart-5: var(--chart-5);
+    --color-chart-4: var(--chart-4);
+    --color-chart-3: var(--chart-3);
+    --color-chart-2: var(--chart-2);
+    --color-chart-1: var(--chart-1);
+    --color-ring: var(--ring);
+    --color-input: var(--input);
+    --color-border: var(--border);
+    --color-destructive: var(--destructive);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-accent: var(--accent);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-muted: var(--muted);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-secondary: var(--secondary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-primary: var(--primary);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-popover: var(--popover);
+    --color-card-foreground: var(--card-foreground);
+    --color-card: var(--card);
+    --color-foreground: var(--foreground);
+    --color-background: var(--background);
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.8);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.4);
+    --radius-2xl: calc(var(--radius) * 1.8);
+    --radius-3xl: calc(var(--radius) * 2.2);
+    --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+/*
+  Tre stili validati con l'utente su mockup HTML interattivi (vedi sessione
+  di design) — scambiabili dal vivo via l'attributo `data-style` sulla root,
+  non legati al toggle chiaro/scuro del sistema: Kolibre COMMITTA a una
+  palette scelta esplicitamente (impostazione futura in Impostazioni), non
+  la deriva da prefers-color-scheme. "Sake" (l'attuale, di default) e
+  "Museo" sono entrambi scuri; "Carta" è chiaro — nessuno dei tre reagisce
+  al tema del sistema.
+
+  I nomi delle variabili (--background, --primary, --sidebar-*, ecc.) sono
+  il contratto di shadcn/ui: ogni componente li usa già, quindi definirli
+  qui basta a colorare l'intera libreria di componenti senza toccare
+  ciascuno singolarmente. Le variabili extra (--bg-hover, --positive-soft,
+  --ease, ...) sono nostre, per il layout custom (sidebar, pill, tabelle)
+  che non passa dai componenti shadcn.
+*/
+:root, [data-style="sake"] {
+    --background: #121011;
+    --foreground: #ece7e2;
+    --card: #1c1917;
+    --card-foreground: #ece7e2;
+    --popover: #1c1917;
+    --popover-foreground: #ece7e2;
+    --primary: #c05a46;
+    --primary-foreground: #ffffff;
+    --secondary: #262220;
+    --secondary-foreground: #ece7e2;
+    --muted: #262220;
+    --muted-foreground: #a89d95;
+    --accent: #262220;
+    --accent-foreground: #ece7e2;
+    --destructive: #a3505c;
+    --destructive-foreground: #ffffff;
+    --border: #322b28;
+    --input: #322b28;
+    --ring: #c05a46;
+    --chart-1: #c05a46;
+    --chart-2: #7a937a;
+    --chart-3: #c29d53;
+    --chart-4: #a3505c;
+    --chart-5: #8a9bab;
+    --radius: 0.45rem;
+    --sidebar: #17140f;
+    --sidebar-foreground: #ece7e2;
+    --sidebar-primary: #c05a46;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #262220;
+    --sidebar-accent-foreground: #ece7e2;
+    --sidebar-border: #241f1c;
+    --sidebar-ring: #c05a46;
+
+    /* Nostre, non parte del contratto shadcn */
+    /* Font vero per la produzione: Lora (già in uso in frontend/) — qui uno
+       stand-in di sistema con lo stesso carattere letterario, per non
+       dipendere da un @font-face aggiuntivo in questa fase. */
+    --font-display: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --bg-hover: #262220;
+    --border-soft: #241f1c;
+    --text-faint: #6e645e;
+    --accent-hover: #d16b57;
+    --accent-soft: rgba(192, 90, 70, 0.16);
+    --positive: #7a937a;
+    --positive-soft: rgba(122, 147, 122, 0.16);
+    --warning: #c29d53;
+    --warning-soft: rgba(194, 157, 83, 0.16);
+    --critical-soft: rgba(163, 80, 92, 0.16);
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Museo": più freddo, archivistico ---- */
+[data-style="museo"] {
+    --background: #0f1113;
+    --foreground: #e6e9ec;
+    --card: #171a1d;
+    --card-foreground: #e6e9ec;
+    --popover: #171a1d;
+    --popover-foreground: #e6e9ec;
+    --primary: #4c7a8c;
+    --primary-foreground: #ffffff;
+    --secondary: #1f2327;
+    --secondary-foreground: #e6e9ec;
+    --muted: #1f2327;
+    --muted-foreground: #93999f;
+    --accent: #1f2327;
+    --accent-foreground: #e6e9ec;
+    --destructive: #a3536a;
+    --destructive-foreground: #ffffff;
+    --border: #2a2f34;
+    --input: #2a2f34;
+    --ring: #4c7a8c;
+    --chart-1: #4c7a8c;
+    --chart-2: #7a9d7e;
+    --chart-3: #b99a5a;
+    --chart-4: #a3536a;
+    --chart-5: #8891a3;
+    --radius: 0.45rem;
+    --sidebar: #121416;
+    --sidebar-foreground: #e6e9ec;
+    --sidebar-primary: #4c7a8c;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #1f2327;
+    --sidebar-accent-foreground: #e6e9ec;
+    --sidebar-border: #1c1f22;
+    --sidebar-ring: #4c7a8c;
+
+    --font-display: Georgia, Cambria, "Times New Roman", serif;
+    --bg-hover: #1f2327;
+    --border-soft: #1c1f22;
+    --text-faint: #5b6167;
+    --accent-hover: #5c8ea1;
+    --accent-soft: rgba(76, 122, 140, 0.18);
+    --positive: #7a9d7e;
+    --positive-soft: rgba(122, 157, 126, 0.16);
+    --warning: #b99a5a;
+    --warning-soft: rgba(185, 154, 90, 0.16);
+    --critical-soft: rgba(163, 83, 106, 0.16);
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Carta": tema chiaro, da carteggio ---- */
+[data-style="carta"] {
+    --background: #f3ede2;
+    --foreground: #2c2418;
+    --card: #ece3d3;
+    --card-foreground: #2c2418;
+    --popover: #ece3d3;
+    --popover-foreground: #2c2418;
+    --primary: #7a2f2f;
+    --primary-foreground: #f7f1e6;
+    --secondary: #e4d8c4;
+    --secondary-foreground: #2c2418;
+    --muted: #e4d8c4;
+    --muted-foreground: #6d5f48;
+    --accent: #e4d8c4;
+    --accent-foreground: #2c2418;
+    --destructive: #8e3a52;
+    --destructive-foreground: #f7f1e6;
+    --border: #d8c9ae;
+    --input: #d8c9ae;
+    --ring: #7a2f2f;
+    --chart-1: #7a2f2f;
+    --chart-2: #4c6b4f;
+    --chart-3: #93702f;
+    --chart-4: #8e3a52;
+    --chart-5: #5a6b7a;
+    --radius: 0.45rem;
+    --sidebar: #eee5d6;
+    --sidebar-foreground: #2c2418;
+    --sidebar-primary: #7a2f2f;
+    --sidebar-primary-foreground: #f7f1e6;
+    --sidebar-accent: #e4d8c4;
+    --sidebar-accent-foreground: #2c2418;
+    --sidebar-border: #e0d3bb;
+    --sidebar-ring: #7a2f2f;
+
+    --font-display: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    --bg-hover: #e4d8c4;
+    --border-soft: #e0d3bb;
+    --text-faint: #99896a;
+    --accent-hover: #8f3c3c;
+    --accent-soft: rgba(122, 47, 47, 0.13);
+    --positive: #4c6b4f;
+    --positive-soft: rgba(76, 107, 79, 0.14);
+    --warning: #93702f;
+    --warning-soft: rgba(147, 112, 47, 0.14);
+    --critical-soft: rgba(142, 58, 82, 0.14);
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Calibre": il minimo indispensabile, come Calibre Desktop —
+   grigi neutri, blu di sistema, angoli quasi retti, nessun carattere
+   letterario. E' il tema per chi vuole che l'interfaccia sparisca. ---- */
+[data-style="calibre"] {
+    --background: #fbfbfc;
+    --foreground: #1f2225;
+    --card: #ffffff;
+    --card-foreground: #1f2225;
+    --popover: #ffffff;
+    --popover-foreground: #1f2225;
+    --primary: #2b6cb0;
+    --primary-foreground: #ffffff;
+    --secondary: #eef0f2;
+    --secondary-foreground: #1f2225;
+    --muted: #eef0f2;
+    --muted-foreground: #61686f;
+    --accent: #eef0f2;
+    --accent-foreground: #1f2225;
+    --destructive: #b3261e;
+    --destructive-foreground: #ffffff;
+    --border: #d8dcdf;
+    --input: #d8dcdf;
+    --ring: #2b6cb0;
+    --chart-1: #2b6cb0;
+    --chart-2: #4a7c59;
+    --chart-3: #b3782b;
+    --chart-4: #b3261e;
+    --chart-5: #6b7280;
+    --radius: 0.15rem;
+    --sidebar: #f2f4f6;
+    --sidebar-foreground: #1f2225;
+    --sidebar-primary: #2b6cb0;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #eef0f2;
+    --sidebar-accent-foreground: #1f2225;
+    --sidebar-border: #e2e6e9;
+    --sidebar-ring: #2b6cb0;
+    --bg-hover: #eef0f2;
+    --border-soft: #e6e9ec;
+    --text-faint: #8b9298;
+    --accent-hover: #3a7ec4;
+    --accent-soft: rgba(43, 108, 176, 0.12);
+    --positive: #3f7d54;
+    --positive-soft: rgba(63, 125, 84, 0.13);
+    --warning: #a8761f;
+    --warning-soft: rgba(168, 118, 31, 0.13);
+    --critical-soft: rgba(179, 38, 30, 0.12);
+
+    --font-display: system-ui, -apple-system, "Segoe UI", sans-serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Foresta": verdi di muschio su marroni di corteccia, chiaro ---- */
+[data-style="foresta"] {
+    --background: #f4f2e9;
+    --foreground: #2b2a20;
+    --card: #eceadf;
+    --card-foreground: #2b2a20;
+    --popover: #eceadf;
+    --popover-foreground: #2b2a20;
+    --primary: #4a6b3d;
+    --primary-foreground: #f7f6ef;
+    --secondary: #e2dfd0;
+    --secondary-foreground: #2b2a20;
+    --muted: #e2dfd0;
+    --muted-foreground: #6a6552;
+    --accent: #e2dfd0;
+    --accent-foreground: #2b2a20;
+    --destructive: #8c4a3a;
+    --destructive-foreground: #f7f6ef;
+    --border: #d3cfba;
+    --input: #d3cfba;
+    --ring: #4a6b3d;
+    --chart-1: #4a6b3d;
+    --chart-2: #7d6440;
+    --chart-3: #a8955c;
+    --chart-4: #8c4a3a;
+    --chart-5: #5c7a6e;
+    --radius: 0.4rem;
+    --sidebar: #ebe8db;
+    --sidebar-foreground: #2b2a20;
+    --sidebar-primary: #4a6b3d;
+    --sidebar-primary-foreground: #f7f6ef;
+    --sidebar-accent: #e2dfd0;
+    --sidebar-accent-foreground: #2b2a20;
+    --sidebar-border: #ded9c6;
+    --sidebar-ring: #4a6b3d;
+    --bg-hover: #e2dfd0;
+    --border-soft: #ded9c6;
+    --text-faint: #97917a;
+    --accent-hover: #587d49;
+    --accent-soft: rgba(74, 107, 61, 0.14);
+    --positive: #5d8a4a;
+    --positive-soft: rgba(93, 138, 74, 0.14);
+    --warning: #a8762f;
+    --warning-soft: rgba(168, 118, 47, 0.14);
+    --critical-soft: rgba(140, 74, 58, 0.13);
+
+    --font-display: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Sottobosco": lo stesso bosco, di notte ---- */
+[data-style="sottobosco"] {
+    --background: #121612;
+    --foreground: #e3e6dd;
+    --card: #1a201a;
+    --card-foreground: #e3e6dd;
+    --popover: #1a201a;
+    --popover-foreground: #e3e6dd;
+    --primary: #7fa86a;
+    --primary-foreground: #101410;
+    --secondary: #232a22;
+    --secondary-foreground: #e3e6dd;
+    --muted: #232a22;
+    --muted-foreground: #9aa494;
+    --accent: #232a22;
+    --accent-foreground: #e3e6dd;
+    --destructive: #b06a52;
+    --destructive-foreground: #ffffff;
+    --border: #2f382e;
+    --input: #2f382e;
+    --ring: #7fa86a;
+    --chart-1: #7fa86a;
+    --chart-2: #b08d5a;
+    --chart-3: #c9b273;
+    --chart-4: #b06a52;
+    --chart-5: #6d8f97;
+    --radius: 0.4rem;
+    --sidebar: #0f130f;
+    --sidebar-foreground: #e3e6dd;
+    --sidebar-primary: #7fa86a;
+    --sidebar-primary-foreground: #101410;
+    --sidebar-accent: #232a22;
+    --sidebar-accent-foreground: #e3e6dd;
+    --sidebar-border: #1c221b;
+    --sidebar-ring: #7fa86a;
+    --bg-hover: #232a22;
+    --border-soft: #1c221b;
+    --text-faint: #6a7365;
+    --accent-hover: #92bd7c;
+    --accent-soft: rgba(127, 168, 106, 0.16);
+    --positive: #86b36f;
+    --positive-soft: rgba(134, 179, 111, 0.16);
+    --warning: #c9a55a;
+    --warning-soft: rgba(201, 165, 90, 0.16);
+    --critical-soft: rgba(176, 106, 82, 0.16);
+
+    --font-display: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Notte": quasi nero, contrasto alto, un solo accento freddo —
+   pensato per leggere al buio senza che lo sfondo illumini la stanza. ---- */
+[data-style="notte"] {
+    --background: #0a0a0b;
+    --foreground: #f0f0f2;
+    --card: #131316;
+    --card-foreground: #f0f0f2;
+    --popover: #131316;
+    --popover-foreground: #f0f0f2;
+    --primary: #6d8cff;
+    --primary-foreground: #0a0a0b;
+    --secondary: #1b1b1f;
+    --secondary-foreground: #f0f0f2;
+    --muted: #1b1b1f;
+    --muted-foreground: #9b9ba3;
+    --accent: #1b1b1f;
+    --accent-foreground: #f0f0f2;
+    --destructive: #e05563;
+    --destructive-foreground: #0a0a0b;
+    --border: #26262c;
+    --input: #26262c;
+    --ring: #6d8cff;
+    --chart-1: #6d8cff;
+    --chart-2: #57c3a4;
+    --chart-3: #d9a441;
+    --chart-4: #e05563;
+    --chart-5: #a78bfa;
+    --radius: 0.3rem;
+    --sidebar: #0d0d0f;
+    --sidebar-foreground: #f0f0f2;
+    --sidebar-primary: #6d8cff;
+    --sidebar-primary-foreground: #0a0a0b;
+    --sidebar-accent: #1b1b1f;
+    --sidebar-accent-foreground: #f0f0f2;
+    --sidebar-border: #1a1a1e;
+    --sidebar-ring: #6d8cff;
+    --bg-hover: #1b1b1f;
+    --border-soft: #1a1a1e;
+    --text-faint: #62626b;
+    --accent-hover: #849eff;
+    --accent-soft: rgba(109, 140, 255, 0.16);
+    --positive: #57c3a4;
+    --positive-soft: rgba(87, 195, 164, 0.16);
+    --warning: #d9a441;
+    --warning-soft: rgba(217, 164, 65, 0.16);
+    --critical-soft: rgba(224, 85, 99, 0.16);
+
+    --font-display: Georgia, Cambria, "Times New Roman", serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Lino": chiaro caldo e attenuato, accento color inchiostro ---- */
+[data-style="lino"] {
+    --background: #faf8f4;
+    --foreground: #23262b;
+    --card: #f2efe8;
+    --card-foreground: #23262b;
+    --popover: #f2efe8;
+    --popover-foreground: #23262b;
+    --primary: #2f4858;
+    --primary-foreground: #faf8f4;
+    --secondary: #eae6dc;
+    --secondary-foreground: #23262b;
+    --muted: #eae6dc;
+    --muted-foreground: #6d6a62;
+    --accent: #eae6dc;
+    --accent-foreground: #23262b;
+    --destructive: #a34a4a;
+    --destructive-foreground: #faf8f4;
+    --border: #ddd8cb;
+    --input: #ddd8cb;
+    --ring: #2f4858;
+    --chart-1: #2f4858;
+    --chart-2: #6b8f71;
+    --chart-3: #b08b4f;
+    --chart-4: #a34a4a;
+    --chart-5: #7d7f9a;
+    --radius: 0.5rem;
+    --sidebar: #f4f1ea;
+    --sidebar-foreground: #23262b;
+    --sidebar-primary: #2f4858;
+    --sidebar-primary-foreground: #faf8f4;
+    --sidebar-accent: #eae6dc;
+    --sidebar-accent-foreground: #23262b;
+    --sidebar-border: #e5e0d4;
+    --sidebar-ring: #2f4858;
+    --bg-hover: #eae6dc;
+    --border-soft: #e5e0d4;
+    --text-faint: #9b968a;
+    --accent-hover: #3c5b70;
+    --accent-soft: rgba(47, 72, 88, 0.12);
+    --positive: #5f8466;
+    --positive-soft: rgba(95, 132, 102, 0.13);
+    --warning: #a87c3e;
+    --warning-soft: rgba(168, 124, 62, 0.13);
+    --critical-soft: rgba(163, 74, 74, 0.12);
+
+    --font-display: "Palatino Linotype", "Book Antiqua", Palatino, serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Ottone": legno scuro e ottone, da biblioteca antiquaria ---- */
+[data-style="ottone"] {
+    --background: #14110d;
+    --foreground: #ece4d6;
+    --card: #1d1913;
+    --card-foreground: #ece4d6;
+    --popover: #1d1913;
+    --popover-foreground: #ece4d6;
+    --primary: #c9a227;
+    --primary-foreground: #14110d;
+    --secondary: #272119;
+    --secondary-foreground: #ece4d6;
+    --muted: #272119;
+    --muted-foreground: #a89a85;
+    --accent: #272119;
+    --accent-foreground: #ece4d6;
+    --destructive: #a85445;
+    --destructive-foreground: #ffffff;
+    --border: #352d22;
+    --input: #352d22;
+    --ring: #c9a227;
+    --chart-1: #c9a227;
+    --chart-2: #8a9a6b;
+    --chart-3: #b3703c;
+    --chart-4: #a85445;
+    --chart-5: #7d8fa3;
+    --radius: 0.35rem;
+    --sidebar: #100e0a;
+    --sidebar-foreground: #ece4d6;
+    --sidebar-primary: #c9a227;
+    --sidebar-primary-foreground: #14110d;
+    --sidebar-accent: #272119;
+    --sidebar-accent-foreground: #ece4d6;
+    --sidebar-border: #221c15;
+    --sidebar-ring: #c9a227;
+    --bg-hover: #272119;
+    --border-soft: #221c15;
+    --text-faint: #6f6555;
+    --accent-hover: #ddb63d;
+    --accent-soft: rgba(201, 162, 39, 0.16);
+    --positive: #8a9a6b;
+    --positive-soft: rgba(138, 154, 107, 0.16);
+    --warning: #d18f3c;
+    --warning-soft: rgba(209, 143, 60, 0.16);
+    --critical-soft: rgba(168, 84, 69, 0.16);
+
+    --font-display: "Iowan Old Style", "Palatino Linotype", Georgia, serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ---- Stile "Tipografia": bianco, nero e un rosso da stampa. Angoli retti
+   (--radius: 0) e grafici in scala di grigi: e' una scelta, non una
+   dimenticanza. ---- */
+[data-style="tipografia"] {
+    --background: #ffffff;
+    --foreground: #0f0f0f;
+    --card: #fafafa;
+    --card-foreground: #0f0f0f;
+    --popover: #fafafa;
+    --popover-foreground: #0f0f0f;
+    --primary: #c8241c;
+    --primary-foreground: #ffffff;
+    --secondary: #f0f0f0;
+    --secondary-foreground: #0f0f0f;
+    --muted: #f0f0f0;
+    --muted-foreground: #595959;
+    --accent: #f0f0f0;
+    --accent-foreground: #0f0f0f;
+    --destructive: #8c1a14;
+    --destructive-foreground: #ffffff;
+    --border: #dcdcdc;
+    --input: #dcdcdc;
+    --ring: #c8241c;
+    --chart-1: #0f0f0f;
+    --chart-2: #c8241c;
+    --chart-3: #767676;
+    --chart-4: #a8a8a8;
+    --chart-5: #4a4a4a;
+    --radius: 0rem;
+    --sidebar: #f4f4f4;
+    --sidebar-foreground: #0f0f0f;
+    --sidebar-primary: #c8241c;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #f0f0f0;
+    --sidebar-accent-foreground: #0f0f0f;
+    --sidebar-border: #e4e4e4;
+    --sidebar-ring: #c8241c;
+    --bg-hover: #f0f0f0;
+    --border-soft: #e8e8e8;
+    --text-faint: #8e8e8e;
+    --accent-hover: #db2e25;
+    --accent-soft: rgba(200, 36, 28, 0.10);
+    --positive: #2e6b3f;
+    --positive-soft: rgba(46, 107, 63, 0.12);
+    --warning: #8a6a1f;
+    --warning-soft: rgba(138, 106, 31, 0.12);
+    --critical-soft: rgba(140, 26, 20, 0.10);
+
+    --font-display: Georgia, Cambria, "Times New Roman", serif;
+    --ease: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+    }
+  body {
+    @apply bg-background text-foreground overflow-x-hidden;
+    }
+  html {
+    @apply font-sans overflow-x-hidden;
+    }
+}

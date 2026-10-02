@@ -1,0 +1,19 @@
+# Build context for backend/Dockerfile is the repo ROOT (the app imports as
+# "backend.app.main", matching run_backend.sh) — without this file, `docker
+# build` would read/hash the entire repo (node_modules, altri_progetti/,
+# toyLibrary/, .git/, local data/) just to build an image that only ever
+# COPYs backend/.
+.git/
+node_modules/
+frontend-react/dist/
+altri_progetti/
+toyLibrary/
+data/
+venv/
+__pycache__/
+*.pyc
+app.db
+app.db-*
+*.log
+.DS_Store
+ImmaginiRiferimento/
