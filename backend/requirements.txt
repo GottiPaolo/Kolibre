@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+sqlalchemy
+pydantic
+pypdf
+cryptography
+passlib[bcrypt]
+python-jose[cryptography]
+httpx
+python-multipart
+pillow
+watchdog
+unidecode

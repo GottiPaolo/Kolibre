@@ -1,0 +1,64 @@
+{
+  "_perche_esiste": [
+    "Che cosa cambia in un aggiornamento, detto a chi deve decidere se farlo.",
+    "Paolo, 08/11/2026: «non mi e' chiaro cosa sia cambiato dall'ultima userpatch».",
+    "",
+    "STA QUI E NON DENTRO I FILE, e il motivo e' uno solo: il testo che una",
+    "persona legge e i byte che una macchina confronta devono poter cambiare",
+    "separatamente. L'impronta di una patch e' il modo in cui il dispositivo",
+    "decide se aggiornare: un testo dentro il file, tradotto in due lingue,",
+    "sarebbe due file con due impronte diverse, e a ogni cambio di lingua il",
+    "lettore si sentirebbe proporre un aggiornamento che non cambia niente.",
+    "",
+    "Il PLUGIN ha le novita' in due lingue, come tutta la sua interfaccia.",
+    "Le PATCH solo in inglese, per decisione di Paolo: «la patch NON ha",
+    "bisogno di una traduzione, e' e deve essere un unico file in inglese per",
+    "sempre e per tutti, tanto non e' un menu' con cui qualcuno deve",
+    "interagire e rimane silenziosa in background».",
+    "",
+    "Le patch sono indicizzate per NOME DI FILE e non per versione, perche'",
+    "una patch cambia anche senza cambiare numero — e' l'impronta a dire che",
+    "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
+  ],
+  "plugin": {
+    "0.13.9": {
+      "it": "Il controllo automatico degli aggiornamenti funziona davvero a ogni risveglio: prima un controllo a vuoto consumava la giornata e non ti proponeva piu' niente fino al giorno dopo. Quello che lasci con \u00abPiu' tardi\u00bb non torna per 24 ore, ma una versione nuova te la propone subito.",
+      "en": "The automatic update check now really runs at every resume: before, one check that found nothing used up the day and nothing was offered again until tomorrow. What you dismiss with \"Later\" stays quiet for 24 hours, but anything new is offered right away."
+    },
+    "0.13.8": {
+      "it": "Sul Kobo i libri si scaricano in /mnt/onboard, come fa KOReader. Prima finivano in una cartella di servizio.",
+      "en": "On Kobo, books are downloaded to /mnt/onboard, where KOReader keeps them. They used to land in a service folder."
+    },
+    "0.13.7": {
+      "it": "Se ci sono da aggiornare sia il plugin sia una patch, te li propone insieme in una finestra sola, e il riavvio lo chiede una volta alla fine.",
+      "en": "If both the plugin and a patch need updating, it now offers them together in one window and asks to restart once at the end."
+    },
+    "0.13.6": {
+      "it": "All'avvio, se il server non risponde, lo dice una volta. Via la riga «Ultima automatica» dal menu.",
+      "en": "At startup, if the server does not answer, it says so once. The \"Last automatic\" menu line is gone."
+    },
+    "0.13.5": {
+      "it": "Quando propone un aggiornamento — del plugin o di una patch — adesso dice anche cosa cambia.",
+      "en": "When it offers an update — of the plugin or of a patch — it now also says what changes."
+    },
+    "0.13.4": {
+      "it": "All'avvio, se il server non risponde, ora lo dice una volta invece di tacere.",
+      "en": "At startup, if the server does not answer, it now says so once instead of staying silent."
+    },
+    "0.13.3": {
+      "it": "Dopo un aggiornamento del plugin il riavvio si propone, con «Riavvia ora», invece di essere solo annunciato. Per le patch succedeva gia'.",
+      "en": "After a plugin update the restart is offered, with \"Restart now\", instead of merely announced. Patches already worked this way."
+    },
+    "0.13.2": {
+      "it": "Al risveglio la sincronizzazione riparte. Prima, dopo la prima riuscita, un lettore che si sospende invece di spegnersi non ne faceva piu' nessuna fino a un riavvio di KOReader.",
+      "en": "Sync starts again after a wake-up. Previously, once the first one had succeeded, a reader that suspends instead of shutting down never synced again until KOReader was restarted."
+    },
+    "0.13.1": {
+      "it": "I dizionari mandati dal portale arrivano nella cartella in cui KOReader li cerca davvero. Prima lo scarico diceva «fallito, percorso non trovato».",
+      "en": "Dictionaries sent from the portal now land in the folder KOReader actually looks in. Before, the download reported \"failed, path not found\"."
+    }
+  },
+  "patch": {
+    "2-kolibre-misura-caratteri.lua": "Name, description and header comments translated to English; the measurement itself is unchanged. This patch is one file in English for everyone, on purpose: a translated copy would have a different checksum, and the checksum is how your reader decides whether to update."
+  }
+}

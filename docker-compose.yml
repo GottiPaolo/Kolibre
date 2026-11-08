@@ -1,0 +1,77 @@
+# Template di test/quickstart: "docker compose up -d" dopo aver copiato
+# .env.example in .env. Due container: backend (FastAPI) e frontend (React,
+# build statica servita da nginx — vedi frontend-react/nginx.conf). Il
+# vecchio frontend Vue (frontend/) è stato ritirato: React ha raggiunto
+# piena parità funzionale ed è ora l'unica GUI.
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8081}:8081"
+    environment:
+      DATA_DIR: /data
+      DATABASE_URL: sqlite:////data/app.db
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin}
+      SECRET_KEY: ${SECRET_KEY:-change-me-this-default-is-not-secure-generate-a-real-one}
+      # Same value as the host-side port mapping below, so the app can tell
+      # the frontend which port a plugin (KOReader/Calibre/Obsidian — they
+      # talk to the backend directly, not through nginx) should actually use.
+      PUBLIC_BACKEND_PORT: ${BACKEND_PORT:-8081}
+      # Reverse of the above: lets a plugin that only knows the backend's
+      # own address build a URL for the actual web UI (e.g. the Calibre
+      # plugin's "Naviga su Kolibre" button) — see the frontend service's
+      # own FRONTEND_PORT mapping below, which this must always match.
+      PUBLIC_FRONTEND_PORT: ${FRONTEND_PORT:-8080}
+      # Version string this deployment reports on GET /api/kolibre/version
+      # (and in Settings → System), so you can tell at a glance which build a
+      # running server is on without digging through its logs. Set it to the
+      # release tag you deployed; "dev" is the fallback.
+      KOLIBRE_VERSION: ${KOLIBRE_VERSION:-dev}
+    volumes:
+      - ${DATA_PATH:-./kolibre-data}:/data
+      # Facoltativo: per aggiungere una libreria Calibre già esistente sul
+      # host senza copiarla, scommenta e aggiusta il percorso — poi importala
+      # da Impostazioni → Librerie puntando a /external-library dentro il
+      # container. Il container non può vedere percorsi del host non montati.
+      # - /percorso/reale/sul/host/della/tua/libreria:/external-library
+    # Ridichiarato qui (oltre al Dockerfile) perché alcune versioni/setup di
+    # Docker Compose non riconoscono un HEALTHCHECK definito solo a livello di
+    # immagine quando valutano "depends_on: condition: service_healthy" — es.
+    # se un'immagine con lo stesso tag era già in cache da un build precedente.
+    healthcheck:
+      # /version, non /libraries: quest'ultimo richiede autenticazione da
+      # quando la dipendenza e' applicata a livello di router (vedi la stessa
+      # nota in backend/Dockerfile). Un 401 qui fa risultare il backend
+      # unhealthy e impedisce l'avvio anche al frontend, che ne dipende.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/api/kolibre/version', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 5
+    restart: unless-stopped
+
+  # Frontend React — nginx SENZA reverse proxy (vedi frontend-react/nginx.conf
+  # per il perché): il browser chiama il backend direttamente (CORS aperto),
+  # quindi questo servizio non ha bisogno di conoscere l'indirizzo del
+  # backend — a patto però di sapere su QUALE PORTA chiamarlo, dato che qui
+  # non c'è un proxy interno immune alla porta host. Senza questo build.args,
+  # il valore restava fisso a 8081 dentro il bundle (Vite lo "cuoce" a build
+  # time) — se BACKEND_PORT era stato personalizzato, ogni richiesta (login
+  # compreso) falliva silenziosamente sulla porta sbagliata, mascherata lato
+  # UI come "credenziali non valide".
+  frontend:
+    build:
+      context: frontend-react
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_PORT: ${BACKEND_PORT:-8081}
+        VITE_KOLIBRE_VERSION: ${KOLIBRE_VERSION:-dev}
+    ports:
+      - "${FRONTEND_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
