@@ -16,7 +16,7 @@ from .calibre.library import purge_expired_book_lists
 from .calibre.write_queue import CalibreWriteQueue, WriteJob, retry_one_pending, serialize_pending
 from .services.watcher import start_watcher, stop_watcher
 from .services import (author_stats_service, highlight_position, identita_durevole,
-                       stardict_service, stats_service, widowed_highlights)
+                       qualita_job, stardict_service, stats_service, widowed_highlights)
 from .api import auth as auth_router
 from .api import users as users_router
 from .api import libraries as libraries_router
@@ -33,6 +33,7 @@ from .api import appunti as appunti_router
 from .api import tools as tools_router
 from .api import settings as settings_router
 from .api import fulltext as fulltext_router
+from .api import qualita as qualita_router
 from .api import library_transfer as library_transfer_router
 from .api import stats as stats_router
 from .api import opds as opds_router
@@ -268,6 +269,18 @@ def _ensure_schema_migrations() -> None:
         if "owner_id" not in existing:
             conn.exec_driver_sql("ALTER TABLE libraries ADD COLUMN owner_id INTEGER")
             log_message("info", "system", "Migrated libraries: added missing 'owner_id' column.")
+
+        # Qualita' degli EPUB (14/11/2026). La tabella `qualita_libri` nasce
+        # da create_all; qui servono solo le due colonne sulle righe di
+        # ingest, che la tabella ce l'hanno gia'.
+        existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ingested_books)")}
+        for col, ddl in (
+            ("qualita_punteggio", "ALTER TABLE ingested_books ADD COLUMN qualita_punteggio INTEGER"),
+            ("qualita_json", "ALTER TABLE ingested_books ADD COLUMN qualita_json TEXT"),
+        ):
+            if col not in existing:
+                conn.exec_driver_sql(ddl)
+                log_message("info", "system", f"Migrated ingested_books: added missing '{col}' column.")
 
         # Sync protocol v2 (cantiere A1): device-level plugin/telemetry fields.
         existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(devices)")}
@@ -887,6 +900,19 @@ async def lifespan(app: FastAPI):
 
     start_watcher()
 
+    # La qualita' degli EPUB: ogni biblioteca accesa va in coda da sola.
+    # Non e' un lavoro che si chiede, e' uno che si trova fatto — e la coda
+    # sa gia' saltare tutto quello che non e' cambiato, quindi al secondo
+    # avvio non costa niente. Un `try` suo come le altre migrazioni: se
+    # questo non parte, il server parte lo stesso e i punteggi restano
+    # quelli di ieri.
+    try:
+        quante = qualita_job.accoda_tutte()
+        if quante:
+            log_message("info", "qualita", f"Qualita' degli EPUB: {quante} biblioteche in coda.")
+    except Exception as exc:
+        log_message("error", "qualita", f"Coda della qualita' non avviata (il server parte lo stesso): {exc}")
+
     yield
 
     stop_watcher()
@@ -1006,6 +1032,7 @@ app.include_router(appunti_router.router, dependencies=_AUTH)
 app.include_router(tools_router.router, dependencies=_AUTH)
 app.include_router(settings_router.router, dependencies=_AUTH)
 app.include_router(fulltext_router.router, dependencies=_AUTH)
+app.include_router(qualita_router.router, dependencies=_AUTH)
 app.include_router(library_transfer_router.router, dependencies=_AUTH)
 app.include_router(stats_router.router, dependencies=_AUTH)
 app.include_router(interventions_router.router, dependencies=_AUTH)

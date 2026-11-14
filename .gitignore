@@ -65,6 +65,13 @@ altri_progetti/
 # during planning to match against — design input, not project source.
 ImmaginiRiferimento/
 
+# Prove d'aspetto: schermate DISEGNATE (non catturate) prima di scrivere il
+# codice di un'interfaccia, piu' lo script che le genera. Sono materiale di
+# progetto — si guardano, si discutono e si rifanno — non sorgente, e
+# pesano centinaia di kB a giro. La prima e' prove-aspetto/ui-koreader/,
+# la UI del plugin KOReader (14/11/2026).
+prove-aspetto/
+
 # Ad-hoc scratch notes/task briefs dropped at the repo root during a work
 # session — not documentation, belongs in chat history instead.
 new_task.txt

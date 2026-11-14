@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, Check, GripVertical, Loader2, RotateCcw, Trash2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useCustomColumns } from '@/lib/queries'
 import { useFulltextStatus } from '@/lib/fulltextActions'
+import { accendiQualita, useQualitaStato } from '@/lib/qualitaActions'
 import { formatBytes } from '@/lib/format'
 import { useDevices } from '@/lib/deviceQueries'
 import type { CustomColumn, CustomColumnDatatype, Library } from '@/types/library'
@@ -69,6 +70,16 @@ export function LibraryEditDialog({ library, onClose }: LibraryEditDialogProps) 
   const { data: statoFulltext } = useFulltextStatus(library.folder_name, fulltextEnabled)
   const [savingFulltext, setSavingFulltext] = useState(false)
 
+  // La qualità degli EPUB, accanto alla ricerca a testo pieno: sono due
+  // lavori della stessa natura — pesanti, in sottofondo, per biblioteca — e
+  // chi ha imparato un interruttore sa già leggere l'altro.
+  const { data: statoQualita } = useQualitaStato(library.folder_name)
+  const [qualitaEnabled, setQualitaEnabled] = useState(false)
+  const [savingQualita, setSavingQualita] = useState(false)
+  useEffect(() => {
+    if (statoQualita) setQualitaEnabled(statoQualita.enabled)
+  }, [statoQualita])
+
   const [newLabel, setNewLabel] = useState('')
   const [newName, setNewName] = useState('')
   const [newDatatype, setNewDatatype] = useState<CustomColumnDatatype>('text')
@@ -89,6 +100,19 @@ export function LibraryEditDialog({ library, onClose }: LibraryEditDialogProps) 
   async function invalidateColumns() {
     await queryClient.invalidateQueries({ queryKey: ['custom-columns', library.folder_name] })
     await queryClient.invalidateQueries({ queryKey: ['books', library.folder_name] })
+  }
+
+  async function handleQualitaToggle(next: boolean) {
+    setQualitaEnabled(next)
+    setSavingQualita(true)
+    try {
+      await accendiQualita(library.folder_name, next)
+      await queryClient.invalidateQueries({ queryKey: ['qualita-stato', library.folder_name] })
+    } catch {
+      setQualitaEnabled(!next)
+    } finally {
+      setSavingQualita(false)
+    }
   }
 
   async function handleFulltextToggle(next: boolean) {
@@ -219,6 +243,43 @@ export function LibraryEditDialog({ library, onClose }: LibraryEditDialogProps) 
                     {t('settings.library.edit.fulltext.status.indexingProgress', {
                       done: statoFulltext.progress.done,
                       total: statoFulltext.progress.total,
+                    })}
+                  </>
+                )}
+              </p>
+            )}
+
+            <label className="mt-1 flex items-center gap-2.5 text-[13px]">
+              <input
+                type="checkbox"
+                checked={qualitaEnabled}
+                disabled={savingQualita}
+                onChange={(e) => void handleQualitaToggle(e.target.checked)}
+                className="size-4 accent-primary"
+              />
+              {t('settings.library.edit.qualita.label')}
+            </label>
+            <p className="pl-6 text-[11.5px] leading-relaxed text-muted-foreground">
+              {t('settings.library.edit.qualita.description')}
+            </p>
+            {qualitaEnabled && statoQualita && (
+              <p className="pl-6 text-[11.5px] leading-relaxed text-muted-foreground">
+                {t('settings.library.edit.qualita.status.countPrefix')}
+                <b className="tabular-nums text-foreground">{statoQualita.analizzati}</b>
+                {t('settings.library.edit.qualita.status.booksOfSuffix')}
+                <b className="tabular-nums text-foreground">{statoQualita.totale}</b>.
+                {statoQualita.non_pronti > 0 && (
+                  <span className="text-[var(--warning)]">
+                    {' '}
+                    {t('settings.library.edit.qualita.status.notReady', { n: statoQualita.non_pronti })}
+                  </span>
+                )}
+                {statoQualita.in_corso && statoQualita.progresso && (
+                  <>
+                    {' '}
+                    {t('settings.library.edit.qualita.status.running', {
+                      fatti: statoQualita.progresso.fatti,
+                      totale: statoQualita.progresso.totale,
                     })}
                   </>
                 )}

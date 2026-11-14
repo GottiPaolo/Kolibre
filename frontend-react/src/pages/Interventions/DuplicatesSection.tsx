@@ -29,11 +29,14 @@ type Gruppo = components['schemas']['GruppoDiDoppioni']
  *  etichetteStato in EntitiesPage.tsx: deve ricalcolarsi al cambio lingua. */
 function criteri(t: (chiave: string, valori?: Valori) => string): readonly [string, string][] {
   return [
-    ['integrita', t('interventions.duplicates.criteria.integrity')],
-    ['toc', t('interventions.duplicates.criteria.toc')],
+    // Le cinque dimensioni della misura nuova (14/11/2026). Il peso del file
+    // non c'è più apposta: faceva vincere una scansione pesante su
+    // un'edizione curata. Le chiavi sono quelle che manda il server.
+    ['indice', t('interventions.duplicates.criteria.index')],
     ['struttura', t('interventions.duplicates.criteria.structure')],
-    ['css', t('interventions.duplicates.criteria.css')],
-    ['peso', t('interventions.duplicates.criteria.weight')],
+    ['pulizia', t('interventions.duplicates.criteria.cleanliness')],
+    ['presentazione', t('interventions.duplicates.criteria.presentation')],
+    ['metadati', t('interventions.duplicates.criteria.metadata')],
   ]
 }
 

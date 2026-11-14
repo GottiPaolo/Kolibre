@@ -1011,6 +1011,17 @@ class IngestedBook(Base):
     duplicate_book_id = Column(Integer, nullable=True)
     error_message = Column(String, nullable=True)
 
+    # La qualita' del file, misurata appena il file viene messo in lista
+    # (services/qualita_job.py) e non quando qualcuno apre la pagina: serve a
+    # scegliere fra due versioni dello stesso libro PRIMA di importarlo.
+    # Sta qui e non in `qualita_libri` perche' queste righe sono di passaggio
+    # e muoiono con l'importazione; all'importazione il risultato si travasa
+    # di la', se il file nel frattempo non e' cambiato, cosi' un libro appena
+    # importato non si rianalizza. Il JSON intero per la stessa ragione
+    # scritta su QualitaLibro.risultato.
+    qualita_punteggio = Column(Integer, nullable=True)
+    qualita_json = Column(Text, nullable=True)
+
     detected_at = Column(DateTime, default=datetime.utcnow)
     processed_at = Column(DateTime, nullable=True)
 
@@ -1770,3 +1781,65 @@ class DecisioneDiNota(Base):
 #: scelta scritta a mano che non e' una di queste viene rifiutata, invece di
 #: finire nel database e non voler dire niente per nessuno.
 SCELTE_DI_CONFLITTO = ("kolibre", "mio")
+
+
+class QualitaLibro(Base):
+    """
+    Quanto e' fatto bene l'EPUB di un libro, e che difetti ha.
+
+    Vive qui e non come colonna personalizzata di Calibre per la stessa
+    ragione di `BookTextStats`: e' un giudizio di Kolibre sul FILE, non un
+    metadato dell'opera, e la biblioteca dell'utente non deve riempirsi di
+    colonne che non ha chiesto.
+
+    **Due risposte, non una** (vedi `services/qualita_epub.py`):
+    `punteggio` dice quanto e' fatto bene il libro, `pronto` dice se KOReader
+    lo apre cosi' com'e'. Sono indipendenti: un libro sano impacchettato
+    male ha 99 e non e' pronto. Tenerle separate e' la ragione per cui ci
+    sono due colonne e non una somma.
+
+    **Il risultato intero sta in `risultato`, in JSON.** Le colonne a parte
+    sono solo quelle su cui si ordina e si filtra: mettere una colonna per
+    ogni misura vorrebbe dire una migrazione a ogni regola nuova, e le regole
+    cambieranno (`VERSIONE`). Chi legge il JSON ignora i campi che non
+    conosce, cosi' una dimensione o un difetto nuovo non obbliga a toccare
+    ne' il database ne' il frontend.
+
+    **`versione`** e' la versione della MISURA che ha prodotto questa riga.
+    Quando il modulo cambia, le righe piu' vecchie si rimettono in coda da
+    sole (a bassa priorita'): senza questo numero resterebbero in giro
+    punteggi di due epoche diverse, indistinguibili fra loro.
+
+    **`file_byte` e `file_mtime` sono l'impronta**, non un hash: costano zero
+    e il caso che conta davvero — Kolibre che riscrive l'EPUB per metterci il
+    conteggio delle pagine — cambia tutti e due. Un hash vero vorrebbe
+    rileggere il file intero a ogni controllo, per una cache.
+
+    **`stato`** e' "ok" oppure "errore_analisi": un libro che fa cadere
+    l'analisi, o che sfora il tempo massimo, si registra come tale e non
+    riprova all'infinito. Un file rotto non deve poter fermare la coda.
+    """
+    __tablename__ = "qualita_libri"
+    __table_args__ = (UniqueConstraint("library", "calibre_book_id"),)
+
+    id = Column(Integer, primary_key=True, index=True)
+    library = Column(String, nullable=False, default="default", index=True)
+    calibre_book_id = Column(Integer, nullable=False)
+
+    #: "ok" oppure "errore_analisi".
+    stato = Column(String, nullable=False, default="ok")
+    #: Da 0 a 100. Resta 0 anche per un libro illeggibile: lo dice `stato`.
+    punteggio = Column(Integer, nullable=True, index=True)
+    pronto = Column(Boolean, nullable=True, index=True)
+    versione = Column(String, nullable=False)
+    analizzato_il = Column(DateTime, default=datetime.utcnow)
+
+    #: Il formato analizzato: oggi solo EPUB. Gli altri non hanno riga.
+    formato = Column(String, nullable=True)
+    file_byte = Column(Integer, nullable=True)
+    file_mtime = Column(Float, nullable=True)
+
+    #: Il risultato intero di `qualita_epub()`, come JSON. Vedi sopra.
+    risultato = Column(Text, nullable=True)
+    #: Perche' l'analisi e' fallita, quando `stato` e' "errore_analisi".
+    errore = Column(String, nullable=True)

@@ -10,7 +10,17 @@ La pipeline e' questa, e l'ordine conta piu' di quanto sembri:
   3. dove l'hash coincide sono lo STESSO FILE, e lo scarto si puo'
      proporre con un bottone solo;
   4. dove non coincide sono due file diversi dello stesso libro, e allora
-     si misura la qualita' (vedi epub_quality) e decide una persona.
+     si misura la qualita' (vedi services/qualita_epub.py) e decide una
+     persona.
+
+**La misura e' cambiata il 14/11/2026**, e qui cambia una decisione, non una
+schermata: la vecchia `epub_quality` dava cinque indizi (integrita', indice,
+struttura, CSS, PESO del file), e il peso bastava a far vincere una scansione
+pesante su un'edizione curata. La misura nuova guarda indice, struttura,
+pulizia (residui di OCR), presentazione e metadati, e il peso non lo guarda
+piu' apposta. In piu' porta una risposta che prima non c'era — se il libro si
+apre cosi' com'e' (`pronto`) — e un libro che non si apre non vince mai,
+nemmeno con cento di punteggio.
 
 L'hash e' uno SHA-256 pieno e non il partial MD5 che il server gia'
 calcola per i dispositivi. Quello campiona dodici blocchi da un kilobyte:
@@ -36,7 +46,7 @@ from ..istanti import quando
 from . import book_records
 from ..calibre.functions import string_to_authors
 from ..calibre.library import CalibreLibrary
-from . import epub_quality
+from . import qualita_epub
 
 # Formati che vale la pena confrontare. Gli altri (immagini, txt) non sono
 # libri, e l'elenco e' lo stesso di una precedente migrazione di biblioteca.
@@ -360,7 +370,7 @@ def _descrivi_gruppo(chiave: str, voci: list, distinte: set) -> dict:
         # libro con epub+pdf vale quanto il suo epub.
         file.sort(key=lambda f: -PREFERENZA_FORMATO.get(f["formato"], 0))
         principale = file[0] if file else None
-        qualita = epub_quality.qualita_file(principale["percorso"], principale["formato"]) if principale else None
+        qualita = _qualita_del_file(principale["percorso"], principale["formato"]) if principale else None
         membri.append({
             "library": v["library"],
             "id": b["id"],
@@ -372,8 +382,9 @@ def _descrivi_gruppo(chiave: str, voci: list, distinte: set) -> dict:
             "formato_principale": principale["formato"] if principale else None,
             "hash": sha256(principale["percorso"]) if principale else None,
             "qualita": qualita["punteggio"] if qualita else None,
-            "qualita_dettaglio": qualita["dettaglio"] if qualita else None,
+            "qualita_dettaglio": _dettaglio(qualita),
             "leggibile": qualita["leggibile"] if qualita else None,
+            "pronto": qualita["pronto"] if qualita else None,
         })
 
     # Sottogruppi a hash identico: quelli sono lo STESSO file, e per loro
@@ -438,7 +449,36 @@ def dichiara_distinti(db: Session, coppie: list) -> int:
 STACCO_MINIMO = 5
 
 
-CRITERI = ("integrita", "toc", "struttura", "css", "peso")
+CRITERI = ("indice", "struttura", "pulizia", "presentazione", "metadati")
+
+
+def _qualita_del_file(percorso: str, formato: str):
+    """
+    Il punteggio di un file qualsiasi.
+
+    Solo gli EPUB si sanno misurare davvero. Per gli altri formati si torna
+    `None` — «non lo so» — invece di inventare un numero: e' proprio il caso
+    in cui un accorpamento automatico deve fermarsi e chiedere.
+    """
+    if (formato or "").upper() != "EPUB":
+        return None
+    try:
+        return qualita_epub.qualita_epub(percorso)
+    except Exception:
+        # Un file che fa cadere la misura e' un file di cui non si sa niente,
+        # e «non si sa niente» qui vuol dire che non si accorpa.
+        return None
+
+
+def _dettaglio(qualita):
+    """
+    Le dimensioni nella forma che la pagina Doppioni gia' si aspetta:
+    `{nome: {"punteggio": 0-100}}`. La misura nuova le da' come numeri secchi;
+    l'involucro sta qui e non nel modulo della misura, che resta puro.
+    """
+    if not qualita:
+        return None
+    return {k: {"punteggio": v} for k, v in (qualita.get("dimensioni") or {}).items()}
 
 
 def domina(vincitore: dict, altri: list) -> bool:
@@ -464,6 +504,12 @@ def domina(vincitore: dict, altri: list) -> bool:
     mio = vincitore.get("qualita_dettaglio")
     if not mio or vincitore.get("qualita") is None:
         return False
+    # Un libro che il lettore non apre non vince mai, per quanto sia fatto
+    # bene dentro: «pronto» e «punteggio» sono due domande diverse (vedi
+    # services/qualita_epub.py), e tenere la copia che non si apre sarebbe
+    # il peggiore degli errori possibili qui.
+    if vincitore.get("pronto") is False:
+        return False
     for a in altri:
         suo = a.get("qualita_dettaglio")
         # Un file non misurabile non e' un file peggiore: e' un file di cui
@@ -474,11 +520,12 @@ def domina(vincitore: dict, altri: list) -> bool:
             return False
         for criterio in CRITERI:
             # Un dettaglio PARZIALE arriva davvero: per un file illeggibile
-            # epub_quality torna presto con il solo criterio "integrita" e un
-            # punteggio non nullo, quindi passava la guardia qui sopra e poi
-            # si moriva su suo["toc"]. Ed e' il caso di punta — un EPUB
-            # troncato a meta' download — quindi bastava un file cosi' per
-            # rendere la pagina Doppioni un 500 permanente.
+            # la misura torna presto, senza nessuna dimensione (un EPUB
+            # troncato a meta' download e' il caso di punta). Prima bastava
+            # un file cosi' per rendere la pagina Doppioni un 500 permanente,
+            # quindi il controllo resta anche ora che la guardia qui sopra
+            # dovrebbe averlo gia' fermato: a questo punto si sta decidendo
+            # di cancellare un file, e due controlli costano meno di uno.
             if criterio not in mio or criterio not in suo:
                 return False
             if mio[criterio]["punteggio"] < suo[criterio]["punteggio"]:

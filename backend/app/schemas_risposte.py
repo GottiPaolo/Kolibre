@@ -112,6 +112,76 @@ class FulltextRicerca(Permissivo):
     results: list[FulltextRisultato]
 
 
+# ── Qualita' degli EPUB ──────────────────────────────────────────────────
+
+class QualitaImpostazioni(Permissivo):
+    enabled: bool
+
+
+class QualitaAvanzamento(Permissivo):
+    """Come va la coda, mentre gira. `None` quando e' ferma."""
+    biblioteca: Optional[str]
+    fatti: int
+    totale: int
+    errori: int
+    in_coda: list[str]
+
+
+class QualitaStato(Permissivo):
+    enabled: bool
+    #: La versione della MISURA che ha prodotto le righe (vedi QualitaLibro).
+    versione: str
+    #: Quanti libri hanno un punteggio, su quanti EPUB ci sono.
+    analizzati: int
+    totale: int
+    non_pronti: int
+    errori: int
+    #: Quanti sono stati misurati con una versione piu' vecchia di quella in
+    #: uso: si rifanno da soli, in fondo alla coda.
+    da_rifare: int
+    in_corso: bool
+    progresso: Optional[QualitaAvanzamento] = None
+
+
+class QualitaRiga(Permissivo):
+    """Una riga della tabella. Il dettaglio sta in `GET /libri/{id}`."""
+    id: int
+    title: str
+    author: Optional[str]
+    #: "ok" oppure "errore_analisi": nel secondo caso `punteggio` e' nullo.
+    stato: str
+    punteggio: Optional[int]
+    pronto: Optional[bool]
+    #: Le cinque dimensioni, da 0 a 100. Chiavi non garantite: la misura puo'
+    #: aggiungerne (vedi `VERSIONE`), e chi legge ignora quelle che non sa.
+    dimensioni: dict
+    #: Quanti difetti ha trovato, per non mandare l'elenco intero in tabella.
+    difetti: int
+    errore: Optional[str]
+
+
+class QualitaElenco(Permissivo):
+    libri: list[QualitaRiga]
+    totale: int
+
+
+class QualitaDettaglio(Permissivo):
+    """
+    Il risultato intero della misura, cosi' come l'ha scritto la funzione.
+
+    Volutamente non descritto campo per campo: la forma la decide
+    `services/qualita_epub.py`, che cambia nel tempo, e il frontend legge
+    quello che trova ignorando il resto. Dichiarare qui ogni misura
+    vorrebbe dire toccare questo file a ogni regola nuova — e, con un
+    `response_model`, buttare via in silenzio i campi non ancora dichiarati.
+    """
+    versione: str
+    punteggio: int
+    pronto: bool
+    dimensioni: dict
+    difetti: list[dict]
+
+
 # ── Colonne personalizzate di Calibre ────────────────────────────────────
 
 class ColonnaPersonalizzata(Permissivo):
@@ -2575,13 +2645,14 @@ class SuggerimentoRipreso(Esito):
 
 class VoceDiQualita(Permissivo):
     """
-    Una delle cinque voci su cui si misura un EPUB, col suo punteggio.
+    Una delle cinque dimensioni su cui si misura un EPUB, col suo punteggio.
 
-    Oltre al punteggio ogni voce porta i **numeri su cui l'ha dato** — quanti
-    file rotti, quante voci d'indice, quanti documenti, quanti byte di CSS —
-    e sono diversi da voce a voce: `extra="allow"` li lascia passare tutti,
-    e `punteggio` e' l'unico che c'e' sempre. E' la parte che si mostra
-    aprendo il dettaglio di un confronto.
+    Dal 14/11/2026 le dimensioni sono indice, struttura, pulizia,
+    presentazione e metadati (prima: integrita', indice, struttura, CSS e
+    peso del file). Qui dentro c'e' il solo punteggio; i numeri su cui e'
+    stato dato — quante voci d'indice, quanti capitoli senza titolo, quanti
+    numeri di pagina rimasti — stanno nel risultato intero della misura, che
+    si legge da `GET /api/kolibre/qualita/libri/{id}`.
     """
     #: Da 0 a 100.
     punteggio: int
@@ -2613,12 +2684,17 @@ class MembroDiUnGruppo(Permissivo):
     #: una prova, non un indizio.
     hash: Optional[str]
     qualita: Optional[int]
-    #: Il perche' del punteggio, voce per voce: le chiavi sono i cinque
-    #: criteri (`integrita`, `toc`, `struttura`, `css`, `peso`), e
-    #: compaiono tutte o nessuna — su un file che non si apre affatto il
-    #: dettaglio e' vuoto.
+    #: Il perche' del punteggio, voce per voce: le chiavi sono le cinque
+    #: dimensioni (`indice`, `struttura`, `pulizia`, `presentazione`,
+    #: `metadati`), e compaiono tutte o nessuna — su un file che non si apre
+    #: affatto il dettaglio e' vuoto.
     qualita_dettaglio: Optional[dict[str, VoceDiQualita]]
     leggibile: Optional[bool]
+    #: Se il lettore apre questo file **cosi' com'e'**. E' una domanda
+    #: diversa dal punteggio: un libro sano impacchettato male e' fatto bene
+    #: e non si apre. Un libro non pronto non viene mai proposto come quello
+    #: da tenere.
+    pronto: Optional[bool]
 
 
 class AzioniSulGruppo(Permissivo):
@@ -2934,6 +3010,15 @@ class LibroInArretrato(Permissivo):
     series_index: Optional[float]
     language: Optional[str]
     isbn: Optional[str]
+    #: Il punteggio di qualita' del file, da 0 a 100. `null` finche' non c'e':
+    #: per un PDF non ci sara' mai (si misurano solo gli EPUB), per un EPUB
+    #: appena arrivato ci mette il tempo di una misura — che gira in
+    #: sottofondo appena il file compare, non quando si apre la pagina.
+    qualita_punteggio: Optional[int]
+    #: Il risultato intero della misura: dimensioni, difetti, se il lettore
+    #: lo apre cosi' com'e'. Volutamente non descritto campo per campo, vedi
+    #: `QualitaDettaglio`.
+    qualita: Optional[dict]
 
 
 class PaginaDiArretrati(Permissivo):

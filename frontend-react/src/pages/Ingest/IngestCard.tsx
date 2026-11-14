@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { AlertTriangle, BookOpen, Download, ExternalLink, Loader2, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatBytes } from '@/lib/format'
@@ -7,6 +8,8 @@ import type { Library } from '@/types/library'
 import { LibraryPickerButton } from '@/components/LibraryPickerButton'
 import type { IngestDuplicato } from '@/lib/ingestQueries'
 import { useLingua } from '@/lib/i18n'
+import { DettaglioQualita, PunteggioQualita } from '@/components/Qualita'
+import type { RisultatoQualita } from '@/lib/qualitaActions'
 
 interface IngestCardProps {
   item: IngestedBook
@@ -45,8 +48,14 @@ export function IngestCard({
   duplicati,
 }: IngestCardProps) {
   const { t } = useLingua()
+  // Il dettaglio della qualità si apre su richiesta: qui si sta scegliendo
+  // se importare un file, e il numero basta per quasi tutti. Chi deve
+  // scegliere fra due versioni dello stesso libro apre e guarda da dove
+  // viene quel numero.
+  const [qualitaAperta, setQualitaAperta] = useState(false)
+  const qualita = item.qualita as RisultatoQualita | null | undefined
   return (
-    <div className="flex items-center gap-4 rounded-lg border border-border bg-card p-3">
+    <div className="flex items-start gap-4 rounded-lg border border-border bg-card p-3">
       {/* Copertina reale solo per EPUB con cover-image nel manifest OPF
           (vedi services/metadata_parser.py) — placeholder generico altrimenti
           (PDF, o un EPUB senza copertina propria). */}
@@ -68,7 +77,28 @@ export function IngestCard({
             </span>
           ))}
           <span>{formatBytes(item.size)}</span>
+          {/* La qualità del file, misurata appena il file è arrivato. Per un
+              PDF non c'è e non ci sarà: si misurano solo gli EPUB. */}
+          {item.qualita_punteggio != null && (
+            <>
+              <span className="text-muted-foreground/60">·</span>
+              <span>{t('ingest.card.qualitaLabel')}</span>
+              <PunteggioQualita punteggio={item.qualita_punteggio} pronto={qualita?.pronto} />
+              <button
+                type="button"
+                onClick={() => setQualitaAperta((a) => !a)}
+                className="text-primary hover:underline"
+              >
+                {qualitaAperta ? t('qualita.nascondiButton') : t('qualita.dettagliButton')}
+              </button>
+            </>
+          )}
         </div>
+        {qualitaAperta && qualita && (
+          <div className="mt-1 rounded border border-border bg-muted/30 p-2">
+            <DettaglioQualita risultato={qualita} />
+          </div>
+        )}
         {duplicati && duplicati.length > 0 && (
           <div className="mt-0.5 flex items-start gap-1.5 text-[11.5px] text-[var(--warning)]">
             <AlertTriangle className="mt-px size-3.5 shrink-0" />

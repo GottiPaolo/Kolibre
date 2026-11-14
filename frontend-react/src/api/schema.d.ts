@@ -1681,6 +1681,13 @@ export interface paths {
          *     with the actual (expensive) recompute happening lazily, right here, at
          *     most once per batch of changes: only when the cache is missing or
          *     dirty, never on every request.
+         *
+         *     **E solo le biblioteche di chi guarda** (8/11/2026). Questa rotta
+         *     camminava su tutto il disco: chi non aveva accesso a nessuna biblioteca
+         *     vedeva comunque l'elenco completo degli autori del server, con i conti
+         *     dei libri e il totale delle pagine. Il cancello di lettura non la
+         *     copriva perche' lui lavora su UNA biblioteca indicata nel parametro
+         *     `library`, e questa cammina sul disco e somma.
          */
         get: operations["list_authors_api_kolibre_authors_get"];
         put?: never;
@@ -1787,8 +1794,18 @@ export interface paths {
         };
         /**
          * Get Author Books
-         * @description **Tutti** i libri di quell'autore, da ogni biblioteca del server, con
-         *     il nome della biblioteca di ognuno e raggruppati per biblioteca.
+         * @description **Tutti** i libri di quell'autore — di ogni biblioteca che chi chiede
+         *     puo' leggere — con il nome della biblioteca di ognuno e raggruppati per
+         *     biblioteca.
+         *
+         *     **«Tutti» vuol dire «tutti i tuoi»** (8/11/2026). Fino a oggi questa
+         *     rotta camminava su tutto il disco e rispondeva con i libri di ogni
+         *     biblioteca del server, a chiunque fosse autenticato: aprendo un autore,
+         *     un utente senza alcun permesso vedeva titoli e copertine di biblioteche
+         *     che non poteva nemmeno elencare. Il filtro sta qui e non nel client per
+         *     la stessa ragione per cui ci sta l'ordine: il web e' uno dei client, e
+         *     un permesso che ogni client puo' sbagliare diversamente non e' un
+         *     permesso.
          *
          *     **Perche' sempre tutti** (Paolo, 08/11/2026). Fino a oggi questa rotta
          *     accettava `?library=` e la pagina web le passava l'ambito scelto
@@ -2611,6 +2628,12 @@ export interface paths {
          *     — returns the `folder_name` slug that /catalog and /books/{id}/download
          *     expect as `library`, unlike the web UI's /api/kolibre/libraries which is
          *     display-oriented.
+         *
+         *     **Quelle del proprietario del dispositivo** (8/11/2026). Elencava ogni
+         *     biblioteca del server: il Kindle di un utente secondario vedeva nel
+         *     selettore anche i nomi delle biblioteche a cui quell'account non ha
+         *     accesso. I libri non arrivavano — `/catalog` passa dal cancello di
+         *     lettura — ma i nomi si', e un nome e' un dato.
          */
         get: operations["list_libraries_for_device_api_kolibre_devices_libraries_get"];
         put?: never;
@@ -4421,6 +4444,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/qualita/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Leggi Impostazioni */
+        get: operations["leggi_impostazioni_api_kolibre_qualita_settings_get"];
+        /** Scrivi Impostazioni */
+        put: operations["scrivi_impostazioni_api_kolibre_qualita_settings_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/qualita/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Stato */
+        get: operations["stato_api_kolibre_qualita_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/qualita/analizza": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Analizza
+         * @description Mette la biblioteca in coda. Con `{"forza": true}` rifa' anche i libri
+         *     che hanno gia' un punteggio buono: chi preme quel pulsante lo fa quando
+         *     non si fida di quello che vede.
+         */
+        post: operations["analizza_api_kolibre_qualita_analizza_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/qualita/libri": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Elenco
+         * @description La tabella di «Interventi». I titoli e gli autori vengono dalla
+         *     biblioteca di Calibre, i punteggi da qui: un libro cancellato da Calibre
+         *     sparisce dalla tabella anche se la sua riga esiste ancora.
+         */
+        get: operations["elenco_api_kolibre_qualita_libri_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/qualita/libri/{book_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dettaglio */
+        get: operations["dettaglio_api_kolibre_qualita_libri__book_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/library-transfer": {
         parameters: {
             query?: never;
@@ -4436,6 +4555,13 @@ export interface paths {
          *     custom-columns, fulltext, this router) expects as its `library`/`folder`
          *     parameter — mirrors the same reasoning as devices.py's
          *     /api/kolibre/devices/libraries (the KOReader-plugin equivalent).
+         *
+         *     **Solo le sue** (8/11/2026). Questa elencava ogni biblioteca del
+         *     server — nome, cartella e conto dei libri — a chiunque fosse
+         *     autenticato, ed e' l'elenco da cui il plugin di Calibre Desktop sceglie
+         *     quale scaricare. Ora passa dal registro dei permessi, come l'elenco del
+         *     web. `biblioteche_visibili` le torna anche nell'ordine scelto in
+         *     Impostazioni, che qui era quello degli `id`.
          */
         get: operations["list_transferable_libraries_api_kolibre_library_transfer_get"];
         put?: never;
@@ -4462,6 +4588,11 @@ export interface paths {
          *     and covers are still fetched individually via the existing
          *     /api/kolibre/books/{id}/download and /cover endpoints — this endpoint is
          *     just the plan, not the payload.
+         *
+         *     **E solo di una biblioteca che si puo' leggere** (8/11/2026): prima
+         *     bastava essere autenticati per farsi elencare titoli, autori, tag e
+         *     colonne personalizzate di qualunque cartella del server. Vedi
+         *     `esigi_biblioteca_leggibile` in api/libraries.py.
          */
         get: operations["get_library_manifest_api_kolibre_library_transfer__folder__manifest_get"];
         put?: never;
@@ -4479,7 +4610,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download Library Fulltext Db */
+        /**
+         * Download Library Fulltext Db
+         * @description L'indice del testo intero di una biblioteca, per il plugin di
+         *     Calibre Desktop.
+         *
+         *     Il controllo di lettura qui pesa piu' che altrove: questo file **e'** il
+         *     testo dei libri, in forma cercabile. Fino all'8/11/2026 bastava essere
+         *     autenticati per scaricarlo da qualunque biblioteca del server.
+         */
         get: operations["download_library_fulltext_db_api_kolibre_library_transfer__folder__fulltext_db_get"];
         put?: never;
         /**
@@ -8614,6 +8753,12 @@ export interface components {
             language: string | null;
             /** Isbn */
             isbn: string | null;
+            /** Qualita Punteggio */
+            qualita_punteggio: number | null;
+            /** Qualita */
+            qualita: {
+                [key: string]: unknown;
+            } | null;
         } & {
             [key: string]: unknown;
         };
@@ -9123,6 +9268,8 @@ export interface components {
             } | null;
             /** Leggibile */
             leggibile: boolean | null;
+            /** Pronto */
+            pronto: boolean | null;
         } & {
             [key: string]: unknown;
         };
@@ -9716,6 +9863,118 @@ export interface components {
             status: string;
             /** Owner */
             owner: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * QualitaAvanzamento
+         * @description Come va la coda, mentre gira. `None` quando e' ferma.
+         */
+        QualitaAvanzamento: {
+            /** Biblioteca */
+            biblioteca: string | null;
+            /** Fatti */
+            fatti: number;
+            /** Totale */
+            totale: number;
+            /** Errori */
+            errori: number;
+            /** In Coda */
+            in_coda: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * QualitaDettaglio
+         * @description Il risultato intero della misura, cosi' come l'ha scritto la funzione.
+         *
+         *     Volutamente non descritto campo per campo: la forma la decide
+         *     `services/qualita_epub.py`, che cambia nel tempo, e il frontend legge
+         *     quello che trova ignorando il resto. Dichiarare qui ogni misura
+         *     vorrebbe dire toccare questo file a ogni regola nuova — e, con un
+         *     `response_model`, buttare via in silenzio i campi non ancora dichiarati.
+         */
+        QualitaDettaglio: {
+            /** Versione */
+            versione: string;
+            /** Punteggio */
+            punteggio: number;
+            /** Pronto */
+            pronto: boolean;
+            /** Dimensioni */
+            dimensioni: {
+                [key: string]: unknown;
+            };
+            /** Difetti */
+            difetti: {
+                [key: string]: unknown;
+            }[];
+        } & {
+            [key: string]: unknown;
+        };
+        /** QualitaElenco */
+        QualitaElenco: {
+            /** Libri */
+            libri: components["schemas"]["QualitaRiga"][];
+            /** Totale */
+            totale: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /** QualitaImpostazioni */
+        QualitaImpostazioni: {
+            /** Enabled */
+            enabled: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * QualitaRiga
+         * @description Una riga della tabella. Il dettaglio sta in `GET /libri/{id}`.
+         */
+        QualitaRiga: {
+            /** Id */
+            id: number;
+            /** Title */
+            title: string;
+            /** Author */
+            author: string | null;
+            /** Stato */
+            stato: string;
+            /** Punteggio */
+            punteggio: number | null;
+            /** Pronto */
+            pronto: boolean | null;
+            /** Dimensioni */
+            dimensioni: {
+                [key: string]: unknown;
+            };
+            /** Difetti */
+            difetti: number;
+            /** Errore */
+            errore: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /** QualitaStato */
+        QualitaStato: {
+            /** Enabled */
+            enabled: boolean;
+            /** Versione */
+            versione: string;
+            /** Analizzati */
+            analizzati: number;
+            /** Totale */
+            totale: number;
+            /** Non Pronti */
+            non_pronti: number;
+            /** Errori */
+            errori: number;
+            /** Da Rifare */
+            da_rifare: number;
+            /** In Corso */
+            in_corso: boolean;
+            progresso?: components["schemas"]["QualitaAvanzamento"] | null;
         } & {
             [key: string]: unknown;
         };
@@ -11166,13 +11425,14 @@ export interface components {
         };
         /**
          * VoceDiQualita
-         * @description Una delle cinque voci su cui si misura un EPUB, col suo punteggio.
+         * @description Una delle cinque dimensioni su cui si misura un EPUB, col suo punteggio.
          *
-         *     Oltre al punteggio ogni voce porta i **numeri su cui l'ha dato** — quanti
-         *     file rotti, quante voci d'indice, quanti documenti, quanti byte di CSS —
-         *     e sono diversi da voce a voce: `extra="allow"` li lascia passare tutti,
-         *     e `punteggio` e' l'unico che c'e' sempre. E' la parte che si mostra
-         *     aprendo il dettaglio di un confronto.
+         *     Dal 14/11/2026 le dimensioni sono indice, struttura, pulizia,
+         *     presentazione e metadati (prima: integrita', indice, struttura, CSS e
+         *     peso del file). Qui dentro c'e' il solo punteggio; i numeri su cui e'
+         *     stato dato — quante voci d'indice, quanti capitoli senza titolo, quanti
+         *     numeri di pagina rimasti — stanno nel risultato intero della misura, che
+         *     si legge da `GET /api/kolibre/qualita/libri/{id}`.
          */
         VoceDiQualita: {
             /** Punteggio */
@@ -17998,6 +18258,217 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FulltextRicerca"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    leggi_impostazioni_api_kolibre_qualita_settings_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaImpostazioni"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scrivi_impostazioni_api_kolibre_qualita_settings_put: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaImpostazioni"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stato_api_kolibre_qualita_status_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaStato"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    analizza_api_kolibre_qualita_analizza_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    elenco_api_kolibre_qualita_libri_get: {
+        parameters: {
+            query?: {
+                ordina?: string;
+                verso?: string;
+                solo?: string;
+                limite?: number;
+                salta?: number;
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaElenco"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dettaglio_api_kolibre_qualita_libri__book_id__get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path: {
+                book_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaDettaglio"];
                 };
             };
             /** @description Validation Error */

@@ -1,4 +1,5 @@
 import base64
+import json
 import os
 import shutil
 import threading
@@ -16,7 +17,7 @@ from ..schemas_risposte import (
     ImportazioneDaFermare, LibroImportato, LibroInArretrato, ModoPaginazione,
     PaginaDiArretrati, StatoImportazione,
 )
-from ..services import duplicates, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job
+from ..services import duplicates, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
 from ..services.library_scanner import EBOOK_EXTENSIONS
 from ..services.watcher import stage_ingest_file
 from ..calibre import calibre_naming
@@ -61,6 +62,13 @@ def _serialize_ingest_item(item: models.IngestedBook) -> dict:
         "series_index": item.series_index,
         "language": item.language,
         "isbn": item.isbn,
+        # La qualita' del file, misurata in sottofondo appena il file e'
+        # arrivato (services/qualita_job.py). `None` finche' non c'e':
+        # per un PDF non ci sara' mai, per un EPUB appena arrivato ci mette
+        # un attimo. Il JSON intero perche' il pannello dei dettagli legge
+        # dimensioni e difetti da li', senza elenchi scritti nel frontend.
+        "qualita_punteggio": item.qualita_punteggio,
+        "qualita": json.loads(item.qualita_json) if item.qualita_json else None,
     }
 
 
@@ -633,6 +641,17 @@ async def import_book_from_ingest(
             )
         except Exception as e:
             log_message("warning", "ingest", f"Closing the formats failed for '{dest_file}': {e}")
+
+        # La qualita' segue il libro dentro la biblioteca. Il travaso
+        # riesce solo se il file e' ancora quello misurato in ingest; con
+        # l'incorporamento del conteggio pagine acceso non lo e' quasi mai,
+        # e allora si rimisura quel libro soltanto, subito, invece di
+        # aspettare il prossimo giro della coda.
+        try:
+            if not qualita_job.travasa_da_ingest(db, item, library_name, book_id, dest_file):
+                qualita_job.analizza_libro_async(library_name, book_id, dest_file)
+        except Exception as e:
+            log_message("warning", "qualita", f"Qualita' non registrata per '{title}': {e}")
 
         item.status = "confirmed"
         item.processed_at = datetime.utcnow()

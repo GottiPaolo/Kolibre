@@ -13,8 +13,9 @@ import { useSetPageHeader } from '@/lib/pageHeaderContext'
 import { READ_FLAG_COLUMN, READ_FLAG_FIELD } from '@/lib/readFlag'
 import { OrphanSessionsPanel } from '@/pages/Statistics/OrphanSessionsPanel'
 import { useOrphanSessions } from '@/lib/statsQueries'
-import { Activity, Copy, EyeOff, Highlighter, BookX, MapPinOff, Smartphone } from 'lucide-react'
+import { Activity, Copy, EyeOff, Highlighter, BookX, MapPinOff, Smartphone, Gauge } from 'lucide-react'
 import { DuplicatesSection, useQuantiDoppioni } from './DuplicatesSection'
+import { QualitaPanel, useQuantiLibriDaGuardare } from './QualitaPanel'
 import { OrphanNotesPanel, useQuanteOrfane } from './OrphanNotesPanel'
 import { WidowedNotesPanel, useQuanteVedove } from './WidowedNotesPanel'
 import { NotesWithoutPositionPanel, useQuanteSenzaPosizione } from './NotesWithoutPositionPanel'
@@ -93,6 +94,10 @@ export function InterventionsPage() {
   const quanteOrfane = useQuanteOrfane()
   const quanteSenzaPosizione = useQuanteSenzaPosizione()
   const quantiScomparsi = useQuantiLibriScomparsi()
+  // I libri che chiedono qualcosa: non si aprono sul lettore, o non si sono
+  // potuti misurare. Un voto basso non entra nel conto — è un fatto, non un
+  // lavoro in sospeso.
+  const quantiDaGuardare = useQuantiLibriDaGuardare(folder)
   // Il numero sulla testa della sezione del legame: la somma di quello che
   // l'ultimo controllo ha trovato. `undefined` finché un controllo non è mai
   // stato fatto — che è diverso da zero, e la sezione lo dice a parole invece
@@ -244,6 +249,18 @@ export function InterventionsPage() {
         descrizione={t('interventions.duplicates.sectionDescription')}
       >
         <DuplicatesSection libraryFolder={folder} />
+      </SezionePieghevole>
+
+      {/* La qualità sta fra i doppioni e i libri letti perché è la stessa
+          domanda dei doppioni — quale file è fatto meglio — vista su tutta
+          la biblioteca invece che su un gruppo di copie. */}
+      <SezionePieghevole
+        titolo={t('interventions.qualita.sectionTitle')}
+        icona={Gauge}
+        quante={quantiDaGuardare}
+        descrizione={t('interventions.qualita.sectionDescription')}
+      >
+        <QualitaPanel libraryFolder={folder} />
       </SezionePieghevole>
 
       <SezionePieghevole

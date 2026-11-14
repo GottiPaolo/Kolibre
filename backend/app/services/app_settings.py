@@ -213,6 +213,32 @@ def set_fulltext_enabled(db: Session, folder_name: str, enabled: bool) -> None:
     set_setting(db, _fulltext_key(folder_name), {"enabled": bool(enabled)})
 
 
+# La qualita' degli EPUB, biblioteca per biblioteca. **Spenta di nascita**,
+# per decisione di Paolo del 14/11/2026: «per biblioteche grosse puo' essere
+# invasivo». La prima stesura la accendeva, col ragionamento che costa poco
+# (0,08 secondi a libro misurati su 1139) e che una biblioteca senza punteggi
+# non si nota finche' non servono. Il conto pero' non si fa a libro: aggiunta
+# una biblioteca di cinquemila libri, il server si mette a leggere e
+# decomprimere cinquemila file senza che nessuno l'abbia chiesto, e chi l'ha
+# appena collegata vede il disco girare e non sa perche'.
+#
+# Conseguenza da sapere: una biblioteca che oggi non ha una riga sua in
+# `app_settings` era accesa per via del valore di prima e da ora e' spenta.
+# I punteggi gia' calcolati **restano** — questo interruttore decide se se ne
+# fanno di nuovi, non se si vedono quelli che ci sono — e riaccenderlo e' un
+# clic, che rimette in coda solo i libri non ancora misurati.
+def _qualita_key(folder_name: str) -> str:
+    return f"qualita_enabled_{folder_name}"
+
+
+def is_qualita_enabled(db: Session, folder_name: str) -> bool:
+    return get_setting(db, _qualita_key(folder_name), {"enabled": False})["enabled"]
+
+
+def set_qualita_enabled(db: Session, folder_name: str, enabled: bool) -> None:
+    set_setting(db, _qualita_key(folder_name), {"enabled": bool(enabled)})
+
+
 AUTO_WIKI_SCRAPE_KEY = "auto_wiki_scrape"
 
 

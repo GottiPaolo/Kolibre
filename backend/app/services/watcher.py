@@ -14,7 +14,7 @@ from watchdog.observers import Observer
 
 from .. import config, models, database
 from ..logging_utils import log_message
-from . import metadata_parser
+from . import metadata_parser, qualita_job
 
 # Give a copy-in-progress file a moment to finish writing before we read it.
 DEBOUNCE_SECONDS = 2.0
@@ -76,6 +76,13 @@ def stage_ingest_file(db, file_path: str) -> bool:
         except OSError as e:
             log_message("warning", "ingest", f"Saving the cover to the staging folder failed for '{filename}': {e}")
     db.commit()
+    # La qualita' si misura adesso, non quando qualcuno apre la pagina: il
+    # punto di quel numero e' scegliere fra due versioni dello stesso libro
+    # PRIMA di importarlo, quindi deve essere gia' li' quando guardi.
+    # In sottofondo: un EPUB grosso non deve far aspettare il watcher, che
+    # intanto ha altri file da mettere in lista.
+    if ext == '.epub':
+        qualita_job.analizza_ingest(item.id)
     return True
 
 
