@@ -745,6 +745,53 @@ class CalibreLibrary:
         finally:
             conn.close()
 
+    def get_custom_column_values(self, label: str, book_ids=None) -> dict:
+        """Il valore di UNA colonna personalizzata per molti libri: una
+        connessione e una query, non una per libro.
+
+        Esiste perche' `get_custom_column_value` apre una connessione a ogni
+        chiamata, e chi deve riempire la stima delle pagine di tutti i libri
+        di un dispositivo (api/devices.py) ne chiederebbe trecento di fila a
+        ogni sincronizzazione. La forma della query e' la stessa che
+        `_build_books` usa gia' per tutte le colonne insieme; qui se ne
+        prende una sola, perche' il resto non serve e costerebbe.
+
+        `book_ids` None vuol dire "tutti". Un elenco vuoto torna un
+        dizionario vuoto senza toccare il disco — e non una query con
+        `IN ()`, che SQLite non accetta.
+        """
+        if book_ids is not None and not book_ids:
+            return {}
+        conn = self._connect()
+        try:
+            col = conn.execute(
+                "SELECT id FROM custom_columns WHERE label = ? AND mark_for_delete = 0",
+                (label,),
+            ).fetchone()
+            if not col:
+                return {}
+            col_id = col["id"]
+            dove, parametri = "", []
+            if book_ids is not None:
+                ids = list(book_ids)
+                dove = f" WHERE book IN ({','.join('?' * len(ids))})"
+                parametri = ids
+            if self._is_normalized_column(conn, col_id):
+                query = (
+                    f"SELECT l.book AS book, cc.value AS value "
+                    f"FROM books_custom_column_{col_id}_link l "
+                    f"JOIN custom_column_{col_id} cc ON cc.id = l.value"
+                    + (dove.replace("book IN", "l.book IN") if book_ids is not None else "")
+                )
+            else:
+                query = f"SELECT book, value FROM custom_column_{col_id}" + dove
+            valori = {}
+            for r in conn.execute(query, parametri):
+                valori.setdefault(r["book"], r["value"])
+            return valori
+        finally:
+            conn.close()
+
     def list_custom_columns(self) -> list[dict]:
         conn = self._connect()
         try:

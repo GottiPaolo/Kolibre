@@ -101,8 +101,6 @@ class DownloadWorker(QThread):
                 if format_paths:
                     custom_values = {k: v for k, v in b.items() if k.startswith('#')}
                     staged.append({
-                        'server_book_id': b['id'],
-                        'server_last_modified': b.get('last_modified'),
                         'title': b.get('title') or 'Untitled',
                         'author': b.get('author') or 'Unknown Author',
                         'tags': b.get('tags') or [],
@@ -189,9 +187,10 @@ class UploadWorker(QThread):
             # Applied once, at the end, after every book has its
             # server-computed estimate already in place.
             pages_overrides = []
-            # (local_book_id, server_book_id) for every successful upload —
-            # lets the caller pair the local<->server library (pairing_store)
-            # without a second round-trip just to look ids back up.
+            # (local_book_id, server_book_id) per ogni libro davvero
+            # caricato. Serve a «manda e cancella» (action.py): si cancella
+            # da Calibre quello che e' arrivato, non la selezione di
+            # partenza, senza un secondo giro di rete per ritrovare gli id.
             uploaded_links = []
             for i, book in enumerate(self.books):
                 if self._cancelled:

@@ -178,24 +178,13 @@ class KolibreClient:
         parsed = urllib.parse.urlsplit(self.server_url)
         return f'{parsed.scheme}://{parsed.hostname}:{port}'
 
-    def delete_remote_book(self, folder: str, book_id: int) -> dict:
-        """
-        DELETE /api/kolibre/books/{id}?library=... — the same endpoint the
-        web UI itself uses to delete a book, reused as-is for the paired-
-        library sync's 'delete_server' direction (a book removed locally
-        that the user confirms removing from Kolibre too).
-        """
-        query = urllib.parse.urlencode({'library': folder})
-        return self.request_json('DELETE', f'/api/kolibre/books/{book_id}?{query}')
-
     def update_book(self, book_id: int, library: str, fields: dict) -> dict:
         """
         PUT /api/kolibre/books/{id}?library=... — a partial update (only the
         keys present in `fields` are touched server-side, see
-        backend/app/api/books.py::update_book). Used both for the mapped
-        page-estimate column override (workers.py's UploadWorker, applied
-        after the whole batch uploads) and by the paired-library diff/apply
-        flow, so it belongs here rather than being duplicated in each caller.
+        backend/app/api/books.py::update_book). Serve alla colonna del
+        numero di pagine (workers.py, UploadWorker: si applica dopo che
+        l'intero lotto e' salito), che oggi e' l'unico uso.
         """
         query = urllib.parse.urlencode({'library': library})
         return self.request_json('PUT', f'/api/kolibre/books/{book_id}?{query}', fields)

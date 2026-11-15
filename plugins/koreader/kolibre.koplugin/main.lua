@@ -605,6 +605,7 @@ local logger           = require("logger")
 local sha2             = require("ffi/sha2")
 local lfs              = require("libs/libkoreader-lfs")
 local DataStorage      = require("datastorage")
+local Device           = require("device")
 local DocSettings      = require("docsettings")
 local t                = require("kolibre_lingua").t
 local lingua_attiva    = require("kolibre_lingua").lingua_attiva
@@ -618,6 +619,9 @@ local KolibreCapabilities = require("kolibre_capabilities")
 -- scorre, e un elenco troppo lungo spinge i bottoni fuori dal bordo.
 local KolibreFinestre = require("kolibre_finestre")
 local KolibrePercorsi = require("kolibre_percorsi")
+-- Il registro di KOReader ripulito e accorciato: una funzione pura, provata
+-- senza KOReader (vedi la prova «il_registro_si_ripulisce»).
+local KolibreDiagnostica = require("kolibre_diagnostica")
 local KolibreAvvio    = require("kolibre_avvio")
 -- Quali patch proporre di aggiornare, e quali no: la scelta e' una funzione
 -- pura, provabile senza KOReader (vedi la prova «patch_da_aggiornare»).
@@ -626,7 +630,7 @@ local KolibrePatch = require("kolibre_patch")
 -- funzione pura (vedi la prova «aggiornamento_al_risveglio»).
 local KolibreRinvii = require("kolibre_rinvii")
 
-local VERSION = "0.13.9"
+local VERSION = "0.14.2"
 
 local EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, fb2 = true, txt = true }
 
@@ -807,6 +811,51 @@ function Kolibre:init()
         self:_provaAvvioConRitentativi()
     end
 
+    -- La vista libreria come schermata del gestore di file, se accesa.
+    --
+    -- **Non piu' «una volta per processo».** Fino al 15/11 si apriva solo la
+    -- prima volta: all'avvio e basta. Uscendo da un libro ci si ritrovava
+    -- nel gestore di file normale, che e' il «usciti da un libro si torna a
+    -- Koreader normale invece che a questa vista» di Paolo. Ora si apre
+    -- ogni volta che nasce un gestore di file — e chiudendo un libro
+    -- KOReader ne costruisce uno NUOVO (`ReaderUI:onClose` ->
+    -- `FileManager:showFiles`), quindi questo `init()` gira di nuovo e la
+    -- vista torna da se', senza toccare niente di KOReader.
+    --
+    -- Le condizioni, e la ragione di ognuna:
+    --   * **spenta per difetto**: finche' nessuno l'accende, KOReader resta
+    --     quello di sempre (decisione dell'11/11);
+    --   * **solo nel gestore file**: di questo plugin esiste un'istanza
+    --     anche dentro il lettore, e li' `self.ui.document` c'e'. Senza
+    --     questo controllo la libreria si aprirebbe sopra il libro che stai
+    --     leggendo;
+    --   * **non due una sopra l'altra**: le istanze del plugin sono due, e
+    --     chi sa se una vista e' gia' viva e' la vista stessa
+    --     (`KolibreUI.aperta()`), che si azzera da se' quando si chiude.
+    --
+    -- E se in KOReader hai scelto «apri l'ultimo libro», il gestore file non
+    -- nasce proprio, quindi questa riga non viene nemmeno eseguita: vince la
+    -- tua scelta, che e' quello che si era deciso.
+    -- Una riga sul registro quando la voce e' accesa, qualunque cosa
+    -- succeda dopo. Senza, «non parte» e' una frase e non un indizio: non si
+    -- sa se la voce era spenta, se eravamo dentro un libro o se la vista era
+    -- gia' aperta. Su un Kindle il registro e' l'unica cosa che si puo'
+    -- leggere a distanza.
+    if self:_libreriaAllAvvio() then
+        logger.info("Kolibre: interfaccia accesa; documento aperto:",
+            tostring(self.ui and self.ui.document ~= nil),
+            "vista gia' aperta:", tostring(self:_libreriaGiaAperta()))
+    end
+    if self:_libreriaAllAvvio() and self.ui and not self.ui.document
+            and not self:_libreriaGiaAperta() then
+        UIManager:nextTick(function()
+            -- Il controllo si rifa' qui: fra l'`init()` e il giro dopo di
+            -- UIManager puo' essere successo di tutto, e due viste una
+            -- sopra l'altra sono un vicolo cieco per chi le deve chiudere.
+            if not self:_libreriaGiaAperta() then self:apriLibreria() end
+        end)
+    end
+
     KolibreMenuPin.ensure()
 end
 
@@ -872,6 +921,15 @@ function Kolibre:addToMainMenu(menu_items)
                 callback = function() self:openCatalogDashboard() end,
             },
             {
+                -- La UI di Kolibre: un file browser nostro con i soli libri
+                -- che Kolibre ha consegnato qui. Spenta per difetto
+                -- (decisione dell'11/11): si accende da qui, e finche'
+                -- nessuno la accende KOReader resta quello di sempre.
+                text = t("koreader.ui.apri"),
+                help_text = t("koreader.ui.apri_help"),
+                callback = function() self:apriLibreria() end,
+            },
+            {
                 text = t("koreader.menu.tools"),
                 sub_item_table_func = function() return self:_toolsMenuItems() end,
             },
@@ -892,6 +950,16 @@ function Kolibre:addToMainMenu(menu_items)
                         -- Il popup delle sincronizzazioni AUTOMATICHE. Quelle
                         -- chieste a mano rispondono sempre: un comando che
                         -- non dice niente sembra rotto.
+                        text = t("koreader.ui.usa_la_vista"),
+                        help_text = t("koreader.ui.usa_la_vista_help"),
+                        checked_func = function() return self:_libreriaAllAvvio() end,
+                        callback = function()
+                            local acceso = not self:_libreriaAllAvvio()
+                            self:_impostaLibreriaAllAvvio(acceso)
+                            self:_applicaSceltaLibreria(acceso)
+                        end,
+                    },
+                    {
                         text = t("koreader.settings.sync_popup"),
                         help_text = t("koreader.settings.sync_popup_help"),
                         checked_func = function() return self:_popupDiSincronizzazione() end,
@@ -900,7 +968,17 @@ function Kolibre:addToMainMenu(menu_items)
                         end,
                     },
                     {
-                        text = t("koreader.settings.info", { version = VERSION }),
+                        -- La versione della UI accanto a quella del plugin,
+                        -- e non una voce in piu': sono due numeri che
+                        -- rispondono alla stessa domanda («cosa ho
+                        -- installato?»), e una riga sola li tiene insieme.
+                        -- Chiesta a `pcall` perche' il modulo della UI puo'
+                        -- non caricarsi, e allora la riga dice solo il
+                        -- plugin invece di sparire.
+                        text = t("koreader.settings.info", {
+                            version = VERSION,
+                            ui = self:_versioneDellaUI(),
+                        }),
                         keep_menu_open = true,
                         callback = function() self:showInfo() end,
                     },
@@ -1013,6 +1091,15 @@ function Kolibre:_toolsMenuItems()
         text = t("koreader.inventory.menu"),
         keep_menu_open = true,
         callback = function() self:mandaInventario() end,
+    })
+    table.insert(items, {
+        -- Accanto all'inventario, che e' l'altra voce che «guarda e basta»:
+        -- due cose che leggono il dispositivo e lo raccontano al server,
+        -- senza cambiare niente.
+        text = t("koreader.diagnostica.menu"),
+        help_text = t("koreader.diagnostica.menu_help"),
+        keep_menu_open = true,
+        callback = function() self:mandaIlRegistro() end,
     })
     table.insert(items, {
         text = t("koreader.restore.menu"),
@@ -1413,6 +1500,29 @@ local function ensureDir(path)
     return util.makePath(path) and lfs.attributes(path, "mode") == "directory"
 end
 
+--- La cartella c'e': ma ci possiamo SCRIVERE?
+--
+-- Sono due domande diverse e il 15/11/2026 ce l'ha insegnato un
+-- aggiornamento fallito sul KOReader di sviluppo con «Permission denied» su
+-- un file che nessuno aveva chiesto di vedere
+-- (`risorse/icona-cronologia.png.kolibre-new.kolibre-parziale`). La cartella
+-- `risorse/` esisteva — l'avevo creata io da fuori dal contenitore — ma
+-- apparteneva a un altro utente e non dava la scrittura a KOReader. Quindi
+-- `ensureDir` diceva «c'e'» e andava tutto avanti fino a sbattere contro un
+-- messaggio che non spiegava niente.
+--
+-- Il modo portatile di chiederlo in Lua e' provarci: non esiste un «posso
+-- scrivere qui» che valga su Kindle, Kobo, Android e desktop insieme. Si
+-- crea un file minuscolo e lo si toglie subito.
+local function cartellaScrivibile(path)
+    local prova = path .. "/.kolibre-prova-scrittura"
+    local f = io.open(prova, "w")
+    if not f then return false end
+    f:close()
+    os.remove(prova)
+    return true
+end
+
 -- One level is always enough here: only ever called on a "<book>.sdr"
 -- sidecar directory, which KOReader itself never nests further. Needed
 -- because lfs.rmdir (like POSIX rmdir) only removes an EMPTY directory —
@@ -1519,6 +1629,7 @@ function Kolibre:_downloadCatalogBook(book, library)
             calibre_book_id = book.id,
             format = fmt:upper(),
             downloaded_at = os.time(),
+            server_pages = book.server_pages,
         })
         local delivered, deliver_err = self.api:request("POST", "/api/kolibre/devices/books/delivered", {
             calibre_book_id = book.id,
@@ -1932,6 +2043,214 @@ end
 -- "Catalogo" top-level entry (addToMainMenu) — a small home screen instead
 -- of jumping straight into the flat catalog Menu (that's now one of three
 -- destinations from here, "Sfoglia la libreria" ▸ "Tutti i libri").
+-- ── la UI di Kolibre (vedi kolibre_ui_libreria.lua) ──────────────────────
+
+--- L'interfaccia di Kolibre e' accesa?
+--
+-- **La chiave non si rinomina, il nome sul menu si'.** Il 15/11/2026 la voce
+-- e' passata da «Open it on startup» a «Use the Kolibre UI», perche' la
+-- vista non si apre piu' solo all'accensione: torna anche ogni volta che si
+-- esce da un libro, cioe' PRENDE IL POSTO del gestore di file. Il nome
+-- vecchio diceva meno di quello che la voce gia' faceva.
+--
+-- La chiave dell'impostazione resta `kolibre_libreria_allavvio` apposta:
+-- quella e' scritta nelle impostazioni di chi l'ha gia' accesa, e
+-- cambiargliela gliela spegnerebbe senza dirglielo.
+function Kolibre:_libreriaAllAvvio()
+    return G_reader_settings:isTrue("kolibre_libreria_allavvio")
+end
+
+--- Accende o spegne l'interfaccia di Kolibre, e **lo scrive subito**.
+--
+-- **Il `flush` non e' prudenza, e' il difetto del 15/11/2026 sul Kindle.**
+-- `saveSetting` scrive in memoria; su disco le impostazioni di KOReader
+-- finiscono quando KOReader esce in modo pulito. Su un computer succede
+-- quasi sempre. **Su un Kindle quasi mai**: il lettore si addormenta, si
+-- riavvia, o il programma viene ucciso, e quella scrittura non arriva mai.
+--
+-- Effetto: Paolo accende la voce, la vede spuntata, e dopo il riavvio la
+-- spunta non c'e' piu' e la vista non parte — senza un errore, senza niente
+-- da leggere. E' esattamente quello che ha visto («l'ho attivata la UI»).
+--
+-- Una riga, e vale per chiunque abbia un lettore che non si spegne mai del
+-- tutto.
+function Kolibre:_impostaLibreriaAllAvvio(acceso)
+    G_reader_settings:saveSetting("kolibre_libreria_allavvio", acceso and true or false)
+    G_reader_settings:flush()
+end
+
+--- La spunta deve fare qualcosa SUBITO, non al prossimo riavvio.
+--
+-- Il secondo difetto dello stesso racconto: fino al 15/11 accendere la voce
+-- non faceva succedere niente. La vista nasce quando nasce un gestore di
+-- file, e quello esiste gia' da prima — quindi bisognava riavviare KOReader
+-- oppure entrare e uscire da un libro per vedere qualcosa. Chi accende un
+-- interruttore e non vede niente pensa che sia rotto, e ha ragione.
+function Kolibre:_applicaSceltaLibreria(acceso)
+    if not acceso then
+        -- Spenta: si toglie di mezzo adesso, e sotto c'e' il gestore di file
+        -- di KOReader, che non e' mai stato chiuso.
+        local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+        if ok and type(KolibreUI.aperta) == "function" then
+            local vista = KolibreUI.aperta()
+            if vista then pcall(function() UIManager:close(vista) end) end
+        end
+        return
+    end
+    if self.ui and self.ui.document then
+        -- Siamo dentro un libro: la vista non si apre sopra quello che stai
+        -- leggendo (e' la regola di sempre). Ma va detto, altrimenti sembra
+        -- che l'interruttore non abbia fatto niente.
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.accesa_dopo_il_libro") })
+        return
+    end
+    if not self:_libreriaGiaAperta() then self:apriLibreria() end
+end
+
+--- Apre la vista «libreria».
+--
+-- Il modulo si carica QUI e non in testa al file: cosi' un guasto nella UI
+-- nuova non impedisce al resto del plugin di partire — sincronizzazione,
+-- note e posizioni continuano a funzionare anche se questa schermata si
+-- rompe con un aggiornamento di KOReader. E' la ragione per cui l'11/11 si
+-- e' deciso un plugin solo invece di due: la separazione serviva a questo, e
+-- un `require` pigro la compra senza il costo di un secondo plugin.
+--- C'e' gia' una vista libreria aperta?
+--
+-- La risposta ce l'ha il modulo della vista, non noi: si azzera da se'
+-- quando la vista si chiude, in qualunque modo venga chiusa. Qui si chiede
+-- con un `pcall` perche' il modulo potrebbe non caricarsi, e in quel caso
+-- la risposta onesta e' «no», non un errore che ferma l'avvio.
+--- Il numero di versione dell'interfaccia, o un trattino.
+function Kolibre:_versioneDellaUI()
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if not ok or type(KolibreUI.versione) ~= "function" then return "-" end
+    local ok2, numero = pcall(KolibreUI.versione)
+    return ok2 and tostring(numero) or "-"
+end
+
+function Kolibre:_libreriaGiaAperta()
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if not ok or type(KolibreUI.aperta) ~= "function" then return false end
+    return KolibreUI.aperta() ~= nil
+end
+
+--- Apre la vista libreria. Se non ci riesce, lo dice e basta.
+--
+-- **Perche' tutto sta dentro un `pcall`, e non solo il `require`.**
+--
+-- Questa funzione viene chiamata anche da sola, al nascere del gestore di
+-- file, dentro un `UIManager:nextTick`. Quello che succede dentro un
+-- `nextTick` non e' protetto da niente: un errore li' dentro risale fino in
+-- cima e **chiude KOReader**. E siccome la vista si riapre a ogni avvio
+-- finche' l'impostazione e' accesa, un errore diventerebbe un KOReader che
+-- muore ogni volta che lo accendi — su un computer si spegne l'impostazione
+-- in tre secondi, su un Kindle si va a cercare un cavo.
+--
+-- Con il `pcall`, il peggio che puo' capitare e' un avviso e il gestore di
+-- file di sempre. **Non** si spegne l'impostazione da soli: quella l'ha
+-- messa Paolo, e un automatismo puo' proporre, non togliere.
+--- Manda al server il registro di KOReader, ripulito.
+--
+-- **Perche' esiste** (15/11/2026). Sul Kindle la UI «non parte e non da'
+-- problemi», e il perche' sta nel `crash.log` di KOReader — che su un
+-- Kindle si raggiunge solo con un cavo. Da qui si manda al server di Paolo,
+-- e da li' si legge con un browser.
+--
+-- **Si chiede sempre prima, e si dice che cosa si manda.** Un registro
+-- raccoglie tutto quello che KOReader stampa, titoli dei libri e percorsi
+-- compresi. Va sul server di casa e non altrove, ma e' roba sua e la
+-- decisione e' sua, ogni volta. Niente invio automatico, mai.
+--
+-- Token e indirizzi li toglie `kolibre_diagnostica` prima che parta.
+function Kolibre:mandaIlRegistro()
+    local cartella = KolibrePercorsi.cartellaDeiDati(DataStorage, lfs.currentdir())
+    local percorso = cartella .. "/crash.log"
+    local dimensione = lfs.attributes(percorso, "size")
+    if not dimensione then
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.diagnostica.assente", { percorso = percorso }),
+        })
+        return
+    end
+    UIManager:show(ConfirmBox:new{
+        text = t("koreader.diagnostica.conferma", {
+            kb = math.floor(dimensione / 1024),
+            max = math.floor(KolibreDiagnostica.MAX_BYTE / 1024),
+        }),
+        ok_text = t("koreader.diagnostica.manda"),
+        ok_callback = function() self:_mandaIlRegistroDavvero(percorso) end,
+    })
+end
+
+function Kolibre:_mandaIlRegistroDavvero(percorso)
+    local grezzo = util.readFromFile(percorso, "rb")
+    if not grezzo then
+        UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
+        return
+    end
+    local pronto = KolibreDiagnostica.prepara(grezzo, {
+        dispositivo = Device and Device.model or "?",
+        versione = VERSION,
+        quando = os.date("%Y-%m-%d %H:%M:%S"),
+    })
+    -- Un file di passaggio accanto al registro, e si toglie SEMPRE: anche
+    -- quando l'invio fallisce, perche' un file dimenticato nella cartella
+    -- dati di KOReader e' esattamente il genere di cosa che dopo un mese
+    -- nessuno sa piu' da dove viene.
+    local temporaneo = percorso .. ".kolibre-da-mandare"
+    local f = io.open(temporaneo, "wb")
+    if not f then
+        UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
+        return
+    end
+    f:write(pronto)
+    f:close()
+
+    local ok, err = self.api:uploadFile("/api/kolibre/devices/diagnostic-log", temporaneo)
+    os.remove(temporaneo)
+    if ok then
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.diagnostica.mandato", { kb = math.floor(#pronto / 1024) }),
+        })
+    else
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.diagnostica.fallito", { errore = tostring(err) }),
+        })
+    end
+end
+
+function Kolibre:apriLibreria()
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if not ok then
+        logger.err("Kolibre: la vista libreria non si carica:", KolibreUI)
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.menu_non_disponibile") })
+        return
+    end
+    local vista
+    local costruita, errore = pcall(function()
+        vista = KolibreUI:new{
+            manifest = self.manifest,
+            kolibre = self,
+            agganciato = self.manifest:getMeta("mai_agganciato") and true or false,
+            cartella_logo = self.path and (self.path .. "/risorse") or nil,
+            path = self.books_dir,
+            close_callback = function() UIManager:close(vista) end,
+        }
+        UIManager:show(vista)
+    end)
+    if not costruita then
+        logger.err("Kolibre: la vista libreria non si apre:", errore)
+        -- Se e' morta a meta' strada puo' essere rimasta nella pila delle
+        -- finestre: una finestra rotta la' dentro impedirebbe a KOReader di
+        -- chiudersi (vedi `KolibreUI:onExit`).
+        if vista then pcall(function() UIManager:close(vista) end) end
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.menu_non_disponibile") })
+        return
+    end
+    return vista
+end
+
 function Kolibre:openCatalogDashboard()
     self:_withCatalogLibrary(function(library)
         self:_showCatalogDashboard(library)
@@ -3796,7 +4115,12 @@ end
 -- anything else in this plugin runs. Returns a user-facing message to show
 -- once UI is available, or nil if there was nothing to do.
 function Kolibre:_resumePendingUpdate()
-    local base_path = self.path or "plugins/kolibre.koplugin"
+    -- `gsub("//+", "/")`: KOReader compone il percorso del plugin unendo una
+    -- cartella che finisce gia' con una barra al nome, e quello che arriva
+    -- qui e' «.../plugins//kolibre.koplugin». Il sistema le barre doppie le
+    -- ignora, ma un messaggio d'errore che le mostra fa perdere tempo a chi
+    -- lo legge — ed e' successo il 15/11.
+    local base_path = (self.path or "plugins/kolibre.koplugin"):gsub("//+", "/")
     local new_version, entries = self:_readUpdateMarker(base_path)
     if not entries then return nil end -- no marker at all: nothing was interrupted
 
@@ -3838,9 +4162,18 @@ function Kolibre:_downloadAndInstallUpdate(new_version, senza_riavvio)
         return false
     end
 
-    local base_path = self.path or "plugins/kolibre.koplugin"
+    -- `gsub("//+", "/")`: KOReader compone il percorso del plugin unendo una
+    -- cartella che finisce gia' con una barra al nome, e quello che arriva
+    -- qui e' «.../plugins//kolibre.koplugin». Il sistema le barre doppie le
+    -- ignora, ma un messaggio d'errore che le mostra fa perdere tempo a chi
+    -- lo legge — ed e' successo il 15/11.
+    local base_path = (self.path or "plugins/kolibre.koplugin"):gsub("//+", "/")
     local staged = {}
     local failed = nil
+    -- Una cartella si controlla una volta sola, non venti: la prova di
+    -- scrittura crea e cancella un file, e farlo per ogni file del plugin
+    -- sarebbe venti scritture inutili su una scheda SD.
+    local cartelle_controllate = {}
 
     -- Download every file to a .new sibling first — if any download fails
     -- partway through, the existing installation is left completely
@@ -3864,7 +4197,24 @@ function Kolibre:_downloadAndInstallUpdate(new_version, senza_riavvio)
         local target_path = base_path .. "/" .. rel_path
         local staged_path = target_path .. ".kolibre-new"
         local dir = target_path:match("^(.*)/[^/]+$")
-        if dir then ensureDir(dir) end
+        -- Una cartella nuova DEVE poter nascere qui: il plugin ne ha
+        -- guadagnata una il 15/11 (`risorse/`, i disegni della UI) e
+        -- l'aggiornamento di chi aveva la versione prima deve crearla da
+        -- se'. `ensureDir` lo fa, ma il suo esito non va buttato via: se la
+        -- cartella non si puo' creare, o c'e' ma non e' scrivibile, si dice
+        -- QUALE cartella e si smette, invece di far fallire il download di
+        -- un file con un messaggio che parla di un file temporaneo.
+        if dir and not cartelle_controllate[dir] then
+            if not ensureDir(dir) then
+                failed = { path = rel_path, err = t("koreader.update.dir_failed", { dir = dir }) }
+                break
+            end
+            if not cartellaScrivibile(dir) then
+                failed = { path = rel_path, err = t("koreader.update.dir_readonly", { dir = dir }) }
+                break
+            end
+            cartelle_controllate[dir] = true
+        end
 
         local ok, download_err = self.api:downloadTo(remote_path, staged_path)
 
@@ -5019,7 +5369,18 @@ function Kolibre:_syncNowRun(interactive, trigger, allow_migration, solo_libri)
     if result.library_token then
         self.manifest:saveToken(result.library_token)
     end
+    -- Il primo aggancio riuscito, ricordato per sempre: e' l'unica cosa che
+    -- il logo della UI dice, e va saputa senza toccare la rete. Un controllo
+    -- verso un server spento blocca il lettore per tre secondi, quindi
+    -- disegnare la barra non puo' permettersi di chiedere "ci sei?".
+    if not self.manifest:getMeta("mai_agganciato") then
+        self.manifest:setMeta("mai_agganciato", true)
+    end
     self:_rememberRestoreRequest(result.restore_request)
+    -- Le stime del server per i libri che il lettore ha gia'. Si applicano
+    -- prima dei download: un libro che arriva in questo giro la sua stima ce
+    -- l'ha gia' nella consegna, e riscriverla dopo sarebbe un giro a vuoto.
+    self.manifest:applicaStimeDelServer(result.server_pages)
 
     -- The handshake response is the implicit ack of our missing_books report:
     -- those entries can now leave the manifest.
@@ -5227,6 +5588,10 @@ function Kolibre:_syncNowRun(interactive, trigger, allow_migration, solo_libri)
                     calibre_book_id = item.calibre_book_id,
                     format = (item.format or ""):upper(),
                     downloaded_at = os.time(),
+                    -- La stima del server, che NON e' `pages`: vedi
+                    -- l'intestazione di kolibre_manifest.lua. E' lei che da'
+                    -- la lunghezza alla barra nella UI.
+                    server_pages = item.server_pages,
                 }, true)
                 -- L'impronta misurata torna al server nell'ack: e' lui che
                 -- deve registrare che cosa ha consegnato DAVVERO.

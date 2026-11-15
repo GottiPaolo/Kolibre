@@ -18,7 +18,16 @@ G_reader_settings, separate file so it survives plugin reinstalls and never
 bloats settings.reader.lua.
 
 Entry value shape: {path, hash (partialMD5, may be nil until backfilled),
-title, author, library, calibre_book_id, format, downloaded_at, pages}.
+title, author, library, calibre_book_id, format, downloaded_at, pages,
+server_pages}.
+
+`pages` e `server_pages` sono due numeri diversi e non vanno confusi.
+`pages` e' il conteggio di KOReader, che dipende da come legge chi legge:
+carattere, corpo, margini, orientamento. Cambi il font e cambia.
+`server_pages` e' la stima del server, ricavata dal testo del libro e uguale
+su ogni dispositivo: e' l'unica con cui si possono confrontare due libri fra
+loro, ed e' quella che da' la lunghezza alla barra nella UI di Kolibre. Se la
+barra usasse `pages` cambierebbe lunghezza dopo la prima apertura del libro.
 library/calibre_book_id/format are duplicated from the key on purpose: the
 missing_books report needs them as separate fields and parsing them back out
 of the key would break the day a library folder name contains ":".
@@ -125,6 +134,38 @@ function KolibreManifest:count()
     local n = 0
     for _k in pairs(self.settings:readSetting("books")) do n = n + 1 end
     return n
+end
+
+-- Le stime del server per i libri che il lettore ha gia', come arrivano in
+-- `server_pages` nella risposta della sincronizzazione: {chiave = numero}.
+--
+-- **Perche' serve, visto che la stima viaggia gia' con la consegna.** Perche'
+-- la consegna riguarda i libri che partono adesso. Tutti quelli gia'
+-- scaricati — sul Kindle di Paolo sono trecento — sono arrivati prima che
+-- quel campo esistesse, e senza questo passaggio resterebbero per sempre
+-- senza barra: l'unico modo per dargliela sarebbe cancellarli e riscaricarli.
+--
+-- Scrive solo voci che esistono gia' (una chiave sconosciuta si ignora: non
+-- si inventa un libro che il dispositivo non ha) e solo quando il numero
+-- cambia davvero, perche' ogni scrittura e' un `flush` su disco e qui si
+-- passa su trecento voci a ogni giro. Non sporca il manifesto: il server
+-- questa informazione ce l'ha gia', e' lui che l'ha mandata.
+function KolibreManifest:applicaStimeDelServer(mappa)
+    if type(mappa) ~= "table" then return 0 end
+    local books = self.settings:readSetting("books")
+    local cambiate = 0
+    for chiave, stima in pairs(mappa) do
+        local voce = books[chiave]
+        if voce and type(stima) == "number" and voce.server_pages ~= stima then
+            voce.server_pages = stima
+            cambiate = cambiate + 1
+        end
+    end
+    if cambiate > 0 then
+        self.settings:saveSetting("books", books)
+        self.settings:flush()
+    end
+    return cambiate
 end
 
 -- ── library_token: the server's cheap change-detection token ──

@@ -16,8 +16,8 @@ from calibre.utils.date import is_date_undefined
 # Calibre edit of one of these back to the server would let a stale value
 # clobber what Kolibre just computed. Excluded here (the ONLY path that
 # builds an upload/update payload from a local book) so every caller —
-# bulk upload, single-book send, incremental "Rileva variazioni" — is
-# covered without repeating the filter at each call site. The opposite
+# una libreria intera o i libri selezionati — e' coperto senza ripetere il
+# filtro a ogni chiamata. The opposite
 # direction (Kolibre -> Calibre, writing the server's value into a local
 # column) is untouched elsewhere, since exporting the authoritative value
 # down is exactly the point. Extend this set as more system-managed columns

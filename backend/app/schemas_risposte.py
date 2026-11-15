@@ -1786,6 +1786,10 @@ class LibroDelCatalogo(Permissivo):
     rating: Optional[float]
     #: Solo il giorno, `YYYY-MM-DD`.
     pubdate: Optional[str]
+    #: Le pagine stimate dal server, lo stesso numero e lo stesso nome che
+    #: nella consegna: un libro preso di qui finisce nel manifesto del
+    #: lettore per la stessa strada.
+    server_pages: Optional[int] = None
     #: **Booleano**, come in ogni altra risposta del progetto.
     #:
     #: Fino al 05/11/2026 qui arrivava `0` oppure `1` — il valore grezzo
@@ -1901,6 +1905,12 @@ class LibroDaMandare(Permissivo):
     #: nella cartella come copertina.
     folder_cover_url: Optional[str]
     delivery_hash: Optional[str]
+    #: Le pagine **stimate dal server**, che sono un'altra cosa dal
+    #: conteggio di KOReader: quello dipende da carattere, corpo e margini
+    #: di chi legge, questa viene dal testo ed e' uguale su ogni
+    #: dispositivo. E' la stima che da' la lunghezza alla barra nella UI
+    #: del lettore. Nulla se il server non la sa.
+    server_pages: Optional[int] = None
 
 
 class LibroDaTogliere(Permissivo):
@@ -1985,6 +1995,13 @@ class Handshake(Permissivo):
     library_token: str
     sends: list[LibroDaMandare]
     removes: list[LibroDaTogliere]
+    #: Le pagine stimate dal server per i libri che il lettore ha **gia'**,
+    #: indicizzate come le voci del suo manifesto:
+    #: `"<biblioteca>:<id>:<FORMATO>"`. `sends[].server_pages` riguarda i
+    #: libri in partenza; questa i libri gia' arrivati, compresi quelli
+    #: scaricati prima che il campo esistesse. Si ripete a ogni giro, cosi'
+    #: un ricalcolo delle stime sul server arriva ai lettori da se'.
+    server_pages: dict[str, int]
     file_actions: list[AzioneSuFile]
     #: Valorizzato **solo** quando una persona l'ha confermata dal portale.
     restore_request: Optional[RichiestaDiRipristino]

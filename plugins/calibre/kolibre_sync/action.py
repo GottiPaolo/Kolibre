@@ -243,13 +243,13 @@ class KolibreSyncAction(InterfaceAction):
         #
         # selected_columns, unlike pages_column, is NOT a per-library choice
         # that needs a dialog — every locally-representable custom column is
-        # simply sent, same as the incremental "Rileva variazioni" sync
-        # already does (_apply_pairing_decisions). Previously this passed
-        # selected_columns=None, meaning custom_values was ALWAYS empty for
-        # a book sent via this exact context-menu action, regardless of what
-        # it actually had (found investigating a real report that a Calibre
-        # push didn't seem to preserve every metadata field) — full-library
-        # upload and "Rileva variazioni" were never affected, only this path.
+        # simply sent, come fa il caricamento di una libreria intera.
+        # Prima qui passava selected_columns=None, e quindi custom_values era
+        # SEMPRE vuoto per un libro mandato con questa voce del menu'
+        # contestuale, qualunque cosa avesse (trovato indagando una
+        # segnalazione vera: un invio da Calibre non sembrava conservare
+        # tutti i metadati). Il caricamento di una libreria intera non ne
+        # era toccato: solo questa strada.
         local_columns = _all_supported_local_columns(db)
         books = []
         for book_id in book_ids:

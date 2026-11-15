@@ -16,7 +16,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import func
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
 from .. import config, models, schemas, database, auth
@@ -25,6 +25,7 @@ from starlette.background import BackgroundTask
 
 from ..logging_utils import log_message
 from ..calibre.library import CalibreLibrary
+from ..calibre.connection import PAGE_COUNT_COLUMN_LABEL
 from ..services import identita_durevole
 from ..services.position_converter.chapter_resolver import resolve_epub_chapter_path, resolve_pdf_chapter_path
 from ..services import (book_hash_service, highlight_position, inventario_dispositivo,
@@ -405,6 +406,42 @@ def _mark_missing_books(db: Session, device: models.Device, missing: list) -> in
     return count
 
 
+def _stime_delle_pagine(righe) -> dict:
+    """{(biblioteca, id libro): stima del server}, per un gruppo di righe
+    DeviceBook — una query per biblioteca, non una per libro.
+
+    **Perche' il server deve mandare la sua stima, visto che il lettore sa
+    contare le pagine da se'.** Sono due numeri diversi e servono a due cose
+    diverse. Il conteggio di KOReader dipende da come TU leggi: carattere,
+    corpo, margini, orientamento. Cambi il font e cambia. La stima del
+    server viene dal testo del libro ed e' la stessa su ogni dispositivo:
+    e' l'unica con cui si possono confrontare due libri fra loro, ed e'
+    quella che da' la lunghezza alla barra nella UI. Se la barra usasse il
+    conteggio del lettore cambierebbe lunghezza dopo la prima apertura del
+    libro — cioe' mentirebbe proprio nel momento in cui la guardi.
+
+    Niente valore: niente chiave. La UI non disegna mai una barra finta, e
+    `None` nel manifesto e' indistinguibile da "non lo so".
+    """
+    per_biblioteca = {}
+    for r in righe:
+        per_biblioteca.setdefault(r.library, set()).add(r.calibre_book_id)
+    stime = {}
+    for nome, ids in per_biblioteca.items():
+        try:
+            valori = CalibreLibrary(config.library_path(nome)).get_custom_column_values(
+                PAGE_COUNT_COLUMN_LABEL, list(ids))
+        except Exception as e:
+            # Una biblioteca che non si apre non deve far fallire la
+            # sincronizzazione: si perde la barra, non il giro.
+            log_message("warning", "sync", f"Page estimates unavailable for library '{nome}': {e}")
+            continue
+        for cid, valore in valori.items():
+            if valore:
+                stime[(nome, cid)] = int(valore)
+    return stime
+
+
 def _build_sends(db: Session, device: models.Device) -> list:
     """sends[] for the handshake response: everything the server wants ON the
     device that isn't there yet. Stamps delivery_hash on each row now, so the
@@ -413,6 +450,7 @@ def _build_sends(db: Session, device: models.Device) -> list:
         models.DeviceBook.device_id == device.id,
         models.DeviceBook.status.in_(_SENDABLE_STATUSES),
     ).all()
+    stime = _stime_delle_pagine(rows)
     sends, libraries_cache = [], {}
     for row in rows:
         lib = libraries_cache.setdefault(row.library, CalibreLibrary(config.library_path(row.library)))
@@ -439,8 +477,40 @@ def _build_sends(db: Session, device: models.Device) -> list:
             "download_url": f"/api/kolibre/books/{row.calibre_book_id}/download?library={row.library}&format={row.format}",
             "folder_cover_url": folder_cover_url,
             "delivery_hash": row.delivery_hash,
+            # Nome distinto da `pages` apposta: nel manifesto del lettore
+            # `pages` e' gia' il conteggio di KOReader, e i due numeri non
+            # si sovrascrivono a vicenda. Vedi `_stime_delle_pagine`.
+            "server_pages": stime.get((row.library, row.calibre_book_id)),
         })
     return sends
+
+
+def _stime_per_il_manifesto(db: Session, device: models.Device) -> dict:
+    """{"<biblioteca>:<id>:<FORMATO>": stima}, per i libri che il lettore ha
+    gia'. E' la chiave del manifesto del plugin, costruita uguale.
+
+    **Perche' non basta mandarla nella consegna.** La stima viaggia con il
+    libro solo quando il libro parte. Tutti i libri gia' scaricati — sul
+    Kindle di Paolo sono trecento — sono arrivati prima che questo campo
+    esistesse, e senza questa mappa resterebbero per sempre senza barra:
+    l'unico modo per dargliela sarebbe cancellarli e riscaricarli.
+
+    Si manda a ogni giro, non una volta sola, e costa una query per
+    biblioteca. Cosi' si aggiorna da se' anche quando il server ricalcola le
+    stime: «Ricalcola le pagine» sul server e i lettori si allineano al
+    giro dopo, senza nessun meccanismo in piu'.
+    """
+    righe = db.query(models.DeviceBook).filter(
+        models.DeviceBook.device_id == device.id,
+        models.DeviceBook.status.notin_(_SENDABLE_STATUSES),
+    ).all()
+    stime = _stime_delle_pagine(righe)
+    fuori = {}
+    for r in righe:
+        valore = stime.get((r.library, r.calibre_book_id))
+        if valore:
+            fuori["%s:%s:%s" % (r.library, r.calibre_book_id, (r.format or "").upper())] = valore
+    return fuori
 
 
 def _build_removes(db: Session, device: models.Device) -> list:
@@ -1251,6 +1321,14 @@ def catalog_sections(
     }
 
 
+def _stima_dal_libro(b: dict):
+    """La stima delle pagine dal dizionario di un libro di `list_books`, dove
+    le colonne personalizzate stanno sotto `#<etichetta>`. Zero e vuoto
+    valgono "non lo so": la UI del lettore non disegna barre finte."""
+    valore = b.get("#" + PAGE_COUNT_COLUMN_LABEL)
+    return int(valore) if valore else None
+
+
 def _serialize_catalog_book(b: dict) -> dict:
     """
     Shared shape for every catalog-style response (browse_catalog, and the
@@ -1272,6 +1350,10 @@ def _serialize_catalog_book(b: dict) -> dict:
         "tags": b.get("tags") or [], "rating": b.get("rating"),
         "pubdate": b.get("pubdate"), "has_cover": bool(b.get("has_cover")),
         "size": b.get("size"),
+        # Stesso nome e stesso significato che nella consegna: un libro preso
+        # dal catalogo sul dispositivo finisce nel manifesto per la stessa
+        # strada, e senza questo campo sarebbe l'unico senza barra.
+        "server_pages": _stima_dal_libro(b),
     }
 
 
@@ -2278,6 +2360,11 @@ def koreader_sync_handshake(
         "library_token": _library_token(db, current_device.id),
         "sends": sends,
         "removes": removes,
+        # Le stime del server per i libri che il lettore ha GIA'. Non e' un
+        # doppione di `sends[].server_pages`: quella riguarda i libri in
+        # partenza, questa quelli gia' arrivati. Vedi
+        # `_stime_per_il_manifesto` per il perche' di entrambe.
+        "server_pages": _stime_per_il_manifesto(db, current_device),
         "file_actions": file_actions,
         "restore_request": restore_request,
         # I dizionari chiesti dal portale. Restano nella risposta di ogni
@@ -3213,6 +3300,117 @@ def list_device_backups(
             "modified_at": quando(datetime.fromtimestamp(os.path.getmtime(fpath), tz=timezone.utc)),
         })
     return files
+
+
+# ── il registro di diagnostica di un lettore ─────────────────────────────
+#
+# Nato il 15/11/2026 da una domanda senza risposta: sul Kindle di Paolo la
+# UI «non parte e non dà problemi», e il perché sta nel `crash.log` di
+# KOReader — che su un Kindle si raggiunge solo con un cavo. Il plugin lo
+# manda qui da una voce di menu, DOPO averlo ripulito di token e indirizzi
+# (vedi `kolibre_diagnostica.lua` nel plugin) e averne preso la coda.
+#
+# Non è un backup e non sta fra i backup: un backup è roba che si può
+# rimettere su un lettore, questo è roba da leggere e buttare.
+_MAX_DIAGNOSTIC_BYTES = 512 * 1024
+
+
+def _diagnostics_dir(device_id: int) -> str:
+    return os.path.join(config.DIAGNOSTICS_DIR, str(device_id))
+
+
+@sync_router.post("/diagnostic-log", responses={200: {"model": dict}})
+async def upload_diagnostic_log(
+    request: Request,
+    db: Session = Depends(database.get_db),
+    current_device: models.Device = Depends(auth.get_current_device),
+):
+    """
+    Il registro di un lettore, mandato a richiesta dal suo menu.
+
+    Corpo grezzo come `upload_device_backup`: è testo, non serve multipart.
+    Il nome del file lo decide il SERVER e non il dispositivo — un nome che
+    arriva da fuori è un modo di scrivere dove non si dovrebbe, e qui non
+    c'è nessuna ragione per cui debba sceglierlo il lettore.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty request body")
+    if len(body) > _MAX_DIAGNOSTIC_BYTES:
+        raise HTTPException(status_code=413, detail="Diagnostic log too large")
+
+    cartella = _diagnostics_dir(current_device.id)
+    os.makedirs(cartella, exist_ok=True)
+    nome = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S") + ".log"
+    with open(os.path.join(cartella, nome), "wb") as f:
+        f.write(body)
+
+    # Si tengono gli ultimi dieci e basta: sono file da leggere una volta, e
+    # una cartella che cresce per sempre è un modo lento di riempire un
+    # disco.
+    vecchi = sorted(os.listdir(cartella))
+    for extra in vecchi[:-10]:
+        try:
+            os.remove(os.path.join(cartella, extra))
+        except OSError:
+            pass
+
+    log_message("info", "diagnostica",
+                f"Registro di diagnostica '{nome}' ({len(body)} byte) ricevuto da '{current_device.name}'")
+    return {"filename": nome, "size": len(body)}
+
+
+@router.get("/{device_id}/diagnostics", responses={200: {"model": list}})
+def list_device_diagnostics(
+    device_id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """I registri che questo lettore ha mandato, dal più recente."""
+    dev = db.query(models.Device).filter(
+        models.Device.id == device_id, models.Device.user_id == current_user.id
+    ).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+    cartella = _diagnostics_dir(device_id)
+    if not os.path.isdir(cartella):
+        return []
+    out = []
+    for nome in sorted(os.listdir(cartella), reverse=True):
+        percorso = os.path.join(cartella, nome)
+        out.append({
+            "filename": nome,
+            "size": os.path.getsize(percorso),
+            "modified_at": quando(datetime.fromtimestamp(os.path.getmtime(percorso), tz=timezone.utc)),
+        })
+    return out
+
+
+@router.get("/{device_id}/diagnostics/{filename}", response_class=Response,
+            responses={200: {"content": {"text/plain": {}}}})
+def read_device_diagnostic(
+    device_id: int,
+    filename: str,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
+):
+    """
+    Un registro, come testo da leggere nel browser.
+
+    `text/plain` e non un allegato: serve aprirlo e guardarlo, non salvarlo.
+    """
+    if not _SAFE_BACKUP_FILENAME.match(filename):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    dev = db.query(models.Device).filter(
+        models.Device.id == device_id, models.Device.user_id == current_user.id
+    ).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+    percorso = os.path.join(_diagnostics_dir(device_id), filename)
+    if not os.path.isfile(percorso):
+        raise HTTPException(status_code=404, detail="Log not found")
+    with open(percorso, "rb") as f:
+        return Response(content=f.read(), media_type="text/plain; charset=utf-8")
 
 
 @router.get("/{device_id}/backups/download", response_class=FileResponse, responses={200: {"content": {"application/zip": {}}}})

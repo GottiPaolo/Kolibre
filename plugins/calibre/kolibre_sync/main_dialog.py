@@ -38,10 +38,8 @@ from qt.core import (
     QListWidgetItem, QPushButton, QSizePolicy, QVBoxLayout, Qt,
 )
 
-from calibre.ebooks.metadata import string_to_authors
 from calibre.ebooks.metadata.book.base import Metadata
 from calibre.gui2 import choose_dir, error_dialog, info_dialog, question_dialog
-from calibre.utils.date import parse_date
 
 from .book_snapshot import snapshot_book_for_upload
 from .client import KolibreApiError, KolibreClient
@@ -72,9 +70,9 @@ def _all_supported_local_columns(db):
     """
     Every local custom column Kolibre's server schema can faithfully
     represent (see SUPPORTED_CUSTOM_COLUMN_DATATYPES's own docstring) —
-    shared by the upload dialog's column picker and the incremental
-    "Rileva variazioni" sync (which has no dialog to ask the user which
-    columns to include, so it always sends all of them).
+    la usano la finestra di caricamento, per riempire l'elenco da cui si
+    scelgono le colonne, e l'invio dei libri selezionati (action.py), che
+    non ha una finestra e quindi le manda tutte.
     """
     return [
         {'label': meta['label'], 'name': meta['name'], 'datatype': meta['datatype'], 'display': meta.get('display') or {}}
@@ -83,40 +81,18 @@ def _all_supported_local_columns(db):
     ]
 
 
-def _ensure_local_custom_column(db, label, server_columns_by_label):
-    """
-    Creates a local Calibre custom column matching the server's definition
-    if it doesn't exist yet — same effect as _apply_downloaded_library's own
-    create-on-download step (main_dialog.py, full-library download), just
-    reusable for a single column during incremental sync too, where a new
-    column created on Kolibre used to stay invisible in Calibre until the
-    entire library was re-downloaded from scratch.
-    """
-    if label in db.field_metadata.custom_field_metadata():
-        return
-    col = server_columns_by_label.get(label)
-    if not col or col['datatype'] not in SUPPORTED_CUSTOM_COLUMN_DATATYPES:
-        return
-    try:
-        db.create_custom_column(label, col['name'], col['datatype'], False, display=col.get('display') or {})
-    except Exception:
-        pass  # e.g. a race with another Calibre window creating the same column
-
-
 def _ensure_server_custom_columns(client, folder_name, columns):
     """
-    Mirror of _ensure_local_custom_column, other direction: creates on the
-    server any LOCAL Calibre custom column not yet known there. Without
+    Crea sul server le colonne personalizzate che esistono in Calibre e
+    la' no. Without
     this, update_book's server-side column lookup (library.py) silently
     drops any "#label" value it doesn't recognize — no error, the column
     just never appears, for every book, forever. upload_current_library
-    already had this exact check before sending a brand-new library (see
-    its own comment: "Stato Lettura... lost every book's value on a real
-    push"), but the incremental "Rileva variazioni" and the temporary
-    "Migra dati sync completi" paths never did — so a local column added
-    AFTER a library was first paired (e.g. a "StatoLettura" column created
-    later in Calibre) never reached the server even after this session's
-    other fixes.
+    upload_current_library aveva gia' questo controllo prima di mandare una
+    libreria nuova (vedi il suo commento: «Stato Lettura... lost every
+    book's value on a real push»); da quando l'accoppiamento non c'e' piu'
+    le strade che caricano sono due — una libreria intera e i libri
+    selezionati — e lo fanno entrambe.
 
     Returns the (column, exception) pairs that failed to create — columns
     already present are skipped silently, not counted as failures.
@@ -393,114 +369,6 @@ class KolibreMainDialog(QDialog):
         # single request.
         override = prefs.get('frontend_url')
         webbrowser.open(override if override else client.frontend_url())
-
-    def _download_book_into_current_library(self, client, folder_name, sb, db, server_columns_by_label=None, excluded_columns=None):
-        """One book from the server manifest -> a new book in the CURRENT
-        (already open) local library. Mirrors _apply_downloaded_library's
-        own add_books call, scoped to a single book instead of a whole
-        freshly created library. Returns (new_local_id, real_last_modified)
-        — see the note on real_last_modified below for why the caller must
-        use THIS value, not a wall-clock timestamp taken before any of this
-        ran."""
-        tmp_dir = tempfile.mkdtemp(prefix='kolibre_sync_book_')
-        try:
-            format_paths = {}
-            for fmt in sb.get('formats', []):
-                dest = os.path.join(tmp_dir, f'content.{fmt.lower()}')
-                url = f"/api/kolibre/books/{sb['id']}/download?format={fmt}&library={folder_name}"
-                client.download_to_file(url, dest)
-                format_paths[fmt] = dest
-            if not format_paths:
-                raise RuntimeError(t('calibre.main.no_downloadable_format'))
-
-            mi = Metadata(sb.get('title') or 'Senza titolo', authors=[sb['author']] if sb.get('author') else [])
-            if sb.get('tags'):
-                mi.tags = sb['tags']
-            if sb.get('series'):
-                mi.series = sb['series']
-                if sb.get('series_index') is not None:
-                    mi.series_index = sb['series_index']
-            if sb.get('rating'):
-                # Kolibre's own scale is 0-5 stars; Calibre's native field is
-                # 0-10 (see book_snapshot.py's own note on this same /2 <-> *2
-                # conversion, applied in the opposite direction there).
-                mi.rating = float(sb['rating']) * 2
-            if sb.get('pubdate'):
-                try:
-                    mi.pubdate = parse_date(sb['pubdate'])
-                except ValueError:
-                    pass
-
-            new_ids, _dupes = db.add_books([(mi, format_paths)])
-            new_id = new_ids[0]
-            for label, value in sb.items():
-                if label.startswith('#') and value not in (None, '') and label[1:] not in (excluded_columns or ()):
-                    _ensure_local_custom_column(db, label[1:], server_columns_by_label or {})
-                    try:
-                        db.set_field(label, {new_id: value})
-                    except Exception:
-                        pass
-            if sb.get('cover_url'):
-                cover_dest = os.path.join(tmp_dir, 'cover.jpg')
-                try:
-                    client.download_to_file(sb['cover_url'], cover_dest)
-                    with open(cover_dest, 'rb') as f:
-                        db.set_cover({new_id: f.read()})
-                except Exception:
-                    pass
-            # add_books/set_field/set_cover each bump Calibre's own
-            # last_modified on this row internally, AFTER the mi object
-            # above was built — using that stale mi.last_modified (or a
-            # wall-clock "now" captured before these calls) as the sync
-            # baseline used to under-count it, so the very next diff always
-            # saw the local side as "changed" even though nothing had
-            # touched it since (reported directly: "ogni sync successiva
-            # propone le stesse differenze"). Re-reading it fresh, now that
-            # every mutation is done, is the actual fix.
-            return new_id, db.get_metadata(new_id).last_modified.isoformat()
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    def _update_local_book_metadata_only(self, local_id, sb, db, server_columns_by_label=None, excluded_columns=None) -> str:
-        """
-        Pannello "Aggiorna metadati localmente": il server è cambiato dal
-        último sync -> aggiorna i metadati core dell'esistente libro locale,
-        mantenendo il suo local_id (e quindi tutto ciò che Calibre stesso
-        traccia contro di esso — cronologia di lettura, collegamenti a
-        dispositivi, ecc.) intatto. Deliberatamente NON tocca mai formati o
-        copertina (scelta deliberata: questo pannello è "solo metadati") — a
-        differenza della vecchia versione di questa funzione, non scarica
-        alcun file, quindi non serve più né `client` né `folder_name`.
-        Restituisce il REALE last_modified post-scrittura — vedi la nota
-        analoga in _download_book_into_current_library sul perché questo (e
-        non un timestamp preso prima di set_metadata) è quello da salvare
-        come nuova base di confronto per il prossimo sync.
-        """
-        mi = db.get_metadata(local_id)
-        if sb.get('title'):
-            mi.title = sb['title']
-        if sb.get('author'):
-            mi.authors = string_to_authors(sb['author'])
-        if sb.get('tags') is not None:
-            mi.tags = sb['tags'] or []
-        if sb.get('comments') is not None:
-            mi.comments = sb['comments']
-        if sb.get('rating'):
-            mi.rating = float(sb['rating']) * 2  # see the same conversion note above
-        if sb.get('pubdate'):
-            try:
-                mi.pubdate = parse_date(sb['pubdate'])
-            except ValueError:
-                pass
-        db.set_metadata(local_id, mi)
-        for label, value in sb.items():
-            if label.startswith('#') and value not in (None, '') and label[1:] not in (excluded_columns or ()):
-                _ensure_local_custom_column(db, label[1:], server_columns_by_label or {})
-                try:
-                    db.set_field(label, {local_id: value})
-                except Exception:
-                    pass
-        return db.get_metadata(local_id).last_modified.isoformat()
 
     # -- download ----------------------------------------------------------
 

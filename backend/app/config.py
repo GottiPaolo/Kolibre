@@ -23,6 +23,13 @@ USERS_DIR = os.path.join(DATA_DIR, "users")
 # (es. "it/") con i file .ifo/.idx/.dict(.dz)/.syn dentro.
 DICTIONARIES_DIR = os.path.join(DATA_DIR, "dictionaries")
 LOGS_FILE = os.path.join(DATA_DIR, "server.log")
+# I registri di diagnostica che i dispositivi mandano a richiesta (il
+# `crash.log` di KOReader, ripulito dal plugin: vedi
+# kolibre_diagnostica.lua). **Cartella separata dai backup, e non e' un
+# dettaglio**: i backup sono dati che si possono RIMETTERE su un lettore, e
+# un registro finito li' in mezzo entrerebbe in un elenco di cose
+# ripristinabili dove non c'entra niente.
+DIAGNOSTICS_DIR = os.path.join(DATA_DIR, "diagnostics")
 
 # The port a client on the LAN (KOReader, Calibre, Obsidian — none go through
 # the frontend's nginx proxy) must use to reach this backend directly. Inside
@@ -56,7 +63,7 @@ PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip()
 
 
 def ensure_directories() -> None:
-    for d in (LIBRARIES_DIR, PLUGINS_DIR, INGEST_DIR, INGEST_COVERS_DIR, AUTHORS_DIR, BACKUPS_DIR, USERS_DIR, DICTIONARIES_DIR):
+    for d in (LIBRARIES_DIR, PLUGINS_DIR, INGEST_DIR, INGEST_COVERS_DIR, AUTHORS_DIR, BACKUPS_DIR, USERS_DIR, DICTIONARIES_DIR, DIAGNOSTICS_DIR):
         os.makedirs(d, exist_ok=True)
 
 
