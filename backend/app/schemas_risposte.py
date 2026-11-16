@@ -3495,11 +3495,22 @@ class PortaDelServer(Permissivo):
 class VersioneDelServer(Permissivo):
     """
     Si risponde **senza autenticazione**, di proposito: serve a controllare
-    con un `curl` se il server e' allineato all'ultimo tag, e chiedere di
-    accedere per saperlo sarebbe un impiccio senza guadagno. `"dev"` quando
-    la versione non e' stata scritta al momento del build.
+    con un `curl` se il server e' allineato all'ultimo tag, e dal 16/11/2026
+    e' anche la prima domanda che fa un client che non ha ancora un account.
+
+    **`version` e `api` sono due cose diverse.** `version` e' il deploy che
+    sta girando e cambia a ogni rilascio; `api` e' il contratto, e cambia
+    solo quando una rotta cambia in modo che un client scritto prima non
+    funzioni piu'. **Un client deve guardare `api`**: legarsi a `version`
+    vorrebbe dire rifiutare un server compatibile perche' ha un altro numero.
+
+    `commit` e' `null`, e non una stringa come `"unknown"`, quando non si
+    sa: una stringa un client non la puo' distinguere da un commit vero.
     """
     version: str
+    commit: Optional[str] = None
+    api: int
+    client_minimo: str
 
 
 class VersioneDelPlugin(Permissivo):
@@ -3793,3 +3804,118 @@ class TokenApplicazioneInElenco(Permissivo):
 class TokenDellApplicazione(Permissivo):
     """I token vivi di questa persona: i revocati non compaiono."""
     items: list[TokenApplicazioneInElenco]
+
+
+class LibroToltoDalDispositivo(Permissivo):
+    """
+    «Questo lettore non vuole piu' questo libro»: la risposta dice quante
+    righe dello stato desiderato se ne sono andate.
+
+    `removed` puo' essere piu' di uno: lo stesso libro puo' essere sul
+    dispositivo in due formati, e togliere «il libro» significa togliere
+    quello che c'e'. Se il plugin dichiara il formato, se ne va solo quello.
+    """
+    status: str
+    removed: int
+
+
+# ── L'accoppiamento per codice ───────────────────────────────────────────
+#
+# Il modo in cui un programma che gira sul computer di una persona si collega
+# al server senza farsi dare la password: mostra un codice, la persona lo
+# conferma dal sito, e il programma riceve un token. Il disegno e il perche'
+# stanno in `models.RichiestaDiAccoppiamento` e in `api/accoppiamento.py`.
+
+
+class AccoppiamentoAvviato(Permissivo):
+    """
+    La risposta a «voglio collegarmi»: il codice da mostrare alla persona, e
+    il biglietto con cui ritirare il token quando sara' confermato.
+
+    **`code` si mostra, `ticket` non si mostra.** Sono due cose diverse: il
+    codice e' per gli occhi di chi conferma, il biglietto e' il segreto del
+    programma — se finisse a schermo, o in un log, chiunque l'abbia visto
+    potrebbe ritirare il token al posto suo.
+    """
+    #: Sei caratteri. Da mostrare come sono, in chiaro e grandi.
+    code: str
+    #: Il segreto del programma. Si conserva in memoria e si usa per chiedere
+    #: com'e' andata; **non si mostra e non si scrive in un file di log**.
+    ticket: str
+    #: Dopo questo istante il codice non vale piu' e si ricomincia.
+    expires_at: str
+    #: Ogni quanti secondi conviene richiedere lo stato. E' un consiglio del
+    #: server, non un limite: serve a non far scegliere al client un intervallo
+    #: cosi' breve da diventare un disturbo.
+    poll_every_seconds: int
+
+
+class StatoDellAccoppiamento(Permissivo):
+    """
+    Com'e' andata, chiesto dal programma con il suo biglietto.
+
+    **`status`**:
+      * `pending` — nessuno ha ancora confermato ne' rifiutato;
+      * `confirmed` — confermato: questa risposta, **e solo questa**, porta
+        il token;
+      * `collected` — il token era gia' stato ritirato. Se il programma vede
+        questo e non ha un token, la risposta con il token e' andata perduta:
+        non c'e' modo di riaverla, e si rifa' l'accoppiamento da capo (il
+        token rimasto senza padrone si spegne dal sito);
+      * `refused` — la persona ha detto no;
+      * `expired` — sono passati i cinque minuti.
+
+    **Prima della conferma `token` e `user` sono nulli**, e non per prudenza:
+    questa rotta risponde **senza autenticazione**, e tutto quello che
+    dicesse in piu' sarebbe un modo di sapere cose su un server altrui
+    presentando un biglietto inventato.
+    """
+    status: str
+    expires_at: Optional[str]
+    #: Il token, **una volta sola**, quando `status` e' `confirmed`.
+    token: Optional[str]
+    #: A nome di chi parlera' il programma: il nome utente di chi ha
+    #: confermato. Nullo prima della conferma.
+    user: Optional[str]
+
+
+class RichiestaDiAccoppiamentoInAttesa(Permissivo):
+    """
+    Una richiesta che aspetta, come la vede chi deve confermarla.
+
+    Porta il **codice** perche' e' con quello che si riconosce la propria: il
+    nome lo scrive il programma e si puo' scrivere qualunque cosa, l'indirizzo
+    dice solo da quale macchina arriva. Il codice invece e' sullo schermo di
+    chi sta aspettando, e due richieste insieme si distinguono solo cosi'.
+    """
+    id: int
+    code: str
+    #: Come il programma si e' presentato. **Testo di uno sconosciuto**: va
+    #: mostrato come testo e mai interpretato.
+    client_name: str
+    platform: Optional[str]
+    #: L'indirizzo da cui e' arrivata, come il server l'ha visto.
+    ip: Optional[str]
+    created_at: Optional[str]
+    expires_at: Optional[str]
+
+
+class RichiesteDiAccoppiamento(Permissivo):
+    """Le richieste vive: le scadute, le confermate e le rifiutate non ci sono."""
+    items: list[RichiestaDiAccoppiamentoInAttesa]
+
+
+class AccoppiamentoConfermato(Permissivo):
+    """
+    La conferma e' fatta: il token e' nato e lo ritirera' il programma.
+
+    **Il token non c'e' nemmeno qui.** Chi conferma dal sito non deve
+    copiarlo, trascriverlo o custodirlo: lo ritira il programma con il suo
+    biglietto, e questa risposta serve solo a dire quale token e' nato — per
+    poterlo spegnere.
+    """
+    status: str
+    #: L'id del token nato, lo stesso che si usa per revocarlo.
+    token_id: int
+    #: Il nome con cui comparira' nell'elenco dei token.
+    token_name: str

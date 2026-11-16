@@ -45,6 +45,61 @@ _OBSIDIAN_PLUGIN_SRC_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "obsidian", "kolibre-highlights")
 )
 
+# La radice del repo, da cui si prendono LICENSE e NOTICE.
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+
+
+# ── Quello che non entra in un archivio, e quello che ci deve entrare ────
+#
+# **La spazzatura.** Costruire l'archivio camminando sulla cartella vera del
+# sorgente vuol dire prendere anche quello che ci ha messo il sistema
+# operativo: su un Mac basta aprire la cartella nel Finder perche' nasca un
+# `.DS_Store`, e basta importare un modulo Python perche' nasca un
+# `__pycache__`. Gli zip di Calibre e Obsidian lo filtravano da sempre,
+# quello di KOReader no. Qui l'elenco e' uno solo per tutti e tre, cosi' la
+# differenza non puo' tornare: il guardiano e'
+# la prova `lo_zip_del_plugin_e_pulito`, che quella spazzatura la
+# crea apposta prima di scaricare — una prova che si limitasse a dire «non
+# c'e'» sarebbe verde anche senza filtro.
+#
+# `gconfig.lua` e' nell'elenco per una ragione piu' grave dell'ordine: nel
+# sorgente non esiste (lo sintetizza il download preconfigurato qui sotto) e
+# porta dentro il **token del dispositivo**. Se una copia ne restasse nella
+# cartella del sorgente, un download non configurato la servirebbe a
+# chiunque.
+_SPAZZATURA_FUORI_DALLO_ZIP = {".DS_Store", "data.json", "gconfig.lua"}
+
+
+def _da_non_impacchettare(fname: str) -> bool:
+    return fname in _SPAZZATURA_FUORI_DALLO_ZIP or fname.endswith(".pyc")
+
+
+# **La licenza viaggia con la copia, e vive solo nell'archivio.** Le
+# intestazioni dei tre plugin rimandano a LICENSE e NOTICE «nel repository»,
+# ma chi installa un plugin riceve lo zip, non il repository, e l'AGPL chiede
+# che l'avviso stia con la copia.
+#
+# Perche' nell'archivio e non nella cartella del sorgente (deciso da Paolo il
+# 16/11/2026): l'elenco dei file dell'autoaggiornamento si costruisce dalla
+# cartella vera (`_plugin_files`), quindi metterceli dentro vorrebbe dire far
+# scaricare a ogni dispositivo due file in piu' a ogni versione, per sempre,
+# per due testi che non cambiano mai. Stessa strada di `gconfig.lua`: un file
+# che esiste solo nello zip.
+_LICENZA = ("LICENSE", "NOTICE")
+
+
+def _aggiungi_la_licenza(z: zipfile.ZipFile, prefisso: str = "") -> None:
+    for nome in _LICENZA:
+        percorso = os.path.join(_REPO_ROOT, nome)
+        if os.path.exists(percorso):
+            z.write(percorso, prefisso + nome)
+        else:
+            # Non si fa fallire un download per questo — ma non si tace
+            # nemmeno: senza questi due file la copia e' distribuita male, e
+            # chi legge il registro deve poterlo sapere.
+            log_message("warning", "tools",
+                        f"Plugin zip built without {nome}: not found at the repository root")
+
 
 # ── La lingua di chi scarica ─────────────────────────────────────────────
 #
@@ -231,13 +286,26 @@ _FILE_NON_AGGIORNABILI = {
 
 
 def _plugin_files(src_dir: str) -> list:
-    """I file di un plugin che possono essere aggiornati, in ordine."""
-    esclusi = _FILE_NON_AGGIORNABILI.get(src_dir, {".DS_Store"})
+    """
+    I file di un plugin che possono essere aggiornati, in ordine.
+
+    Due filtri, e sono due cose diverse: `_FILE_NON_AGGIORNABILI` sono le
+    impostazioni dell'utente, che un aggiornamento non deve toccare;
+    `_da_non_impacchettare` e' la spazzatura del sistema operativo, che non
+    deve uscire di qui ne' dentro un archivio. Oggi i due elenchi si
+    sovrappongono quasi del tutto — ma restano scritti separati perche'
+    dicono due cose, e un domani una delle due potrebbe cambiare da sola.
+
+    Che questo elenco e lo zip coincidano non e' un dettaglio: il
+    dispositivo chiede qui l'elenco, poi i file uno per uno, e ne verifica
+    l'impronta. Due elenchi diversi sono un aggiornamento che non finisce.
+    """
+    esclusi = _FILE_NON_AGGIORNABILI.get(src_dir, set())
     files = []
     for root, dirs, filenames in os.walk(src_dir):
         dirs[:] = [d for d in dirs if d != "__pycache__"]
         for fname in filenames:
-            if fname in esclusi:
+            if fname in esclusi or _da_non_impacchettare(fname):
                 continue
             rel = os.path.relpath(os.path.join(root, fname), src_dir)
             files.append(rel.replace(os.sep, "/"))
@@ -349,11 +417,12 @@ def download_calibre_plugin(
         for root, dirs, files in os.walk(_CALIBRE_PLUGIN_SRC_DIR):
             dirs[:] = [d for d in dirs if d != "__pycache__"]
             for fname in files:
-                if fname == ".DS_Store" or fname.endswith(".pyc"):
+                if _da_non_impacchettare(fname):
                     continue
                 abs_path = os.path.join(root, fname)
                 arcname = os.path.relpath(abs_path, _CALIBRE_PLUGIN_SRC_DIR)
                 _scrivi_nello_zip(z, abs_path, arcname, lingua)
+        _aggiungi_la_licenza(z)
         if preconfig:
             z.writestr("kolibre_preconfig.json", json.dumps(preconfig))
     # This zip is regenerated fresh on every request from current source —
@@ -414,11 +483,12 @@ def download_obsidian_plugin(
         for root, dirs, files in os.walk(_OBSIDIAN_PLUGIN_SRC_DIR):
             dirs[:] = [d for d in dirs if d != "__pycache__"]
             for fname in files:
-                if fname == ".DS_Store" or fname == "data.json":
+                if _da_non_impacchettare(fname):
                     continue
                 abs_path = os.path.join(root, fname)
                 arcname = os.path.relpath(abs_path, _OBSIDIAN_PLUGIN_SRC_DIR)
                 _scrivi_nello_zip(z, abs_path, arcname, lingua)
+        _aggiungi_la_licenza(z)
         if data_json:
             z.writestr("data.json", json.dumps(data_json, indent=2))
 
@@ -483,11 +553,15 @@ def download_koreader_plugin(
 
     plugin_path = _temp_zip_path("kolibre.koplugin.")
     with zipfile.ZipFile(plugin_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, _dirs, files in os.walk(_KOREADER_PLUGIN_SRC_DIR):
+        for root, dirs, files in os.walk(_KOREADER_PLUGIN_SRC_DIR):
+            dirs[:] = [d for d in dirs if d != "__pycache__"]
             for fname in files:
+                if _da_non_impacchettare(fname):
+                    continue
                 abs_path = os.path.join(root, fname)
                 arcname = os.path.join("kolibre.koplugin", os.path.relpath(abs_path, _KOREADER_PLUGIN_SRC_DIR))
                 _scrivi_nello_zip(z, abs_path, arcname, lingua)
+        _aggiungi_la_licenza(z, "kolibre.koplugin/")
         if gconfig_lua:
             z.writestr("kolibre.koplugin/gconfig.lua", gconfig_lua)
     return FileResponse(

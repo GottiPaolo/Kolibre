@@ -255,7 +255,12 @@ def scrape_missing_authors(force: bool = False, db: Session = Depends(database.g
     ).count()
 
     if not names and not anagrafica_mancante:
-        return {"status": "nothing_to_do", "skipped": skipped, **author_scrape_job.status()}
+        # **Lo stato del giro PRIMA, le nostre due chiavi dopo.** In Python
+        # l'ultima chiave vince: con `**author_scrape_job.status()` in coda,
+        # lo `skipped` dell'ultimo giro fatto girare — zero, se non ne e'
+        # mai partito uno — schiacciava il conteggio appena fatto. Misurato
+        # su una biblioteca vera: 42 autori saltati, risposta `0`.
+        return {**author_scrape_job.status(), "status": "nothing_to_do", "skipped": skipped}
     if not author_scrape_job.start(names, skipped=skipped):
         raise HTTPException(status_code=409, detail="A fetch is already running")
     log_message(

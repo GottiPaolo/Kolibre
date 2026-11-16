@@ -33,9 +33,20 @@ def lookup_word(
     # lingue: vedi dictionary_service.lingue_preferite. Questo router e' gia'
     # autenticato (main.py lo include con `dependencies=_AUTH`), quindi
     # chiedere chi sta cercando non cambia chi puo' cercare.
-    result = dictionary_service.fetch_definition(
-        word, preferenze_utente.lingua_di(db, current_user.id)
-    )
+    # **Due esiti, due risposte.** Una parola che Wiktionary non documenta
+    # e' un 404 definitivo; Wikimedia che chiede di rallentare e' un 503 da
+    # rifare. Fino al 16/11/2026 erano la stessa risposta, e l'utente leggeva
+    # «nessuna definizione trovata» anche per una parola che c'era.
+    try:
+        result = dictionary_service.fetch_definition(
+            word, preferenze_utente.lingua_di(db, current_user.id)
+        )
+    except dictionary_service.RicercaDaRifare as e:
+        raise HTTPException(
+            status_code=503,
+            detail=f"The dictionary could not be reached, so we cannot tell whether "
+                   f"'{word}' has a definition: {e.motivo}. Try again in a few seconds.",
+        )
     if not result:
         raise HTTPException(status_code=404, detail=f"No definition found for '{word}'")
     return result

@@ -37,7 +37,8 @@ from ..schemas_risposte import (
     CapacitaDelServer, CatalogoSfogliato, DispositivoFratello, DispositivoInElenco,
     DizionariInCoda, Esito, FileDiBackup, FileIdentificato, FileNonIdentificato,
     Handshake, HandshakeLegacy, LibriDaScoprire, LibroConsegnato, LibroDaRivedere,
-    LibroSegnalato, LottoConfermato, ManifestDelDizionario, OrfaneMigrate,
+    LibroSegnalato, LibroToltoDalDispositivo, LottoConfermato,
+    ManifestDelDizionario, OrfaneMigrate,
     PagineRicevute, PosizionePerIlDispositivo, RichiestaDiRipristinoCreata,
     InventarioDelDispositivo, InventarioRicevuto,
     ScansioneDeiNonAccoppiati, SegnalazioneAccoppiataDaSola, SessioneChiusa,
@@ -2625,6 +2626,85 @@ def push_device_pages(
 
 
 @sync_router.post(
+    "/books/removed",
+    responses={200: {"model": LibroToltoDalDispositivo}},
+)
+def report_book_removed(
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    current_device: models.Device = Depends(auth.get_current_device),
+):
+    """
+    «Questo lettore non vuole piu' questo libro»: lo chiede il plugin, quando
+    si tiene premuto un libro nella vista Kolibre e si sceglie «elimina dal
+    dispositivo». Corpo: l'identita' del libro, come per `/progress`
+    ({hash} oppure {library, calibre_book_id}, piu' {format} facoltativo).
+
+    **Perche' il dispositivo deve passare da qui e non cancellare e basta**
+    (ed e' la ragione per cui questo endpoint esiste). Lo stato desiderato —
+    «quali libri stanno su questo lettore» — lo tiene il server: e' lui che
+    al prossimo handshake offre al dispositivo quello che gli manca. Un
+    plugin che cancellasse il file per conto suo si vedrebbe **riconsegnare
+    lo stesso libro** alla sincronizzazione dopo, e chi ha premuto «elimina»
+    non lo capirebbe mai. Quindi la cancellazione comincia qui, e il file
+    sparisce dopo.
+
+    **Il dispositivo poteva gia' AGGIUNGERE** da se' (`/books/delivered`, lo
+    sfoglia-catalogo sul lettore): questa e' l'operazione simmetrica, e la
+    riga che nasce la' con `requested_by = "device"` se ne va qui.
+
+    **Una riga mai consegnata non si segna, si butta.** Se il libro era in
+    coda di invio e non e' mai arrivato, «eliminarlo dal dispositivo» vuol
+    dire annullare l'invio: e' quello che fa anche il pulsante del sito
+    (`queue_device_book_action`, ramo `queued_delete`), e qui si fa lo
+    stesso perche' la domanda e' la stessa.
+
+    **La riga se ne va anche quando il libro era consegnato**, e non diventa
+    `pending_delete`: quello stato vuol dire «il server vuole che il
+    dispositivo lo cancelli, e aspetta conferma». Qui la conferma e' la
+    richiesta stessa — il dispositivo sta per cancellarlo, e lo sa lui. E'
+    la stessa scelta che `/sync/ack` fa quando il plugin dichiara
+    `result = deleted`: la riga se ne va e la storia ne conserva la traccia.
+    """
+    if not payload.get("hash") and payload.get("calibre_book_id") is None:
+        raise HTTPException(status_code=400,
+                            detail="the book's identity or its fingerprint is required")
+
+    matches = book_hash_service.resolve_identities_from_item(
+        db, payload, device_id=current_device.id)
+    if not matches:
+        raise HTTPException(status_code=404, detail="Book not recognised")
+
+    fmt = (payload.get("format") or "").upper() or None
+    quante = 0
+    for library, calibre_book_id in matches:
+        query = db.query(models.DeviceBook).filter(
+            models.DeviceBook.device_id == current_device.id,
+            models.DeviceBook.library == library,
+            models.DeviceBook.calibre_book_id == calibre_book_id,
+        )
+        # Il formato restringe se c'e'. Senza, se ne va il libro in tutti i
+        # formati che stanno su questo lettore: e' quello che vuol dire
+        # «togli questo libro», e un plugin che il formato non lo manda non
+        # deve lasciare meta' libro indietro.
+        if fmt:
+            query = query.filter(models.DeviceBook.format == fmt)
+        for row in query.all():
+            db.delete(row)
+            quante += 1
+    if quante == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="The book is not on this device: there is nothing to remove",
+        )
+    db.commit()
+    log_message("info", "devices",
+                f"Device '{current_device.name}' removed a book it no longer wants "
+                f"({quante} row(s) of desired state).")
+    return {"status": "ok", "removed": quante}
+
+
+@sync_router.post(
     "/books/delivered",
     responses={200: {"model": LibroConsegnato}},
 )
@@ -3341,7 +3421,14 @@ async def upload_diagnostic_log(
 
     cartella = _diagnostics_dir(current_device.id)
     os.makedirs(cartella, exist_ok=True)
-    nome = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%S") + ".log"
+    # **La «Z» nel nome non e' decorazione.** Questo non e' un istante
+    # serializzato, e' il nome di un file — ma e' un nome che si legge, che
+    # si serve a un client (`list_device_diagnostics`) e su cui si riordina
+    # la cartella, e senza fuso dichiarato dice un'ora che non e' quella del
+    # posto in cui la si legge. Un carattere, e il nome diventa vero.
+    # L'ordine alfabetico resta l'ordine cronologico, perche' la «Z» sta
+    # dopo i secondi; `_SAFE_BACKUP_FILENAME` la ammette.
+    nome = datetime.utcnow().strftime("%Y-%m-%d_%H-%M-%SZ") + ".log"
     with open(os.path.join(cartella, nome), "wb") as f:
         f.write(body)
 
@@ -3356,7 +3443,7 @@ async def upload_diagnostic_log(
             pass
 
     log_message("info", "diagnostica",
-                f"Registro di diagnostica '{nome}' ({len(body)} byte) ricevuto da '{current_device.name}'")
+                f"Diagnostic log '{nome}' ({len(body)} bytes) received from '{current_device.name}'")
     return {"filename": nome, "size": len(body)}
 
 

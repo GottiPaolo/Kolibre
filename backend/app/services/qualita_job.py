@@ -37,6 +37,7 @@ from datetime import datetime
 
 from .. import config, database, models
 from ..calibre.library import CalibreLibrary
+from ..istanti import quando
 from ..logging_utils import log_message
 from . import app_settings, qualita_epub
 
@@ -120,18 +121,18 @@ def analizza_file(percorso: str, limite: int = LIMITE_SECONDI) -> tuple:
                 # modo di fermare davvero un'analisi che non finisce.
                 for p in pool._processes.values():
                     p.kill()
-                return None, f"tempo scaduto ({limite}s)"
+                return None, f"timed out ({limite}s)"
     except concurrent.futures.process.BrokenProcessPool as e:
         _processo_rotto = True
         log_message("warning", "qualita",
-                    f"Processo separato non utilizzabile ({type(e).__name__}): "
-                    "da qui in avanti si misura nel processo del server, senza tempo massimo")
+                    f"The separate process is unusable ({type(e).__name__}): "
+                    "from here on measuring happens in the server process, with no time limit")
         return _misura_qui(percorso)
     except OSError as e:
         _processo_rotto = True
         log_message("warning", "qualita",
-                    f"Processo separato non creabile ({type(e).__name__}: {e}): "
-                    "da qui in avanti si misura nel processo del server, senza tempo massimo")
+                    f"The separate process could not be created ({type(e).__name__}: {e}): "
+                    "from here on measuring happens in the server process, with no time limit")
         return _misura_qui(percorso)
     except Exception as e:
         # Un'eccezione uscita DALLA MISURA: e' un giudizio sul file.
@@ -193,7 +194,7 @@ def _lavoro(db, library: str) -> list:
         lib = CalibreLibrary(config.library_path(library))
         libri = lib.list_books()
     except Exception as e:
-        log_message("error", "qualita", f"Biblioteca '{library}' non leggibile: {e}")
+        log_message("error", "qualita", f"Library '{library}' could not be read: {e}")
         return []
 
     righe = {r.calibre_book_id: r for r in db.query(models.QualitaLibro).filter(
@@ -229,7 +230,12 @@ def _giro() -> None:
         while True:
             with _lock:
                 if not _in_coda:
-                    _stato.update(in_corso=False, biblioteca=None, finito_il=datetime.utcnow().isoformat())
+                    # `quando()` e non `.isoformat()`: questi due istanti
+                    # escono verso un client (`api/qualita.py` li serve in
+                    # `/qualita/stato`), e una data senza fuso un client la
+                    # legge come ora locale — sbagliata di tutto l'offset.
+                    _stato.update(in_corso=False, biblioteca=None,
+                                  finito_il=quando(datetime.utcnow()))
                     return
                 library = _in_coda.popleft()
                 _stato.update(biblioteca=library, fatti=0, totale=0, errori=0)
@@ -238,7 +244,7 @@ def _giro() -> None:
             with _lock:
                 _stato["totale"] = len(lavoro)
             if lavoro:
-                log_message("info", "qualita", f"Qualita': {len(lavoro)} libri da misurare in '{library}'")
+                log_message("info", "qualita", f"Quality: {len(lavoro)} books to measure in '{library}'")
             for book_id, percorso in lavoro:
                 risultato, errore = analizza_file(percorso)
                 try:
@@ -246,7 +252,7 @@ def _giro() -> None:
                     db.commit()
                 except Exception as e:
                     db.rollback()
-                    log_message("error", "qualita", f"Qualita' non salvata per il libro {book_id}: {e}")
+                    log_message("error", "qualita", f"Quality not saved for book {book_id}: {e}")
                 with _lock:
                     _stato["fatti"] += 1
                     if errore:
@@ -281,7 +287,7 @@ def accoda(library: str, forza: bool = False) -> bool:
         _in_coda.append(library)
         if _stato["in_corso"]:
             return True
-        _stato.update(in_corso=True, avviato_il=datetime.utcnow().isoformat(), finito_il=None)
+        _stato.update(in_corso=True, avviato_il=quando(datetime.utcnow()), finito_il=None)
     threading.Thread(target=_giro, daemon=True, name="qualita").start()
     return True
 
@@ -314,7 +320,7 @@ def analizza_libro_async(library: str, book_id: int, percorso: str) -> None:
             db.commit()
         except Exception as e:
             db.rollback()
-            log_message("error", "qualita", f"Qualita' non misurata per il libro {book_id}: {e}")
+            log_message("error", "qualita", f"Quality not measured for book {book_id}: {e}")
         finally:
             db.close()
 
@@ -353,7 +359,7 @@ def _analizza_ingest(item_id: int) -> None:
         db.commit()
     except Exception as e:
         db.rollback()
-        log_message("error", "qualita", f"Qualita' in ingest non misurata ({item_id}): {e}")
+        log_message("error", "qualita", f"Quality not measured during ingest ({item_id}): {e}")
     finally:
         db.close()
 

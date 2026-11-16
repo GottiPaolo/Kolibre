@@ -9,7 +9,7 @@ dove si legge con un browser.
 
 **Perche' e' un modulo a parte, e puro.** Non tocca KOReader: prende una
 stringa e ne torna un'altra. Cosi' si prova senza avviare niente (vedi
-`plugins/koreader/prove/il_registro_si_ripulisce.lua`), ed e' la stessa
+la prova `il_registro_si_ripulisce`), ed e' la stessa
 strada di `kolibre_patch.lua` e `kolibre_rinvii.lua`.
 
 ────────────────────────────────────────────────────────────────────────

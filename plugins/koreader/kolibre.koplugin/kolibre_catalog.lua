@@ -19,6 +19,7 @@ plugin that touches the network from a loop: don't block the UI thread.
 
 local CenterContainer = require("ui/widget/container/centercontainer")
 local DataStorage = require("datastorage")
+local KolibreCopertine = require("kolibre_copertine")
 local Font = require("ui/font")
 local Geom = require("ui/geometry")
 local HorizontalGroup = require("ui/widget/horizontalgroup")
@@ -41,21 +42,25 @@ local Screen = require("device").screen
 local DEFAULT_GRID_COLUMNS = 3
 local DEFAULT_GRID_ROWS = 3
 local THUMBNAIL_BATCH_SIZE = 2
--- Sanity ceiling on a single thumbnail transfer, NOT the expected size (the
--- server-side resize in books.py caps actual covers at 400x600 JPEG, well
--- under this) — belt-and-braces so a misbehaving response can never balloon
--- into an unbounded decode on a memory-constrained device.
-local THUMBNAIL_MAX_BYTES = 3 * 1024 * 1024
--- Simple count cap on the on-device thumbnail cache — every book ever
--- browsed left a file here forever with no eviction at all. Deliberately a
--- plain one-shot oldest-first sweep (not BookOrbit's own time-budgeted
--- incremental heap eviction, bookorbit_catalog_thumbnails.lua) rather than
--- more machinery than this scale needs: thumbnails are now small (server-
--- resized, see THUMBNAIL_MAX_BYTES above), so even a few hundred of them
--- cost little to stat/sort, and this only ever runs once per catalog-screen
--- open, never per-frame.
-local MAX_CACHED_THUMBNAILS = 300
-local PRUNE_TARGET_THUMBNAILS = 200
+-- Il tetto ai byte di un trasferimento e quelli al numero di file in cache
+-- stanno in `kolibre_copertine.lua` e non piu' qui. I numeri sono piu' alti
+-- di prima (600/500 invece di 300/200). **Non e' generosita': e' un difetto
+-- chiuso.** Dal 15/11/2026 questa cache serve anche alla vista libreria,
+-- cioe' ai libri che stanno DAVVERO sul dispositivo. Con due potature
+-- indipendenti, una passeggiata nel catalogo di una biblioteca grossa
+-- avrebbe buttato via le copertine dei libri che Paolo ha in mano, e la
+-- vista libreria le avrebbe riscaricate alla sincronizzazione dopo —
+-- all'infinito, a giro di rete ogni volta.
+--
+-- Vale ancora la ragione per cui la potatura e' una passata sola dalla piu'
+-- vecchia, e non l'eviction incrementale di BookOrbit: le miniature le
+-- ridimensiona il server (400x600, vedi books.py), qualche centinaio di file
+-- costa poco da guardare e ordinare, e questo gira una volta per apertura
+-- del catalogo, non a ogni disegno.
+--
+-- La regola migliore sarebbe «non buttare mai la copertina di un libro che
+-- e' nel manifesto», ed e' in lista; alzare il tetto perche' ci stiano tutti
+-- e due i casi costa una riga, e intanto il giro infinito non c'e' piu'.
 
 local KolibreCatalog = Menu:extend{
     is_borderless = true,
@@ -96,7 +101,9 @@ function KolibreCatalog:init()
     -- old directory itself is simply abandoned (a few KB/book of dead
     -- weight, harmless, not worth the complexity of migrating or deleting
     -- it from here).
-    self.thumbnail_cache_dir = DataStorage:getDataDir() .. "/cache/kolibre_covers_v2"
+    -- La cartella la decide `kolibre_copertine.lua`, che e' lo stesso posto
+    -- da cui la chiede la vista libreria: due viste, una cache.
+    self.thumbnail_cache_dir = KolibreCopertine.cartella(DataStorage)
     self.thumbnail_generation = 0
     self.thumbnail_failures = {}
     -- Which grid PAGES have already had their thumbnails requested — see
@@ -148,12 +155,11 @@ end
 -- ── Thumbnails ──
 
 function KolibreCatalog:thumbnailPath(book)
-    if not book or not util.makePath(self.thumbnail_cache_dir) then return nil end
-    -- Namespaced by library: Calibre book ids restart at 1 in every library,
-    -- so without this two different libraries' book #5 would share (and
-    -- silently show each other's) cached cover file.
-    local library_key = tostring(self.library or ""):gsub("[^%w%-%._]", "_")
-    return self.thumbnail_cache_dir .. "/" .. library_key .. "_" .. tostring(book.id) .. ".jpg"
+    if not book then return nil end
+    -- La regola (biblioteca nel nome, niente formato, nome ripulito) sta in
+    -- `kolibre_copertine.lua`: era scritta qui, e averla in due posti era il
+    -- modo di farla divergere il giorno che uno dei due cambiava.
+    return KolibreCopertine.percorso(self.thumbnail_cache_dir, self.library, book.id)
 end
 
 function KolibreCatalog:cachedThumbnailPath(book)
@@ -171,27 +177,12 @@ function KolibreCatalog:thumbnailState(book)
     return "loading"
 end
 
--- One-shot oldest-first sweep — see MAX_CACHED_THUMBNAILS's own comment for
--- why this stays simple instead of porting BookOrbit's incremental scheduler.
+-- Una passata sola, dalla piu' vecchia: la regola e i tetti stanno in
+-- `kolibre_copertine.lua`, che e' la stessa potatura che usa la vista
+-- libreria. Vedi il commento ai tetti, in testa a questo file, per il
+-- perche' non e' l'eviction incrementale di BookOrbit.
 function KolibreCatalog:pruneThumbnailCache()
-    local ok, iter, dir_obj = pcall(lfs.dir, self.thumbnail_cache_dir)
-    if not ok or not iter then return end
-    local files = {}
-    for entry in iter, dir_obj do
-        if entry ~= "." and entry ~= ".." then
-            local full = self.thumbnail_cache_dir .. "/" .. entry
-            local mtime = lfs.attributes(full, "modification")
-            if mtime then
-                table.insert(files, { path = full, mtime = mtime })
-            end
-        end
-    end
-    if #files <= MAX_CACHED_THUMBNAILS then return end
-
-    table.sort(files, function(a, b) return a.mtime < b.mtime end)
-    for i = 1, (#files - PRUNE_TARGET_THUMBNAILS) do
-        os.remove(files[i].path)
-    end
+    return KolibreCopertine.pota(self.thumbnail_cache_dir)
 end
 
 function KolibreCatalog:scheduleThumbnailDownloads(items)
@@ -219,8 +210,8 @@ function KolibreCatalog:scheduleThumbnailDownloads(items)
                 -- is routinely 1000-2500px on the long edge, and decoding
                 -- several of those at once for this grid is what crashed a
                 -- real Kindle before this fix.
-                local url = string.format("/api/kolibre/books/%d/cover/thumbnail?library=%s", book.id, self.library or "")
-                local ok = self.api:downloadTo(url, path, THUMBNAIL_MAX_BYTES)
+                local url = KolibreCopertine.indirizzo(self.library, book.id)
+                local ok = self.api:downloadTo(url, path, KolibreCopertine.MAX_BYTE)
                 if ok then
                     self.thumbnail_failures[tostring(book.id)] = nil
                 else

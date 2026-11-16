@@ -86,7 +86,7 @@ def analizza(payload: dict = None, library: str = Depends(biblioteca_scrivibile)
     avviato = qualita_job.accoda(library, forza=forza)
     if not avviato:
         # Non e' un errore: o e' spenta, o e' gia' in coda. Lo stato lo dice.
-        return {"status": "ok", "messaggio": "gia' in coda o spenta"}
+        return {"status": "ok", "messaggio": "already queued, or switched off"}
     return {"status": "ok"}
 
 
@@ -104,7 +104,7 @@ def elenco(library: str = Depends(default_library_param), db: Session = Depends(
         lib = CalibreLibrary(config.library_path(library))
         libri = {b["id"]: b for b in lib.list_books()}
     except Exception as e:
-        raise HTTPException(status_code=404, detail=f"Biblioteca non leggibile: {e}")
+        raise HTTPException(status_code=404, detail=f"The library could not be read: {e}")
 
     fuori = []
     for r in righe:
@@ -154,10 +154,10 @@ def dettaglio(book_id: int, library: str = Depends(default_library_param),
         models.QualitaLibro.calibre_book_id == book_id,
     ).first()
     if not riga:
-        raise HTTPException(status_code=404, detail="Questo libro non e' ancora stato analizzato")
+        raise HTTPException(status_code=404, detail="This book has not been analysed yet")
     if riga.stato != "ok" or not riga.risultato:
         raise HTTPException(status_code=409, detail=riga.errore or "Analisi non riuscita")
     try:
         return json.loads(riga.risultato)
     except ValueError:
-        raise HTTPException(status_code=500, detail="Il risultato salvato non si legge")
+        raise HTTPException(status_code=500, detail="The stored result could not be read")

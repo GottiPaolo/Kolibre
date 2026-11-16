@@ -29,6 +29,7 @@ from typing import Optional
 
 from .toc_editor import _find_opf_path
 from ..calibre.connection import PAGE_COUNT_COLUMN_LABEL
+from ..logging_utils import log_message
 
 _STALE_META_RE_TEMPLATE = r'<meta\b[^>]*name=["\']{label}["\'][^>]*/?>(?:\s*</meta>)?'
 
@@ -108,7 +109,8 @@ def embed_custom_column(
         return False
 
 
-def embed_page_count(library_path: str, epub_path: str, fmt: str, pages: int) -> bool:
+def embed_page_count(library_path: str, epub_path: str, fmt: str, pages: int,
+                     *, book_id: Optional[int] = None) -> bool:
     """
     One-line wrapper for count_pages' two call sites (ingest.py, and
     libraries.py's recompute-pages maintenance loop): looks up the "pages"
@@ -117,12 +119,78 @@ def embed_page_count(library_path: str, epub_path: str, fmt: str, pages: int) ->
     it. Only EPUB has an OPF to embed into — pdf/mobi/azw3/txt are silently
     skipped here (not an error: count_pages' own database write already
     happened regardless, this is strictly additive).
+
+    **`book_id`: a che serve, e perche' sta qui dentro.** Incorporare il
+    conteggio ricostruisce lo zip e lo rimette al suo posto con
+    `os.replace`: il file sul disco diventa un altro file, con un'altra
+    lunghezza, mentre `data.uncompressed_size` nel database di Calibre ha
+    ancora quella di prima. Da quel momento il peso che Kolibre dichiara —
+    nell'elenco dei libri e nel totale di una biblioteca — e' quello di un
+    file che non esiste piu', e **non torna giusto da solo**. Dandoci il
+    `book_id` quella riga si ridichiara qui, nello stesso posto in cui il
+    file viene riscritto: e' la stessa ragione per cui l'impronta si calcola
+    dentro `chiudi_i_formati` e non nei chiamanti — una regola scritta in
+    tre posti prima o poi si perde in uno (vedi
+    `prove/impronta_dopo_la_scrittura.py`, che racconta la volta in cui e'
+    successo).
+
+    Senza `book_id` il peso non si aggiorna, e si dice nel registro: il
+    parametro e' facoltativo perche' un chiamante nuovo non deve rompersi,
+    non perche' sia opzionale nel senso di «indifferente».
+
+    **Una scrittura diretta, e perche' qui si puo'.** Tutte le altre
+    scritture su `metadata.db` passano dalla coda (`calibre/write_queue.py`),
+    che le serializza per non incontrare mai SQLITE_BUSY. Questa no, perche'
+    questa funzione e' sincrona e la coda e' asincrona, e farla passare da
+    la' vorrebbe dire spostare la regola nei chiamanti, cioe' il difetto che
+    sta chiudendo. L'eccezione e' contenuta: e' un UPDATE su una riga, subito
+    dopo una riscrittura di file che e' durata ordini di grandezza di piu', e
+    le connessioni di Calibre hanno `busy_timeout=30000` (connection.py),
+    quindi al massimo aspetta il suo turno invece di fallire.
     """
     if (fmt or "").upper() != "EPUB":
         return False
     from ..calibre.library import CalibreLibrary  # local import: avoids a hard dependency cycle at module load time
-    cols = CalibreLibrary(library_path).list_custom_columns()
+    lib = CalibreLibrary(library_path)
+    cols = lib.list_custom_columns()
     col = next((c for c in cols if c["label"] == PAGE_COUNT_COLUMN_LABEL), None)
     if not col:
         return False
-    return embed_custom_column(epub_path, col["id"], col["label"], col["name"], col["datatype"], col["display"], pages)
+    scritto = embed_custom_column(
+        epub_path, col["id"], col["label"], col["name"], col["datatype"], col["display"], pages)
+    if scritto:
+        _ridichiara_il_peso(lib, library_path, epub_path, fmt, book_id)
+    return scritto
+
+
+def _ridichiara_il_peso(lib, library_path: str, epub_path: str, fmt: str,
+                        book_id: Optional[int]) -> None:
+    """
+    Il peso del file appena riscritto, nel database di Calibre.
+
+    Best-effort per scelta: il conteggio pagine **e' stato incorporato**, e
+    un numero di byte che non si riesce a scrivere non deve annullare quel
+    risultato ne' fermare l'ingresso di un libro. Ma non in silenzio — un
+    peso sbagliato che nessuno segnala e' il difetto da cui nasce questa
+    funzione.
+    """
+    if book_id is None:
+        log_message("warning", "metadata",
+                    f"Page count embedded in '{epub_path}' but the declared file size was not "
+                    "refreshed: the caller passed no book_id")
+        return
+    try:
+        peso = os.path.getsize(epub_path)
+    except OSError as e:
+        log_message("warning", "metadata",
+                    f"Page count embedded in '{epub_path}' but its size could not be read: {e}")
+        return
+    try:
+        if not lib.update_format_size(book_id, fmt, peso):
+            log_message("warning", "metadata",
+                        f"Page count embedded in '{epub_path}' but book {book_id} has no "
+                        f"{fmt.upper()} row in the library's data table, so no size was refreshed")
+    except Exception as e:
+        log_message("warning", "metadata",
+                    f"Page count embedded in '{epub_path}' but refreshing the declared file "
+                    f"size failed: {e}")

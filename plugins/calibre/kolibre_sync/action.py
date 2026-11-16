@@ -161,7 +161,7 @@ class KolibreSyncAction(InterfaceAction):
             return
         menu.addSeparator()
         # Every other entry in this menu — Calibre's own built-ins and every
-        # other installed plugin's (EpubMerge, KoServer Delivery, ...) —
+        # other installed plugin's (EpubMerge and the rest) —
         # carries an icon; this one didn't (reported directly, with a
         # screenshot showing it as the one plain-text row in an otherwise
         # all-iconed menu). Same icon as the toolbar button, not a second

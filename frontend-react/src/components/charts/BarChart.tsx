@@ -70,7 +70,8 @@ interface BarChartProps {
 }
 
 // Istogramma multi-serie (impilato o affiancato), ispirato alla vista
-// statistiche di KoServer — stesso ruolo di ChartWidget.vue in modalità
+// statistiche di un mio progetto precedente — stesso ruolo del suo
+// componente grafico in modalità
 // type="bar" quando questa pagina lo usa per gli andamenti settimanale/
 // mensile di lettura, colorati per libro.
 export function BarChart({ labels, datasets, stacked = false, yUnit = '', height = 220, showLegend = true }: BarChartProps) {

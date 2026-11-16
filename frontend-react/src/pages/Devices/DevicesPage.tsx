@@ -1,16 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, BookOpen, Plus, RefreshCw, Save, Smartphone } from 'lucide-react'
+import { AlertTriangle, BookOpen, Link2, Plus, RefreshCw, Save, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { useDevices } from '@/lib/deviceQueries'
+import { eIndietro } from '@/lib/versioni'
 import { api } from '@/lib/api'
 import { relativeTimeFrom } from '@/lib/deviceFormat'
 import { useSetPageHeader } from '@/lib/pageHeaderContext'
 import { cn } from '@/lib/utils'
 import { useLingua } from '@/lib/i18n'
 import { AddDeviceDialog } from './AddDeviceDialog'
+import { CollegaUnClientDialog, RichiesteInAttesa } from './CollegaUnClient'
 import { PatchRiepilogo } from './PatchInfo'
 import { ListError } from '@/components/ListError'
 
@@ -23,6 +25,7 @@ export function DevicesPage() {
   const navigate = useNavigate()
   const { data: devices = [], isLoading, isError, refetch } = useDevices()
   const [showAdd, setShowAdd] = useState(false)
+  const [showCollega, setShowCollega] = useState(false)
 
   // Conteggio "da rivedere" per ogni card. Nessun endpoint di lista lo
   // restituisce insieme ai dispositivi (list_devices non lo calcola) — a
@@ -45,8 +48,15 @@ export function DevicesPage() {
       return data.version ?? null
     },
   })
+  // **«Più vecchio», non «diverso».** Qui c'era `d.plugin_version !==
+  // ultimaVersione`: un dispositivo con una versione più NUOVA del server —
+  // cioè Paolo mentre prova la prossima — veniva annunciato come indietro,
+  // con l'invito ad aggiornarsi a una versione precedente. E il confronto
+  // come testo sbaglia da solo appena un plugin passa la nona versione
+  // minore («0.9.0» viene dopo «0.10.0» per le stringhe). Vedi `lib/versioni`
+  // e la prova `versioni_dei_plugin`.
   const indietro = ultimaVersione
-    ? devices.filter((d) => d.plugin_version && d.plugin_version !== ultimaVersione)
+    ? devices.filter((d) => eIndietro(d.plugin_version, ultimaVersione))
     : []
   const senzaVersione = devices.filter((d) => !d.plugin_version)
 
@@ -65,11 +75,24 @@ export function DevicesPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        {/* Un programma non e' un lettore: non si «registra» con un modello e
+            un nome, si fa entrare confermando il codice che mostra. Il
+            pulsante c'e' anche quando nessuno sta chiedendo, perche' e' la
+            risposta alla domanda «e il client come lo collego?» — la
+            richiesta vera compare da se' qui sotto. */}
+        <Button variant="outline" onClick={() => setShowCollega(true)}>
+          <Link2 className="size-3.5" /> {t('devices.pairing.button')}
+        </Button>
         <Button onClick={() => setShowAdd(true)}>
           <Plus className="size-3.5" /> {t('devices.list.addButton')}
         </Button>
       </div>
+
+      {/* In cima, e con il colore dell'avviso: un programma che chiede di
+          entrare e' la cosa piu' urgente che questa pagina possa avere da
+          dire. Non c'e' quando non c'e' niente. */}
+      <RichiesteInAttesa />
 
       {/* Compare SOLO quando c'è qualcosa da dire: un dispositivo indietro, o
           uno di cui non si conosce la versione. Prima c'era anche quando andava
@@ -171,6 +194,7 @@ export function DevicesPage() {
       )}
 
       {showAdd && <AddDeviceDialog onClose={() => setShowAdd(false)} />}
+      {showCollega && <CollegaUnClientDialog onClose={() => setShowCollega(false)} />}
     </div>
   )
 }

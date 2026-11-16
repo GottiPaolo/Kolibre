@@ -50,8 +50,42 @@ WIKTIONARY_DEFINITION_URL = "https://en.wiktionary.org/api/rest_v1/page/definiti
 # rate limiting on a handful of requests without the underlying word being
 # genuinely missing.
 _RETRYABLE_STATUSES = {429, 502, 503, 504}
-_MAX_ATTEMPTS = 3
+
+# **Quattro tentativi, non tre, e perche' questo numero.** Misurato il
+# 05/11/2026 su 34 ricerche vere: a 0,6 s di distanza l'una dall'altra
+# **11 sono tornate vuote per 429 Too Many Requests** — `miasma`, `probity`,
+# `egregious`, `winnow`, `chicanery`… tutte parole che Wiktionary ha. A 6 s
+# di distanza sono passate tutte tranne una. Con tre tentativi e attese di
+# 1 s e 2 s il budget era di **tre secondi in tutto**, cioe' meta' di quello
+# che serve al limitatore di Wikimedia. Quattro tentativi con attese di
+# 1, 2 e 3 secondi fanno sei secondi, che e' la misura che ha funzionato.
+#
+# Sei secondi su una richiesta sono tanti, e si pagano **solo** quando
+# Wikimedia sta rifiutando: nel caso normale la prima risposta arriva e non
+# si aspetta niente.
+_MAX_ATTEMPTS = 4
 _RETRY_DELAY_SECONDS = 1.0
+
+
+class RicercaDaRifare(Exception):
+    """
+    Wiktionary non ha risposto: la ricerca si puo' rifare, la parola non e'
+    detto che manchi.
+
+    **Perche' un'eccezione e non un `None`.** Le due cose che possono
+    andare storte — «questa parola non esiste» e «Wikimedia mi ha chiesto di
+    rallentare» — tornavano entrambe come `None`, e chi chiamava diceva
+    all'utente «nessuna definizione trovata» in tutti e due i casi. Una
+    ricerca andata male si rifa'; una bugia no. Con un'eccezione, un
+    chiamante nuovo che non la conosce fallisce in modo **visibile** invece
+    di tornare a dire la cosa falsa in silenzio — che e' il modo in cui
+    questo difetto e' vissuto per mesi.
+    """
+
+    def __init__(self, parola: str, motivo: str):
+        self.parola = parola
+        self.motivo = motivo
+        super().__init__(f"Lookup of {parola!r} could not be completed: {motivo}")
 
 # The tail of the preference order, after the account's own language:
 # English as the universal fallback, then Italian (most of the libraries this
@@ -119,36 +153,54 @@ def _strip_html(html: str) -> str:
 
 
 def _fetch(word: str) -> Optional[dict]:
+    """
+    La risposta di Wiktionary, o `None` se quella parola non c'e'.
+
+    **Alza `RicercaDaRifare`** quando non si e' arrivati a una risposta:
+    tentativi finiti su un 429 (o 502/503/504), o la rete caduta. Non e' la
+    stessa cosa di `None`, e tenerle distinte e' tutto il punto di questa
+    funzione — vedi `RicercaDaRifare`.
+    """
     url = WIKTIONARY_DEFINITION_URL.format(word=word)
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
             resp = httpx.get(url, timeout=8, headers={"User-Agent": "Kolibre/1.0"}, follow_redirects=True)
-        except httpx.HTTPError:
+        except httpx.HTTPError as e:
             if attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_SECONDS * attempt)
                 continue
-            return None
+            raise RicercaDaRifare(word, f"the network call failed ({type(e).__name__})")
         if resp.status_code == 404:
             return None  # no such page, not worth retrying
         if resp.status_code != 200:
             if resp.status_code in _RETRYABLE_STATUSES and attempt < _MAX_ATTEMPTS:
                 time.sleep(_RETRY_DELAY_SECONDS * attempt)
                 continue
-            return None
+            # Un 429 arrivato fino all'ultimo tentativo e un 500 sono due
+            # cose diverse solo nel motivo: in entrambi i casi non si sa se
+            # la parola ci sia, e in entrambi i casi la risposta giusta e'
+            # «rifai», non «non esiste».
+            raise RicercaDaRifare(word, f"Wiktionary answered HTTP {resp.status_code}")
         break
     try:
         data = resp.json()
-        return data if isinstance(data, dict) else None
-    except (httpx.HTTPError, ValueError):
-        return None
+    except (httpx.HTTPError, ValueError) as e:
+        raise RicercaDaRifare(word, f"the answer could not be read ({type(e).__name__})")
+    return data if isinstance(data, dict) else None
 
 
 def fetch_definition(word: str, lingua: Optional[str] = None) -> Optional[dict]:
     """
-    Best-effort single-word lookup. Returns None if nothing was found at all
-    anywhere (not in the local dictionary, not on Wiktionary, or a network/
-    transient failure that exhausted retries) — callers must treat None as
-    "try again later or give up", not as a permanent "no definition exists".
+    Best-effort single-word lookup. Returns None when the word was genuinely
+    not found anywhere: not in the local dictionary, and not documented by
+    Wiktionary.
+
+    **Alza `RicercaDaRifare`** quando non si e' potuto sapere: Wikimedia che
+    chiede di rallentare (429), un errore suo, la rete caduta. Prima questo
+    caso tornava `None` come l'altro, e chi chiamava diceva «nessuna
+    definizione trovata» anche quando la parola c'era — misurato: 11 ricerche
+    su 34. Un chiamante deve rispondere «rifai» (503), non «non esiste»
+    (404).
 
     `lingua` is the account's interface language, and only sets the ORDER in
     which languages are tried (see lingue_preferite): nothing here detects

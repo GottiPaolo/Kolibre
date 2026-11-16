@@ -800,7 +800,10 @@ async def recompute_page_counts(
         # books (this endpoint's whole reason to exist) get the embedded
         # value retroactively, not just newly-ingested ones.
         try:
-            await run_in_threadpool(opf_metadata.embed_page_count, library_path, file_path, fmt, pages)
+            await run_in_threadpool(
+                opf_metadata.embed_page_count, library_path, file_path, fmt, pages,
+                book_id=book["id"],
+            )
         except Exception as e:
             log_message("warning", "libraries", f"Embedding the page count in the OPF failed for '{file_path}': {e}")
         updated += 1

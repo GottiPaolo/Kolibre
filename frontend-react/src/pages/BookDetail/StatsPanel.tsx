@@ -21,7 +21,8 @@ export function StatsPanel({ stats }: { stats: BookStats }) {
   const { t } = useLingua()
   // Tempo di lettura cumulativo giorno per giorno — non il tempo letto
   // quel giorno isolato, ma il totale progressivo, come nella vista
-  // statistiche di KoServer: una linea che sale, mai che scende.
+  // statistiche di un mio progetto precedente: una linea che sale, mai che
+  // scende.
   const cumulative = useMemo(() => {
     let running = 0
     return stats.daily_sessions.map((d) => {

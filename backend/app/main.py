@@ -39,6 +39,7 @@ from .api import stats as stats_router
 from .api import opds as opds_router
 from .api import dictionaries as dictionaries_router
 from .api import vocabulary as vocabulary_router
+from .api import accoppiamento as accoppiamento_router
 
 # pypdf logga un avviso per OGNI font CFF Type1 che incontra senza fontTools
 # installato ("fontTools is required to fully parse the encoding…"). È
@@ -909,9 +910,9 @@ async def lifespan(app: FastAPI):
     try:
         quante = qualita_job.accoda_tutte()
         if quante:
-            log_message("info", "qualita", f"Qualita' degli EPUB: {quante} biblioteche in coda.")
+            log_message("info", "qualita", f"EPUB quality: {quante} libraries queued.")
     except Exception as exc:
-        log_message("error", "qualita", f"Coda della qualita' non avviata (il server parte lo stesso): {exc}")
+        log_message("error", "qualita", f"The quality queue did not start (the server starts anyway): {exc}")
 
     yield
 
@@ -959,20 +960,95 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Che cosa sei, e con chi puoi parlare ──
+#
+# **Il numero di versione dell'API, e perche' non e' la versione del
+# server.** Sono due cose diverse e vanno tenute separate: `version` dice
+# QUALE DEPLOY sta girando (cambia a ogni rilascio, anche per una correzione
+# che non tocca nessuna rotta), `api` dice QUALE CONTRATTO parla — cambia
+# solo quando una rotta cambia in modo che un client scritto prima non
+# funzioni piu'. Un client deve guardare `api`: legarsi a `version` vorrebbe
+# dire rifiutare un server perfettamente compatibile perche' ha un numero
+# diverso.
+#
+# **Si alza quando si rompe qualcosa, non quando si aggiunge.** Aggiungere
+# una rotta o un campo non rompe nessuno: un client che non lo conosce lo
+# ignora. Togliere un campo, rinominarlo, cambiarne il tipo o il significato
+# invece si': quello e' il momento di alzare questo numero, e di alzare anche
+# CLIENT_MINIMO.
+API = 1
+
+# **La versione minima di client che questo server accetta di servire.** Non
+# e' un controllo che il server fa — e' un'informazione che da', e che il
+# client usa per dire a chi lo usa «il tuo server e' troppo vecchio per
+# questa versione, aggiornalo» invece di rompersi in un modo che nessuno sa
+# spiegare. Resta a 0.0.0 finche' un client esiste: un numero piu' alto
+# oggi rifiuterebbe un client che non c'e'.
+CLIENT_MINIMO = "0.0.0"
+
+
+def _commit_in_esecuzione():
+    """Il commit da cui gira questo server, o `None` se non si sa.
+
+    **Tre strade, in ordine, e `None` come ultima risposta.** Prima
+    KOLIBRE_COMMIT dall'ambiente, che e' come lo scrive il build. Poi, se
+    c'e' un `.git` accanto al codice (cioe' in sviluppo), si legge il
+    riferimento a mano — **senza chiamare `git`**, che in un container non
+    c'e' e lanciare un processo per quattro byte e' lavoro sproporzionato.
+
+    **`None` e non `"unknown"`.** Una stringa scritta a mano un client non
+    la puo' distinguere da un commit vero: proverebbe a confrontarla, a
+    mostrarla, a mandarla in un rapporto. `None` e' l'unica risposta che
+    dice «non lo so» in un modo che non si confonde con un dato.
+    """
+    dall_ambiente = (os.environ.get("KOLIBRE_COMMIT") or "").strip()
+    if dall_ambiente:
+        return dall_ambiente
+    try:
+        radice = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        testa = os.path.join(radice, ".git", "HEAD")
+        with open(testa, "r", encoding="utf-8") as f:
+            contenuto = f.read().strip()
+        if contenuto.startswith("ref: "):
+            riferimento = contenuto[5:].strip()
+            with open(os.path.join(radice, ".git", riferimento), "r", encoding="utf-8") as f:
+                contenuto = f.read().strip()
+        return contenuto[:40] or None
+    except OSError:
+        return None
+
+
 @app.get(
     "/api/kolibre/version",
     responses={200: {"model": schemas_risposte.VersioneDelServer}},
 )
 def get_version():
     """
-    Versione in esecuzione — nessuna autenticazione richiesta apposta, cosi'
-    si puo' controllare con un semplice curl/browser senza login, per capire
-    a colpo d'occhio se il server e' allineato all'ultimo tag pushato. Il
-    valore arriva da KOLIBRE_VERSION, che si scrive in .env prima del build
-    (la propria automazione di deploy lo ricava da `git describe`); se non
-    c'e', risponde "dev".
+    Chi sei, che contratto parli, e da quale commit giri.
+
+    **Nessuna autenticazione, apposta** — e dal 16/11/2026 e' una ragione in
+    piu' che prima: oltre a poter controllare con un curl se il server e'
+    allineato all'ultimo tag, questa e' la prima domanda che fa un client che
+    NON HA ANCORA un account. Dietro l'autenticazione sarebbe inutile
+    proprio nel momento in cui serve.
+
+    **Perche' non e' una rotta nuova chiamata `/api/version`.** Perche'
+    questa c'era gia', ed e' quella che il frontend web interroga
+    (`components/ConnectionStatus.tsx`). Due indirizzi che rispondono «chi
+    sei» sono il modo di farli divergere: uno viene aggiornato e l'altro no,
+    e chi legge quello sbagliato crede a una versione che non gira.
+
+    `version` arriva da KOLIBRE_VERSION, che si scrive in .env prima del
+    build (la propria automazione di deploy lo ricava da `git describe`); se
+    non c'e', risponde "dev". Vedi `API` e `CLIENT_MINIMO` per la differenza
+    fra la versione del deploy e quella del contratto.
     """
-    return {"version": os.environ.get("KOLIBRE_VERSION", "dev")}
+    return {
+        "version": os.environ.get("KOLIBRE_VERSION", "dev"),
+        "commit": _commit_in_esecuzione(),
+        "api": API,
+        "client_minimo": CLIENT_MINIMO,
+    }
 
 
 @app.exception_handler(LibraryDeletedError)
@@ -1038,6 +1114,7 @@ app.include_router(stats_router.router, dependencies=_AUTH)
 app.include_router(interventions_router.router, dependencies=_AUTH)
 app.include_router(dictionaries_router.router, dependencies=_AUTH)
 app.include_router(vocabulary_router.router, dependencies=_AUTH)
+app.include_router(accoppiamento_router.router, dependencies=_AUTH)  # il pannello di chi conferma
 
 # OPDS ha gia' la sua autenticazione, HTTP Basic (require_opds_auth): i
 # lettori esterni che consumano il feed non sanno nulla del JWT di Kolibre.
@@ -1045,11 +1122,17 @@ app.include_router(opds_router.router)
 
 # Endpoint che il browser o il plugin caricano senza poter allegare un
 # header: copertine e foto in <img src>, font in @font-face, self-update
-# del plugin KOReader. Tutti in sola lettura — vedi il commento accanto a
-# ciascun public_router nel rispettivo modulo.
+# del plugin KOReader. In sola lettura tutti tranne l'accoppiamento qui
+# sotto, che e' la sola parte SENZA autenticazione che scriva nel database
+# (anche il suo GET scrive: segna il token come ritirato) —
+# vedi il commento accanto a ciascun public_router nel rispettivo modulo.
 app.include_router(users_router.public_router)
 app.include_router(ingest_router.public_router)
 app.include_router(books_router.device_or_user_router)                    # persona O dispositivo
 app.include_router(books_router.public_router)
 app.include_router(authors_router.public_router)
 app.include_router(tools_router.public_router)
+# Senza autenticazione per forza: un programma che chiede di accoppiarsi non
+# ha ancora nessuna credenziale. I limiti che tengono stretta questa
+# superficie stanno in testa a `api/accoppiamento.py`.
+app.include_router(accoppiamento_router.public_router)

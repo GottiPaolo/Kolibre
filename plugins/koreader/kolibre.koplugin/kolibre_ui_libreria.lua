@@ -7,7 +7,9 @@ mostra cartelle e file come un gestore di file qualunque — si apre questa:
 le cartelle degli autori con la loro foto e quanti libri hanno dentro, poi i
 libri, ognuno con una copertina, il titolo, una riga di stato a parole e una
 barra lunga in proporzione alle pagine e riempita in proporzione a quanto
-hai letto. Sopra, cinque tasti; sotto, la navigazione di KOReader.
+hai letto. Sopra, cinque tasti e la riga che dice dove sei; sotto, la
+navigazione di KOReader, con dentro «indietro» a sinistra e la carica della
+batteria a destra.
 
 **Come si aggancia, e perche' cosi'.** E' una sottoclasse di `FileChooser`,
 il file browser di KOReader. Non una patch, non un plugin che si prende il
@@ -44,19 +46,17 @@ mostra l'ultimo stato conosciuto, scritto dall'ultima sincronizzazione.
 local BookList = require("ui/widget/booklist")
 local FileChooser = require("ui/widget/filechooser")
 local FileManager = require("apps/filemanager/filemanager")
-local Geom = require("ui/geometry")
 local InfoMessage = require("ui/widget/infomessage")
 local ReaderUI = require("apps/reader/readerui")
 local Screen = require("device").screen
 local UIManager = require("ui/uimanager")
-local VerticalSpan = require("ui/widget/verticalspan")
-local CenterContainer = require("ui/widget/container/centercontainer")
-local TextBoxWidget = require("ui/widget/textboxwidget")
-local Font = require("ui/font")
-local Size = require("ui/size")
 local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local Pezzi = require("kolibre_ui_pezzi")
+local Comune = require("kolibre_ui_comune")
+local DataStorage = require("datastorage")
+local KolibreCopertine = require("kolibre_copertine")
+local Azioni = require("kolibre_ui_azioni")
 local t = require("kolibre_lingua").t
 
 -- `Menu` e non `FileChooser`: si prende il modulo di KOReader cosi' com'e',
@@ -77,13 +77,13 @@ local Menu = require("ui/widget/menu")
 -- KOReader del Mac e ha dichiarato buona. C'e': la barra coi cinque tasti,
 -- l'elenco a sei righe con la foto dell'autore o il riquadro col titolo, lo
 -- stato di lettura a parole, la barra delle pagine lunga quanto la stima del
--- server e riempita quanto hai letto, la striscia «← Back» in fondo, e il
--- ritorno alla vista quando chiudi un libro.
+-- server e riempita quanto hai letto, il tasto «indietro», e il ritorno alla
+-- vista quando chiudi un libro.
 --
 -- **Resta spenta per difetto**: finche' non si accende l'impostazione,
 -- KOReader e' quello di sempre. Il Kindle non la vede e non la vedra'
 -- finche' Paolo non lo decide.
-local UI_VERSION = "0.0.1"
+local UI_VERSION = "0.6.0"
 
 --- Il «gestore di file» che `FileChooser` si aspetta di avere sopra di se'.
 --
@@ -139,12 +139,49 @@ end
 -- aprirne una seconda sopra una gia' aperta. Sta qui dentro, e non in
 -- `main.lua`, perche' chi sa se una vista e' viva e' la vista stessa: la
 -- azzera da se' quando si chiude, comunque venga chiusa.
+--- Quante righe per schermata, come le ha chieste Paolo.
+--
+-- **Perche' si limita invece di fidarsi.** Il valore sta in
+-- `G_reader_settings`, cioe' in un file di testo che si puo' modificare a
+-- mano, e arriva anche da un ripristino di backup fatto su un dispositivo
+-- diverso. Un 40 li' dentro vorrebbe dire righe di trenta pixel: non un
+-- elenco fitto, uno schermo di righe nere. Un 1 vorrebbe dire una riga per
+-- schermata. Fuori da 4-8 si riporta dentro, invece di rifiutare: una
+-- schermata che funziona vale piu' di un messaggio d'errore.
+--
+-- La chiave si chiama `kolibre_ui_righe` e non `..._righe_per_schermata`
+-- per la stessa ragione per cui `kolibre_libreria_allavvio` non e' stata
+-- rinominata quando l'opzione ha cambiato nome: una chiave rinominata e'
+-- un'impostazione che si perde in silenzio al primo aggiornamento.
+local function righeScelte()
+    local scelta = tonumber(G_reader_settings:readSetting("kolibre_ui_righe"))
+    if not scelta then return Pezzi.RIGHE_PER_DIFETTO end
+    scelta = math.floor(scelta)
+    if scelta < Pezzi.RIGHE_MINIME then return Pezzi.RIGHE_MINIME end
+    if scelta > Pezzi.RIGHE_MASSIME then return Pezzi.RIGHE_MASSIME end
+    return scelta
+end
+
+-- **L'ordinamento per data non c'e' piu', e la data non e' andata persa.**
+--
+-- Il 16/11/2026 ne ho fatto un ordinamento da scegliere in un menu. Paolo
+-- l'ha corretto: «non volevo un ordinamento dei libri per data, ma un vero e
+-- proprio pannello con gli ultimi invii dal server». Ha ragione, e la
+-- differenza non e' di gusto. Un ordinamento ti fa **perdere** l'elenco che
+-- avevi: per vedere cos'e' arrivato ieri dovevi scompaginare la libreria, e
+-- poi rimetterla a posto. Un pannello e' una finestra che si apre, si
+-- guarda e si chiude — e la libreria resta dov'era.
+--
+-- Gli invii stanno quindi in `kolibre_ui_consegne.lua`, e si aprono tenendo
+-- premuto il tasto della casa. Qui l'ordine e' uno solo, per nome, e non
+-- c'e' niente da scegliere: una preferenza in meno da ricordarsi.
+
 local _aperta = nil
 
 local KolibreUI = FileChooser:extend{
     manifest = nil,          -- KolibreManifest, gia' caricato
     kolibre = nil,           -- il plugin, per le impostazioni e l'aggancio
-    righe_per_schermata = 6, -- configurabile piu' avanti (richiesta dell'11/11)
+    righe_per_schermata = nil, -- la scelta di Paolo: vedi KolibreUI.righe()
     agganciato = false,
     cartella_logo = nil,
     show_path = false,
@@ -166,6 +203,10 @@ local KolibreUI = FileChooser:extend{
 -- costare una scansione: con trecento libri sarebbero trecento scansioni a
 -- ogni cambio di pagina.
 function KolibreUI:_indicizzaManifesto()
+    -- La cartella delle copertine, una volta sola: `KolibreCopertine.percorso`
+    -- crea la cartella se manca, e chiamarlo per ogni riga vorrebbe dire
+    -- chiederlo al disco trecento volte a ogni cambio di pagina.
+    self.cartella_copertine = KolibreCopertine.cartella(DataStorage)
     self.gestiti = {}           -- percorso -> voce del manifesto
     self.cartelle = {}          -- cartella -> quanti libri di Kolibre dentro
     local n = 0
@@ -226,30 +267,38 @@ end
 function KolibreUI:genItemTable(dirs, files, path)
     local voci = FileChooser.genItemTable(self, dirs, files, path)
     local tenute = {}
+    -- Azzerato PRIMA del giro: se la voce «vai su» non c'e' affatto — alla
+    -- radice del disco KOReader non la mette — quello che resta qui dentro
+    -- sarebbe il percorso della cartella di prima, cioe' un tasto
+    -- «indietro» acceso che porta altrove.
+    self.sopra = nil
     for _i, voce in ipairs(voci) do
         if voce.is_go_up then
-            -- «Indietro» esce dall'elenco e diventa una striscia sua, in
-            -- fondo (vedi updateItems). Fuori dall'elenco per due ragioni,
-            -- e la seconda e' quella vera: perche' non spenda una riga su
-            -- sei, e perche' dentro l'elenco sparirebbe appena si gira
-            -- pagina — un comando che c'e' a pagina uno e non a pagina due
-            -- e' peggio che non averlo.
+            -- **«Indietro» non e' una voce dell'elenco.** Dentro l'elenco
+            -- spariva appena si girava pagina — un comando che c'e' a pagina
+            -- uno e non a pagina due e' peggio che non averlo — e una
+            -- striscia sua sopra la barra costava spazio alle righe. Adesso
+            -- e' la freccia in fondo a sinistra, che c'e' sempre e sta
+            -- ferma: vedi `Comune.tastoIndietro` e `KolibreUI:onReturn`.
             --
-            -- Alla radice non c'e' proprio: sopra la libreria di Kolibre non
-            -- c'e' un'altra cartella di Kolibre, c'e' il disco.
-            if path ~= self.radice then
-                voce.titolo = t("koreader.ui.cartella_sopra")
-                voce.solo_titolo = true
-                self.voce_indietro = voce
-            else
-                self.voce_indietro = nil
-            end
+            -- Qui si tiene solo il percorso da cui KOReader lo ricava, che
+            -- e' `<cartella>/..`, e si butta la voce.
+            self.sopra = (path ~= self.radice) and voce.path or nil
         elseif voce.is_file then
             local m = self.gestiti[voce.path] or {}
             voce.titolo = m.title or voce.text
             voce.autore = m.author
             voce.stima_pagine = m.server_pages
             voce.info = BookList.getBookInfo(voce.path)
+            -- La copertina, SE e' gia' sul dispositivo. Qui si guarda un
+            -- file e basta: scaricarla la scarica la sincronizzazione
+            -- (`main.lua`, `scaricaLeCopertine`), mai il disegno di una
+            -- riga. Una vista che va in rete mentre disegna e' uno schermo
+            -- fermo, e su un e-ink si vede.
+            --
+            -- Finche' non c'e', la riga mostra il riquadro col titolo: non
+            -- e' un buco, e' quello che dice di che libro si tratta.
+            voce.immagine = KolibreCopertine.perVoce(self.cartella_copertine, m)
             table.insert(tenute, voce)
         elseif self.cartelle[voce.path] then
             voce.e_cartella = true
@@ -263,7 +312,36 @@ function KolibreUI:genItemTable(dirs, files, path)
             table.insert(tenute, voce)
         end
     end
-    return tenute
+    return self:_ordina(tenute)
+end
+
+--- L'ordine delle voci: le cartelle in cima, poi i libri, tutto per nome.
+--
+-- **Perche' si riordina qui invece di lasciar fare a KOReader.**
+-- `FileChooser.genItemTable` ordina leggendo due impostazioni **sue**
+-- (`reverse_collate` e `collate_mixed`): con il file browser di Paolo
+-- impostato al contrario, questa vista si sarebbe rovesciata insieme a lui,
+-- per una ragione che non ha niente a che vedere con quello che stava
+-- facendo. E' la stessa regola per cui la vista si calcola le proprie
+-- misure invece di ereditarle — ed e' il motivo per cui queste righe sono
+-- rimaste anche dopo che l'ordinamento per data se n'e' andato.
+--
+-- **Le cartelle restano in cima.** Sono dei contenitori, non dei libri:
+-- in mezzo all'elenco farebbero inciampare l'occhio a ogni schermata.
+function KolibreUI:_ordina(voci)
+    local cartelle, libri = {}, {}
+    for _i, voce in ipairs(voci) do
+        table.insert(voce.e_cartella and cartelle or libri, voce)
+    end
+    local function perNome(a, b)
+        return (a.text or "") < (b.text or "")
+    end
+    table.sort(cartelle, perNome)
+    table.sort(libri, perNome)
+    local fuori = {}
+    for _i, v in ipairs(cartelle) do table.insert(fuori, v) end
+    for _i, v in ipairs(libri) do table.insert(fuori, v) end
+    return fuori
 end
 
 -- ── il disegno ───────────────────────────────────────────────────────────
@@ -276,6 +354,9 @@ function KolibreUI:init()
     -- QUATTORDICI. Scrivendo `perpage` le righe tornavano quattordici al
     -- primo ridisegno e diventavano alte 46 px: copertine francobollo e
     -- mezzo schermo vuoto. Visto sulla prima cattura dal KOReader vero.
+    -- La scelta si legge QUI e non sulla classe: letta sulla classe sarebbe
+    -- quella del primo avvio per sempre, e cambiarla non si vedrebbe mai.
+    self.righe_per_schermata = self.righe_per_schermata or righeScelte()
     self.items_per_page = self.righe_per_schermata
     -- La radice della libreria: sopra di lei non si sale, perche' sopra non
     -- c'e' la libreria di Kolibre, c'e' il disco.
@@ -290,20 +371,103 @@ function KolibreUI:init()
         altezza = math.floor(Screen:getHeight() * Pezzi.QUOTA_BARRA),
         agganciato = self.agganciato,
         cartella_logo = self.cartella_logo,
+        -- Alla radice si scrive comunque il nome della libreria: una barra
+        -- che cresce al primo passo dentro una cartella e si accorcia
+        -- tornando indietro e' un salto, non un'informazione.
+        percorso = t("koreader.ui.percorso_radice"),
         azioni = {
-            casa = function() self:goHome() end,
+            casa = function() self:_casa() end,
             cronologia = function() self:_cronologia() end,
             kolibre = function() self:_tastoKolibre() end,
             ultimo = function() self:_ultimoLibro() end,
             menu = function() self:_menuDiKoreader() end,
         },
+        -- **La pressione prolungata sulla casa apre gli ultimi invii**
+        -- (Paolo, 16/11/2026). Sta sulla casa e non su un sesto tasto
+        -- perche' e' la stessa domanda fatta da vicino: la casa dice «tutta
+        -- la libreria», tenendola premuta si chiede «e di nuovo, cosa c'e'?».
+        --
+        -- **E la pressione prolungata sul logo apre il menu del plugin**
+        -- (Paolo, 16/11/2026): lo stesso primo livello che sta in Strumenti
+        -- ▸ Kolibre, chiesto a `main.lua` e non riscritto qui (vedi
+        -- `kolibre_ui_azioni.lua`).
+        azioni_tenute = {
+            casa = function() self:_consegne() end,
+            kolibre = function() Azioni.menuDelPlugin(self) end,
+        },
     }
     FileChooser.init(self)
+    -- **Dopo** `FileChooser.init`, non prima: il gruppo delle frecce lo
+    -- costruisce `Menu.init`, che gira lì dentro. Chiamarla prima vorrebbe
+    -- dire infilare la batteria in un gruppo che ancora non esiste.
+    pcall(function() self:_batteriaNellaBarra() end)
+    -- **E qui, non prima**, il controllo di compatibilità: le misure da
+    -- guardare le scrive `FileChooser.init`, e guardarle prima vorrebbe
+    -- dire guardarle tutte vuote. Dentro un `pcall` perché una diagnosi che
+    -- uccide il paziente non è una diagnosi — vedi
+    -- `kolibre_ui_compatibilita.lua` per il perché guarda gli invarianti e
+    -- non chi li ha rotti.
+    pcall(function() self:_controlloDiCompatibilita() end)
     _aperta = self
+end
+
+--- Se un altro plugin ci ha cambiato le misure sotto i piedi, lo dice.
+---
+--- Una volta per sessione, nel registro sempre e a schermo una sola volta:
+--- la vista si ridisegna a ogni cambio di pagina, e un avviso per ridisegno
+--- sarebbe un dispositivo inservibile.
+function KolibreUI:_controlloDiCompatibilita()
+    local ok, Compat = pcall(require, "kolibre_ui_compatibilita")
+    if not ok then return end
+    local loader
+    pcall(function() loader = require("pluginloader") end)
+    Compat.controlla(self, function(testo)
+        UIManager:show(InfoMessage:new{ text = testo })
+    end, loader)
 end
 
 --- La vista aperta adesso, o `nil`. La legge `main.lua` per non
 --- aprirne una seconda sopra la prima.
+--- Infila la batteria nel gruppo delle frecce, in fondo allo schermo.
+--
+-- **Perche' si MUTA `page_info` invece di costruire un fondo nostro.**
+-- Quel gruppo lo costruisce `Menu.init`, e il contenitore che lo tiene
+-- appoggiato in fondo allo schermo e' una variabile locale di quel metodo:
+-- da fuori non si raggiunge. La tabella `self.page_info` invece e' la
+-- stessa che il contenitore ha in mano, quindi infilarci dentro un pezzo si
+-- vede, senza riscrivere niente di KOReader — che e' la regola di questa
+-- vista da quando coverbrowser ci ha chiuso KOReader.
+--
+-- **Lo spazio davanti non e' decorazione.** `page_info` e' CENTRATO in
+-- fondo allo schermo, e la sua larghezza e' la somma dei suoi pezzi:
+-- aggiungendo la batteria solo in coda, il «pagina 2 di 5» si sposterebbe a
+-- sinistra di mezza batteria. Uno spazio della stessa larghezza davanti
+-- rimette il centro dov'era.
+--
+-- **Il corpo e' quello del testo delle pagine**, chiesto al widget vero
+-- invece di indovinato: cosi' la barra non cresce di un pixel, e quello che
+-- l'elenco ha guadagnato togliendo la striscia non se lo riprende la barra.
+function KolibreUI:_batteriaNellaBarra()
+    return Comune.batteriaNellaBarra(self)
+end
+
+--- Le righe scelte, e i limiti: li legge il menu in `main.lua`.
+function KolibreUI.righe() return righeScelte() end
+function KolibreUI.righeMinime() return Pezzi.RIGHE_MINIME end
+function KolibreUI.righeMassime() return Pezzi.RIGHE_MASSIME end
+
+--- Scrive la scelta. `flush` perche' su un Kindle una chiusura pulita e' raro
+-- che arrivi, e senza quello l'impostazione si perderebbe allo spegnimento —
+-- e' lo stesso difetto corretto il 15/11 su `kolibre_libreria_allavvio`.
+function KolibreUI.scegliRighe(quante)
+    quante = math.floor(tonumber(quante) or Pezzi.RIGHE_PER_DIFETTO)
+    if quante < Pezzi.RIGHE_MINIME then quante = Pezzi.RIGHE_MINIME end
+    if quante > Pezzi.RIGHE_MASSIME then quante = Pezzi.RIGHE_MASSIME end
+    G_reader_settings:saveSetting("kolibre_ui_righe", quante)
+    G_reader_settings:flush()
+    return quante
+end
+
 function KolibreUI.aperta() return _aperta end
 
 --- La versione della vista, per le note e per chi la mostra.
@@ -351,47 +515,14 @@ function KolibreUI.versione() return UI_VERSION end
 -- sorgente) e sono nostre. In piu' tengono le righe a SEI anche quando
 -- coverbrowser ne ha decise dieci per se'.
 --
--- Il guardiano e' `plugins/koreader/prove/la_vista_regge_coverbrowser.lua`.
+-- Il guardiano e' la prova `la_vista_regge_coverbrowser`.
 function KolibreUI:_recalculateDimen(no_recalculate_dimen)
-    local righe = self.righe_per_schermata
-    local corpo = self.items_font_size or Menu.getItemFontSize(righe)
-    if self.perpage ~= righe or self.font_size ~= corpo then
-        self.perpage = righe
-        self.font_size = corpo
-        no_recalculate_dimen = false
-    end
-    -- `and self.available_height`: anche quando il ricalcolo non e' stato
-    -- chiesto, la PRIMA volta le misure non ci sono ancora e senza di loro
-    -- non si disegna niente. E' la rete che mancava: il percorso che ci ha
-    -- ucciso passava proprio da qui.
-    if no_recalculate_dimen and self.available_height then return end
-
-    local alto = 0
-    if self.title_bar and not self.no_title then
-        alto = self.title_bar:getHeight()
-    end
-    local basso = 0
-    if self.page_return_arrow and self.page_info_text then
-        -- Il padding in piu' e' solo per l'occhio, e lo copiamo da KOReader
-        -- per non avere una navigazione piu' attaccata al bordo della sua.
-        basso = math.max(self.page_return_arrow:getSize().h,
-                         self.page_info_text:getSize().h) + Size.padding.button
-    end
-
-    self.available_height = self.inner_dimen.h - alto - basso
-    -- `item_dimen` non lo usa il nostro disegno (le righe se la misurano in
-    -- `updateItems`), ma lo leggono dei metodi di `Menu` che ereditiamo:
-    -- resta scritto perche' non sia nil sotto di loro.
-    self.item_dimen = Geom:new{
-        x = 0, y = 0,
-        w = self.inner_dimen.w,
-        h = math.floor(self.available_height / righe),
-    }
-
-    self.page_num = self:getPageNumber(#self.item_table)
-    if self.page > self.page_num then
-        self.page = self.page_num
-    end
+    -- `or righeScelte()` e cintura e bretelle: se un giorno questo metodo
+    -- fosse chiamato prima di `init`, un nil qui dentro sarebbe un errore di
+    -- aritmetica, cioe' la vista che muore — lo stesso guaio di
+    -- `available_height` di cui parla il commento qui sopra.
+    return Comune.misure(self, no_recalculate_dimen,
+        self.righe_per_schermata or righeScelte())
 end
 
 --- La chiusura: quella di KOReader, non quella di coverbrowser.
@@ -435,86 +566,48 @@ function KolibreUI:onExit()
     UIManager:close(self)
 end
 
-function KolibreUI:updateItems(select_number, no_recalculate_dimen)
-    local old_dimen = self.dimen and self.dimen:copy()
-    self.layout = {}
-    self.item_group:clear()
-    self.page_info:resetLayout()
-    self.return_button:resetLayout()
-    self.content_group:resetLayout()
-    self:_recalculateDimen(no_recalculate_dimen)
-
-    local voci = self.item_table or {}
-    local inizio = (self.page - 1) * self.perpage
-    local scelta = select_number
-
-    if #voci == 0 then
-        -- Un elenco vuoto qui vuol dire una cosa precisa e va detta: non e'
-        -- che la cartella e' vuota, e' che Kolibre non ha consegnato niente
-        -- a questo dispositivo. Un elenco bianco sembrerebbe un guasto.
-        table.insert(self.item_group, VerticalSpan:new{ width = math.floor(self.available_height * 0.35) })
-        table.insert(self.item_group, CenterContainer:new{
-            dimen = Geom:new{ w = self.inner_dimen.w, h = Screen:scaleBySize(90) },
-            TextBoxWidget:new{
-                text = self.quanti_gestiti == 0 and t("koreader.ui.nessun_libro")
-                    or t("koreader.ui.cartella_vuota"),
-                width = self.inner_dimen.w - 2 * Size.padding.large,
-                alignment = "center",
-                face = Font:getFace("infofont"),
-            },
-        })
-    else
-        local alt_indietro = self.voce_indietro
-            and math.floor(self.available_height * Pezzi.QUOTA_INDIETRO) or 0
-        -- La batteria si prende il suo posto PRIMA che le righe si
-        -- dividano quello che resta, come la striscia «indietro»: se si
-        -- aggiungesse dopo, le spingerebbe fuori dallo schermo.
-        local batteria = Pezzi.rigaBatteria(self.inner_dimen.w,
-            math.floor(self.available_height * Pezzi.QUOTA_STATO))
-        local alt_stato = batteria and math.floor(self.available_height * Pezzi.QUOTA_STATO) or 0
-        local alt_riga = math.floor((self.available_height - alt_indietro - alt_stato) / self.perpage)
-        local usata = 0
-        for posto = 1, self.perpage do
-            local voce = voci[inizio + posto]
-            if not voce then break end
-            voce.idx = inizio + posto
-            if voce.idx == self.itemnumber then scelta = posto end
-            local riga = Pezzi.Riga:new{
-                voce = voce,
-                menu = self,
-                dentro_autore = self.dentro_autore,
-                dimen = Geom:new{ w = self.inner_dimen.w, h = alt_riga },
-            }
-            table.insert(self.item_group, riga)
-            table.insert(self.layout, { riga })
-            usata = usata + alt_riga
-        end
-        -- Spinta in fondo: l'ultima pagina puo' avere due righe invece di
-        -- sei, e quello che sta sotto deve stare dov'e' sempre, non dove
-        -- finiscono le righe. Un comando che cambia posto a seconda di
-        -- quanti libri ci sono non si impara mai.
-        local avanzo = self.available_height - usata - alt_indietro - alt_stato
-        if avanzo > 0 then
-            table.insert(self.item_group, VerticalSpan:new{ width = avanzo })
-        end
-        if self.voce_indietro then
-            local striscia = Pezzi.Riga:new{
-                voce = self.voce_indietro,
-                menu = self,
-                dimen = Geom:new{ w = self.inner_dimen.w, h = alt_indietro },
-            }
-            table.insert(self.item_group, striscia)
-            table.insert(self.layout, { striscia })
-        end
-        if batteria then table.insert(self.item_group, batteria) end
+--- Il percorso da scrivere in cima: dove sei, rispetto alla radice.
+--
+-- **Non il percorso del disco.** `/mnt/us/documents/Luigi Pirandello` non
+-- dice niente di piu' di «Luigi Pirandello» e non ci sta nella barra. Si
+-- scrive quello che c'e' DENTRO la libreria, e alla radice il suo nome.
+--
+-- Il separatore e' « ▸ » e non «/»: non e' un percorso da copiare, e' un
+-- posto in cui sei.
+function KolibreUI:_percorsoDaScrivere()
+    local qui = self.path
+    local radice = self.radice
+    if type(qui) ~= "string" or qui == "" then return nil end
+    if type(radice) ~= "string" or radice == "" or qui == radice then
+        return t("koreader.ui.percorso_radice")
     end
+    local dentro = qui
+    if qui:sub(1, #radice) == radice then
+        dentro = qui:sub(#radice + 1)
+    end
+    dentro = dentro:gsub("^/+", ""):gsub("/+$", "")
+    if dentro == "" then return t("koreader.ui.percorso_radice") end
+    return (dentro:gsub("/", " ▸ "))
+end
 
-    self:updatePageInfo(scelta)
-    Menu.mergeTitleBarIntoLayout(self)
-    UIManager:setDirty(self.show_parent, function()
-        local da_rifare = old_dimen and old_dimen:combine(self.dimen) or self.dimen
-        return "ui", da_rifare
-    end)
+function KolibreUI:updateItems(select_number, no_recalculate_dimen)
+    -- **Il percorso si aggiorna PRIMA di ridisegnare**, perche' la barra
+    -- puo' cambiare altezza (la riga del percorso compare o sparisce) e le
+    -- misure dell'elenco si fanno su quella. Dopo, l'elenco sarebbe alto
+    -- per la barra di prima.
+    if self.custom_title_bar and self.custom_title_bar.aggiornaPercorso then
+        if self.custom_title_bar:aggiornaPercorso(self:_percorsoDaScrivere()) then
+            no_recalculate_dimen = false
+        end
+    end
+    -- Il testo del vuoto dice una cosa precisa e diversa nei due casi: se il
+    -- manifesto e' vuoto Kolibre non ha mai consegnato niente a questo
+    -- dispositivo; se non lo e', questa cartella e' vuota. Un elenco bianco
+    -- senza spiegazione sembrerebbe un guasto, e il motivo non si indovina.
+    local vuoto = self.quanti_gestiti == 0 and t("koreader.ui.nessun_libro")
+        or t("koreader.ui.cartella_vuota")
+    return Comune.ridisegna(self, self.righe_per_schermata or righeScelte(),
+        vuoto, select_number, no_recalculate_dimen)
 end
 
 -- ── i tocchi ─────────────────────────────────────────────────────────────
@@ -529,21 +622,54 @@ function KolibreUI:onClose()
     return true
 end
 
-function KolibreUI:onRigaToccata(voce)
-    if voce.is_go_up then
-        -- **Il percorso si passa com'e'**, senza togliergli il `/..`.
-        --
-        -- La voce «vai su» di KOReader ha come percorso `<cartella>/..`
-        -- (`FileChooser:genItemTable`), e `changeToPath` lo risolve con
-        -- `realpath`, che e' quello che lo fa diventare la cartella di
-        -- sopra. Togliendogli il `/..` gli si chiedeva di andare nella
-        -- cartella in cui si era gia': il tasto non faceva niente, ed e' il
-        -- «il tasto indietro non funziona» di Paolo del 15/11. Questa riga
-        -- e' ora la stessa che KOReader usa da se' in
-        -- `FileChooser:onMenuSelect`.
+--- La casa: la radice della libreria, non quella di KOReader.
+--
+-- **`FileChooser:goHome()` qui era sbagliato**, e si vedeva solo su un
+-- dispositivo vero: porta alla cartella `home_dir` di KOReader, che su un
+-- Kindle e' `/mnt/us` — cioe' fuori dalla libreria di Kolibre, in un posto
+-- dove il nostro filtro non ha niente da mostrare. Il tasto casa di questa
+-- vista vuol dire «torna in cima alla LIBRERIA», e la radice della libreria
+-- la vista ce l'ha gia' in mano da `init`.
+function KolibreUI:_casa()
+    if self.path ~= self.radice then
         self.dentro_autore = false
-        return self:changeToPath(voce.path, self.path)
+        self:changeToPath(self.radice)
     end
+end
+
+--- La freccia in fondo a sinistra: sali di una cartella.
+--
+-- **Il percorso si passa com'e'**, senza togliergli il `/..`. La voce «vai
+-- su» di KOReader ha come percorso `<cartella>/..`
+-- (`FileChooser:genItemTable`), e `changeToPath` lo risolve con `realpath`,
+-- che e' quello che lo fa diventare la cartella di sopra. Togliendogli il
+-- `/..` gli si chiedeva di andare nella cartella in cui si era gia': il
+-- tasto non faceva niente, ed e' il «il tasto indietro non funziona» di
+-- Paolo del 15/11.
+function KolibreUI:onReturn()
+    if not self.sopra then return true end
+    self.dentro_autore = false
+    self:changeToPath(self.sopra, self.path)
+    return true
+end
+
+--- C'e' un posto dove tornare? Alla radice no: sopra la libreria di Kolibre
+--- non c'e' un'altra cartella di Kolibre, c'e' il disco.
+function KolibreUI:siPuoTornare()
+    return self.sopra ~= nil
+end
+
+--- Le strisciate: su e giu' girano pagina, e **niente chiude la vista**.
+--- Il perche' sta per esteso in `Comune.swipe`.
+function KolibreUI:onSwipe(_arg, ges)
+    return Comune.swipe(self, ges and ges.direction)
+end
+
+function KolibreUI:onMultiSwipe()
+    return true
+end
+
+function KolibreUI:onRigaToccata(voce)
     if voce.e_cartella then
         self.dentro_autore = true
         return self:changeToPath(voce.path)
@@ -555,26 +681,106 @@ function KolibreUI:onRigaToccata(voce)
 end
 
 --- Pressione prolungata: per ora dice solo che cos'e' il libro.
+--- Tenendo premuto un libro: la scheda, e le cose che si possono fargli.
+--
+-- **Prima qui c'era solo la scheda** — titolo, autore, biblioteca, pagine —
+-- che si leggeva e si chiudeva. Dal 16/11/2026 quelle stesse righe sono il
+-- titolo di un menu con le azioni (Paolo: «tenendo premuto un libro si apre
+-- un menu»). Non si e' perso niente, e la domanda «su quale libro sto
+-- agendo?» ha la risposta scritta sopra i pulsanti — che e' la domanda da
+-- farsi prima di premere «elimina».
 function KolibreUI:onRigaTenuta(voce)
-    if voce.e_cartella or not voce.path then return end
-    local m = self.gestiti[voce.path] or {}
-    UIManager:show(InfoMessage:new{
-        text = t("koreader.ui.scheda_breve", {
-            titolo = m.title or voce.text,
-            autore = m.author or "-",
-            biblioteca = m.library or "-",
-            pagine = m.server_pages and tostring(m.server_pages) or t("koreader.ui.pagine_ignote"),
-        }),
-    })
+    Azioni.perUnLibro(self, voce)
 end
 
+--- Rilegge l'elenco dopo che e' cambiato qualcosa a un libro.
+--
+-- `refreshPath` e' di `FileChooser` e rilegge la cartella in cui siamo: e' la
+-- cosa giusta qui, perche' un libro cancellato non c'e' piu' sul disco e
+-- `genItemTable` riparte da quello che il disco dice.
+function KolibreUI:rileggi()
+    pcall(function() self:refreshPath() end)
+end
+
+--- Il tasto «cronologia» apre la NOSTRA cronologia.
+--
+-- Prima passava la mano a quella di KOReader (`fm.history:onShowHist()`):
+-- una sua schermata, col suo aspetto, in mezzo alla nostra. Paolo ha chiesto
+-- le copertine anche li', «con lo stesso aspetto: copertina e barra», e dal
+-- 16/11/2026 quella vista e' nostra — vedi `kolibre_ui_cronologia.lua`.
+--
+-- **Non si chiude la libreria.** La cronologia si apre SOPRA, e chiudendola
+-- si torna qui: e' lo stesso rapporto che ha un menu con la schermata da cui
+-- l'hai aperto, e vale anche se dalla cronologia si apre un libro — chiuso
+-- il libro, la libreria e' ancora sotto.
+--
+-- Sotto `pcall`, e con il ripiego su quella di KOReader: un modulo che non
+-- si carica (un aggiornamento a meta') non deve togliere a Paolo la
+-- cronologia, deve dargliela come prima.
 function KolibreUI:_cronologia()
+    local ok, KolibreCronologia = pcall(require, "kolibre_ui_cronologia")
+    if ok and type(KolibreCronologia.aperta) == "function" and KolibreCronologia.aperta() then
+        return   -- gia' aperta: non se ne impila una seconda
+    end
+    if ok then
+        local vista
+        local costruita, errore = pcall(function()
+            vista = KolibreCronologia:new{
+                manifest = self.manifest,
+                kolibre = self.kolibre,
+                agganciato = self.agganciato,
+                cartella_logo = self.cartella_logo,
+                righe_per_schermata = self.righe_per_schermata,
+            }
+            UIManager:show(vista)
+        end)
+        if costruita then return end
+        logger.err("Kolibre: la cronologia non si apre:", errore)
+        if vista then pcall(function() UIManager:close(vista) end) end
+    else
+        logger.err("Kolibre: la cronologia non si carica:", KolibreCronologia)
+    end
+    -- Il ripiego: quella di KOReader, che c'e' sempre.
     local fm = FileManager.instance
     if fm and fm.history then
         fm.history:onShowHist()
     else
         UIManager:show(InfoMessage:new{ text = t("koreader.ui.cronologia_non_disponibile") })
     end
+end
+
+--- Il pannello degli ultimi invii, tenendo premuto il tasto della casa.
+--
+-- **Perche' una finestra e non un ordinamento** sta scritto in cima a questo
+-- file: un ordinamento ti fa perdere l'elenco che avevi, una finestra la
+-- chiudi e la libreria e' ancora li'.
+--
+-- Si apre SOPRA, come la cronologia, e per le stesse ragioni: chiudendola si
+-- torna qui, e anche aprendo un libro da li' — chiuso il libro, la libreria
+-- e' ancora sotto.
+function KolibreUI:_consegne()
+    local ok, Consegne = pcall(require, "kolibre_ui_consegne")
+    if not ok then
+        logger.err("Kolibre: il pannello degli invii non si carica:", Consegne)
+        return
+    end
+    if type(Consegne.aperta) == "function" and Consegne.aperta() then
+        return   -- gia' aperto: non se ne impila un secondo
+    end
+    local vista
+    local costruita, errore = pcall(function()
+        vista = Consegne:new{
+            manifest = self.manifest,
+            kolibre = self.kolibre,
+            agganciato = self.agganciato,
+            cartella_logo = self.cartella_logo,
+            righe_per_schermata = self.righe_per_schermata,
+        }
+        UIManager:show(vista)
+    end)
+    if costruita then return end
+    logger.err("Kolibre: il pannello degli invii non si apre:", errore)
+    if vista then pcall(function() UIManager:close(vista) end) end
 end
 
 function KolibreUI:_ultimoLibro()

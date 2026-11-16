@@ -387,7 +387,8 @@ def chiudi_i_formati(
             # entrambi i casi, riuscito o fallito, perche' «fallito» qui vuol
             # dire anche «ha riscritto a meta'».
             incorporato = opf_metadata.embed_page_count(
-                library_path, percorso, formato_preferito, pagine)
+                library_path, percorso, formato_preferito, pagine,
+                book_id=calibre_book_id)
 
     impronte = {}
     for formato, percorso in percorsi_per_formato.items():

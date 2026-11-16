@@ -15,9 +15,9 @@ from ..logging_utils import log_message
 from . import book_hash_service
 from . import app_settings
 
-# Same threshold the sibling KoServer project's own processor.py uses to
-# group KOReader's raw page_stat_data rows into logical reading sessions —
-# ported wholesale, not reinvented.
+# Same threshold an earlier, unpublished project of mine used (its
+# processor.py) to group KOReader's raw page_stat_data rows into logical
+# reading sessions — ported wholesale, not reinvented.
 _SESSION_GAP_SECONDS = 900  # 15 minutes
 
 # How far back GET /stats/timeline's cached copy reaches — generous margin
@@ -87,8 +87,8 @@ def _resolve_book_identities(db: Session, md5: str) -> list:
     KOReader's statistics.sqlite3 `book.md5` column IS the same
     KOReader-compatible partial-MD5 this app already computes/stores in
     BookHash (services/koreader_hash.py) — no separate id-mapping table
-    needed, unlike KoServer's own schema (which keeps its own Book rows
-    keyed by md5). Returns every (library, calibre_book_id) this hash
+    needed, unlike the schema of that earlier project (which kept its own
+    Book rows keyed by md5). Returns every (library, calibre_book_id) this hash
     resolves to — usually one, but the exact same file can legitimately
     exist in more than one library (same precedent as push_reading_progress
     in devices.py, which handles the identical ambiguity for KOSync pushes).
@@ -117,14 +117,14 @@ def process_statistics_db(db_path: str, user_id: int, device_id, db: Session) ->
     book-identified reading sessions and updates each resolved book's
     reading-coverage estimate.
 
-    Session-grouping algorithm ported from the sibling KoServer project's
-    own processor.py::process_statistics_db (15-minute gap threshold on
-    page_stat_data, ordered by start_time) — this function's own PREVIOUS
+    Session-grouping algorithm ported from an earlier, unpublished project
+    of mine (its processor.py::process_statistics_db — 15-minute gap
+    threshold on page_stat_data, ordered by start_time) — this function's own PREVIOUS
     version stored KOReader's internal page_stat_data.id_book as if it were
     already a calibre_book_id (never resolved via any hash at all) and never
     grouped anything into sessions (one row per raw page-turn event) — see
     _resolve_book_identities for the fix, which reuses this app's existing
-    BookHash table instead of KoServer's separate md5-keyed Book model.
+    BookHash table instead of that project's separate md5-keyed Book model.
 
     Returns a small summary dict for the caller to log/report.
     """
@@ -824,8 +824,8 @@ def libri_letti(db: Session, utente) -> dict:
 
 def compute_summary(db: Session, library: str, user_id: int) -> dict:
     """
-    Global + current-year + personal-record counters — mirrors the sibling
-    KoServer project's own /stats/summary. Everything here is derived
+    Global + current-year + personal-record counters — same shape as the
+    summary of an earlier, unpublished project of mine. Everything here is derived
     straight from ReadingSession (both koreader and web sources, unified);
     "longest book" is the one exception, which is a library-metadata fact
     (page count) rather than a reading-session fact, so it's resolved via
@@ -1166,8 +1166,8 @@ def compute_raw(db: Session, library: str, user_id: int) -> list:
 
 
 def compute_timeline(db: Session, library: str, user_id: int, days: int = _TIMELINE_CACHE_DAYS) -> list:
-    """date -> total seconds read, for the activity heatmap — mirrors
-    KoServer's own /stats/timeline. Folds in OrphanReadingSession duration
+    """date -> total seconds read, for the activity heatmap — same shape as
+    the timeline of an earlier, unpublished project of mine. Folds in OrphanReadingSession duration
     too (same "not scoped by library, honest overcount over silent
     undercount" reasoning as compute_summary's own docstring) so a day with
     only not-yet-paired reading doesn't show up empty on the heatmap."""

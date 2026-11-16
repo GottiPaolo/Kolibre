@@ -3,7 +3,8 @@
 #
 # Kolibre — Calibre Desktop plugin.
 # Copyright (C) 2026 Paolo Gotti. GNU AGPL-3.0-or-later; see the LICENSE and
-# NOTICE files in the Kolibre repository.
+# NOTICE files next to this one: the server adds them to the download zip,
+# because whoever installs a plugin gets the zip and not the repository.
 """
 Kolibre Sync — Calibre Desktop plugin.
 

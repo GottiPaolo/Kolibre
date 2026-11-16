@@ -54,7 +54,8 @@ interface LineChartProps {
 }
 
 // Serie storica a pallini collegati da linee, ispirata alla vista
-// statistiche di KoServer — pensata per progressioni cumulative (es. tempo
+// statistiche di un mio progetto precedente — pensata per progressioni
+// cumulative (es. tempo
 // di lettura totale nel tempo) o per confrontare più andamenti nel tempo
 // (chart builder). Con una sola serie la legenda resta nascosta (nulla da
 // distinguere); con più di una viene mostrata automaticamente.

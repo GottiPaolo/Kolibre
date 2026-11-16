@@ -668,7 +668,7 @@ class StatsHashDiscard(Base):
 
 
 class ReadingSession(Base):
-    """One grouped reading session (KoServer-style 15-minute-gap grouping of
+    """One grouped reading session (15-minute-gap grouping of
     KOReader's raw page_stat_data rows — see stats_service.process_statistics_db).
     `library` is required for the same reason every other book-identifying
     table in this app requires it: calibre_book_id is only unique WITHIN one
@@ -1843,3 +1843,120 @@ class QualitaLibro(Base):
     risultato = Column(Text, nullable=True)
     #: Perche' l'analisi e' fallita, quando `stato` e' "errore_analisi".
     errore = Column(String, nullable=True)
+
+
+class RichiestaDiAccoppiamento(Base):
+    """
+    «Un programma chiede di entrare: questo e' il suo codice.»
+
+    **Da zero: a che domanda risponde** (16/11/2026, per il client nativo).
+    Un programma che gira sul computer di una persona deve potersi collegare
+    al server senza che quella persona gli consegni la **password del proprio
+    account**. Finora i modi erano due, e nessuno dei due va bene qui:
+
+      * il plugin Obsidian chiedeva nome utente e password, e per non doverli
+        richiedere ogni settimana **conservava la password** dentro il vault
+        (vedi `TokenApplicazione`: e' il difetto che quei token hanno chiuso);
+      * i dispositivi KOReader ricevono il loro token dal server, dentro un
+        pacchetto preparato dal sito — ma li' il token lo si va a prendere con
+        il browser, cioe' da un posto dove si e' gia' entrati.
+
+    Un client desktop non ha ne' l'una ne' l'altra strada: la finestra e' sua
+    e il browser e' un'altra cosa. L'accoppiamento per codice e' la terza:
+    **il programma mostra un codice, la persona lo conferma dal sito dove e'
+    gia' entrata, e il programma riceve un token.** La password non passa mai
+    per il programma, e il programma nasce senza saperla.
+
+    ────────────────────────────────────────────────────────────────────
+    LE DUE CHIAVI, CHE NON SONO LA STESSA COSA
+    ────────────────────────────────────────────────────────────────────
+
+    **`codice`** e' per gli occhi di una persona: sei caratteri, da leggere su
+    uno schermo e ritrovare su un altro. Corto per forza, e **mostrato**.
+
+    **Il biglietto** (di cui qui si tiene solo l'impronta, `ticket_hash`) e' il
+    segreto del programma: trentadue byte casuali, che nessuno vede e che non
+    si scrivono a mano. **E' lui che autorizza a RITIRARE il token.**
+
+    Tenerli separati e' il punto di tutto il disegno. Se il token si ritirasse
+    presentando il **codice**, allora chiunque, da fuori, potrebbe provare
+    codici a caso e ritirare il token **nell'istante in cui la persona
+    conferma** — e la conferma e' esattamente il momento in cui il codice
+    diventa buono. Sei caratteri non si difendono da chi li prova a macchina;
+    trentadue byte si. Quindi: il codice serve a **riconoscere** la richiesta,
+    il biglietto a **ritirarla**.
+
+    **Dell'impronta e non del biglietto**, per la stessa ragione per cui si
+    tiene l'impronta di un token d'applicazione: un database che finisse in
+    mano a qualcuno non deve regalare accessi funzionanti.
+
+    ────────────────────────────────────────────────────────────────────
+    TRE COSE CHE VALE LA PENA SPIEGARE
+    ────────────────────────────────────────────────────────────────────
+
+    **1. Il codice vive cinque minuti.** Una rotta che risponde **senza
+    autenticazione** e' una superficie nuova, e la difesa migliore e' che non
+    ci sia quasi mai niente da prendere: dopo cinque minuti la riga non apre
+    piu' niente, e chi ha perso tempo deve ricominciare dal programma.
+
+    **2. Prima della conferma, qui non si impara niente.** La risposta a chi
+    chiede «com'e' andata?» dice soltanto lo stato. Non il nome della persona,
+    non quello del server, non quanti libri ci sono: se lo dicesse, una rotta
+    senza autenticazione diventerebbe un modo di sapere cose su un server
+    altrui, e il codice servirebbe solo a far perdere tempo.
+
+    **3. Il token in chiaro sta qui per pochi minuti, e poi non c'e' piu'.**
+    Dal momento della conferma a quello del ritiro il token deve esistere da
+    qualche parte, perche' il programma non era presente quando e' nato. Lo si
+    scrive su questa riga e si **cancella al primo ritiro**, che e' anche il
+    solo ritiro permesso. L'alternativa — il programma manda una sua chiave
+    pubblica e il server gli cifra il token — chiuderebbe anche quella
+    finestra di minuti, al prezzo di una gestione di chiavi dentro un client
+    che ancora non esiste: segnata fra le cose da decidere, non fatta.
+
+    **Il token che nasce qui e' un `TokenApplicazione`** (`kolibre_app_…`), non
+    un token di dispositivo (`kolibre_tok_…`). La ragione e' in
+    `api/accoppiamento.py`, in testa al file.
+    """
+
+    __tablename__ = "richieste_accoppiamento"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    #: Sei caratteri da un alfabeto senza lettere confondibili. Unico fra le
+    #: richieste vive; una riga morta puo' averlo uguale a una viva e non e'
+    #: un problema, perche' il codice si cerca solo fra le vive.
+    codice = Column(String, nullable=False, index=True)
+    #: L'impronta SHA-256 del biglietto del programma. Vedi sopra.
+    ticket_hash = Column(String, nullable=False, unique=True, index=True)
+
+    #: Come il programma si e' presentato: «Kolibre client (MacBook di
+    #: Paolo)». E' **testo di uno sconosciuto** che il sito mostra, quindi si
+    #: taglia e si ripulisce prima di scriverlo (vedi `api/accoppiamento.py`).
+    nome_client = Column(String, nullable=False)
+    #: «macOS 15», «Linux», quello che il programma dichiara. Puo' mancare.
+    piattaforma = Column(String, nullable=True)
+    #: Da dove e' arrivata la richiesta. Serve a chi conferma, per capire se
+    #: quel programma e' il suo: e' l'unica cosa che il server sa e che la
+    #: richiesta non puo' raccontarsi da sola.
+    ip_richiedente = Column(String, nullable=True)
+
+    creato_il = Column(DateTime, default=datetime.utcnow, index=True)
+    #: Dopo questo istante la riga non apre piu' niente. Vedi il punto 1.
+    scade_il = Column(DateTime, nullable=False)
+
+    confermato_il = Column(DateTime, nullable=True)
+    rifiutato_il = Column(DateTime, nullable=True)
+    #: Quando il programma ha ritirato il token. Dopo, `token_in_chiaro` e'
+    #: nullo e un secondo ritiro non da' niente.
+    ritirato_il = Column(DateTime, nullable=True)
+
+    #: Chi ha confermato, cioe' **a nome di chi** parlera' il programma. Nullo
+    #: finche' nessuno ha confermato.
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=True, index=True)
+    #: Il token che e' nato da questa conferma, per poterlo poi spegnere.
+    token_applicazione_id = Column(Integer, nullable=True)
+    #: Il token in chiaro, dalla conferma al ritiro e non oltre. Vedi il
+    #: punto 3.
+    token_in_chiaro = Column(String, nullable=True)

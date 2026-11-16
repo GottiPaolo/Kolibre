@@ -58,7 +58,7 @@ from xml.etree import ElementTree as ET
 
 # Si alza a ogni cambio che cambia i risultati: Kolibre rianalizza i libri
 # che hanno una versione più vecchia (standard concordato con kolibre-14, 14/11).
-VERSIONE = "2.0"
+VERSIONE = "2.1"
 
 PESI = {"indice": 30, "struttura": 25, "pulizia": 20, "presentazione": 15, "metadati": 10}
 
@@ -68,6 +68,37 @@ LIBRO_BREVE = 8000
 PAROLE_DIVISORE = 60
 # Un file con almeno tante parole è un capitolo «vero».
 PAROLE_CAPITOLO = 300
+
+# ── Quanto fitto deve essere un indice (v2.1, 16/11/2026) ────────────────
+#
+# **Il difetto che queste tre righe chiudono.** «Germinale» di Zola prendeva
+# 100 su 100 con un indice inservibile: 45 titoli nel testo, 14 voci
+# nell'indice, perché lo strumento che l'ha prodotto tiene la prima volta che
+# compare ogni nome e butta le ripetizioni. Nessuno dei quattro controlli
+# sull'indice lo vedeva — i doppioni qui erano stati tolti, l'ordine era
+# perfetto, l'indice piatto non aveva niente di annidato male, e la
+# COPERTURA era buona: il tratto più lungo senza una voce era il 17% del
+# libro, sotto la soglia del 35%. **Un indice può coprire bene un libro ed
+# essere inutile come elenco**, perché poche voci sparse non lasciano buchi
+# grandi: la copertura e la grana sono due domande diverse.
+#
+# **I numeri vengono dal corpus, non dalla testa** (1139 libri, misurati il
+# 16/11/2026 prima di scrivere una riga). Il rapporto fra voci d'indice e
+# unità navigabili è ≥ 0,90 per l'81% dei libri: un indice fitto è la norma,
+# non un ideale. Sotto 0,55 ci sono 93 libri su 1119, e 82 di loro hanno già
+# un altro difetto d'indice — cioè questo controllo quasi sempre conferma un
+# giudizio che c'era, e in 11 casi dice una cosa che nessuno diceva.
+# Fra questi «I demoni» di Dostoevskij, 27 voci per 110 unità, punteggio 100:
+# la stessa forma di Germinale.
+RAPPORTO_SCARNO = 0.55
+# Sotto questo, il difetto è grave: i casi puliti del corpus stanno tutti
+# sotto 0,40 (Germinale 0,31, «I demoni» 0,25, «Guerra e pace» 0,08).
+RAPPORTO_GRAVE = 0.35
+# **Sotto questa misura non si giudica**, e non è prudenza: il rapporto non
+# vuol dire niente su pochi pezzi. Sul corpus i due soli falsi allarmi erano
+# esattamente questo — un saggio in 2 file con una voce, uno in 3 file con
+# una voce. Lo stesso spirito di LIBRO_BREVE qui sopra.
+UNITA_MINIME_PER_GIUDICARE = 10
 
 FINE_FRASE = tuple('.!?…»"”’:;)]—–*')
 
@@ -96,6 +127,9 @@ POLITICA = {
     "toc_bersagli":        ("indice", 2, False, "auto", "RSC-007/RSC-012"),
     "toc_ordine":          ("indice", 2, False, "auto", "NAV-011"),
     "toc_grossolano":      ("indice", 2, False, "auto", "—"),
+    "toc_scarno":          ("indice", 2, False, "auto", "—"),
+    # Peso zero sul punteggio, di proposito: vedi dov'è segnalato.
+    "toc_piatto":          ("indice", 1, False, "auto", "—"),
     "toc_annidamento":     ("indice", 2, False, "auto", "—"),
     "titoli_assenti":      ("struttura", 2, False, "ia",   "—"),
     "gerarchia_invertita": ("struttura", 2, False, "auto", "—"),
@@ -418,6 +452,27 @@ def qualita_epub(percorso):
                 indice_a_pagina = True
                 difetto("toc_solo_pagina",
                         "L'indice è solo una pagina del libro: manca quello del lettore (NCX o nav), si ricava da lì")
+        # ── Le unità navigabili, contate qui perché servono a due sezioni ──
+        #
+        # Stavano dentro «Struttura» e sono state portate su il 16/11/2026,
+        # senza cambiare una virgola del calcolo: all'indice servono per
+        # sapere quante cose un indice dovrebbe elencare, e alla struttura
+        # continuano a servire per la gerarchia. Calcolarle due volte
+        # vorrebbe dire due definizioni di «capitolo» che un giorno
+        # divergono.
+        capitoli = [s for s in spine if docs[s].parole >= PAROLE_CAPITOLO]
+        # Un divisore è un file breve con un titolo, seguito da capitoli veri:
+        # il frontespizio di una parte.
+        primo = [(s, docs[s].titoli[0][0]) for s in spine if docs[s].titoli]
+        divisori, invertiti = 0, 0
+        for i, (s, liv) in enumerate(primo):
+            if docs[s].parole < PAROLE_DIVISORE and i + 1 < len(primo):
+                seguenti = [l for t, l in primo[i + 1:i + 4] if docs[t].parole >= PAROLE_CAPITOLO]
+                if seguenti:
+                    divisori += 1
+                    if liv > min(seguenti):
+                        invertiti += 1
+
         pos, rotti = [], 0
         for prof, b, href in voci:
             f, _, ancora = href.partition("#")
@@ -481,32 +536,68 @@ def qualita_epub(percorso):
         if annidati:
             difetto("toc_annidamento",
                     f"{annidati} titoli di parte stanno nell'indice dentro un capitolo invece che sopra")
+        # ── La grana: quante voci ha l'indice rispetto a quante cose ci sono ──
+        #
+        # **La domanda che mancava.** La copertura qui sopra chiede «ci sono
+        # buchi grandi?»; questa chiede «l'indice elenca le cose che il libro
+        # ha?». Sono diverse, e il caso che l'ha fatta nascere lo dimostra:
+        # «Germinale» aveva una copertura del 17% (ottima) e 14 voci per 45
+        # fra capitoli e parti. Vedi RAPPORTO_SCARNO per i numeri del corpus.
+        #
+        # Il rapporto si taglia a 1: un indice con più voci delle unità (voci
+        # su àncore dentro uno stesso file) non è un difetto, è un indice
+        # fitto.
+        unita = len(capitoli) + divisori
+        giudicabile = bool(sequenza) and not breve and unita >= UNITA_MINIME_PER_GIUDICARE
+        if giudicabile:
+            rapporto = min(1.0, n_voci / unita)
+            # **La scala finisce dove comincia il difetto, non oltre.** Prima
+            # saliva fino a 0,75, e il risultato era un libro che perdeva
+            # quattro punti senza che nessun difetto lo spiegasse — visto sul
+            # corpus: «I principi della matematica», da 100 a 96 con la
+            # tabella dei difetti vuota. In una pagina che elenca i difetti,
+            # un punteggio che cala in silenzio è peggio di un punteggio
+            # generoso. Così **ogni punto perso ha un nome**: sopra
+            # RAPPORTO_SCARNO non cambia niente, sotto c'è sempre
+            # `toc_scarno` a dire perché.
+            granularita = _lineare(rapporto, 0.25, RAPPORTO_SCARNO)
+            if rapporto < RAPPORTO_SCARNO:
+                difetto("toc_scarno",
+                        f"L'indice ha {n_voci} voci per {unita} fra capitoli e parti: "
+                        f"elenca meno di un {rapporto:.0%} di quello che c'è nel libro",
+                        gravita=2 if rapporto < RAPPORTO_GRAVE else 1)
+        else:
+            rapporto, granularita = None, 1.0
+        # **L'indice piatto su un libro a parti: si dice e non si conta.**
+        # Peso zero sul punteggio di proposito. Un indice senza annidamento è
+        # legittimo in un libro senza parti, e lo è anche in uno con parti se
+        # le voci ci sono tutte — quindi è un indizio da leggere insieme agli
+        # altri, non un giudizio. Soglia a due divisori: con uno solo
+        # «l'indice dovrebbe avere due livelli» non si sostiene.
+        if divisori >= 2 and n_voci and max(p_ for p_, _, _ in pos) == 0:
+            difetto("toc_piatto",
+                    f"Il libro ha {divisori} parti, ma l'indice è su un livello solo: "
+                    "nel menù del lettore i capitoli non stanno sotto la loro parte")
         # Un indice che non copre il libro vale poco, qualunque cosa dicano i suoi link.
-        indice = ((0.1 * presenza + 0.2 * bersagli + 0.15 * ordine + 0.15 * annidamento) * (0.25 + 0.75 * copertura)
-                  + 0.4 * copertura)
+        # E uno della grana sbagliata nemmeno: `utile` è quanto l'indice
+        # DESCRIVE il libro, e la grana ne pesa poco più di un terzo. Con una
+        # grana sana (`granularita` = 1) `utile` è esattamente la copertura di
+        # prima, quindi la v2.1 non sposta di un punto i libri con un indice
+        # fitto — e sono l'81% del corpus.
+        utile = copertura * (0.65 + 0.35 * granularita)
+        indice = ((0.1 * presenza + 0.2 * bersagli + 0.15 * ordine + 0.15 * annidamento) * (0.25 + 0.75 * utile)
+                  + 0.4 * utile)
         if n_voci == 0:
             indice = 0.0
         elif indice_a_pagina:
             indice *= 0.8
 
         # ── Struttura ──────────────────────────────────────────────────
-        capitoli = [s for s in spine if docs[s].parole >= PAROLE_CAPITOLO]
         con_titolo = [s for s in capitoli if docs[s].titoli]
         titoli = len(con_titolo) / len(capitoli) if capitoli else (1.0 if breve else 0.0)
         if capitoli and titoli < 0.5:
             difetto("titoli_assenti",
                     f"Solo {len(con_titolo)} capitoli su {len(capitoli)} hanno un titolo vero (h1–h6)")
-        # Gerarchia: un divisore (file breve con un titolo) non può avere un livello
-        # più basso dei capitoli che lo seguono.
-        primo = [(s, docs[s].titoli[0][0]) for s in spine if docs[s].titoli]
-        divisori, invertiti = 0, 0
-        for i, (s, liv) in enumerate(primo):
-            if docs[s].parole < PAROLE_DIVISORE and i + 1 < len(primo):
-                seguenti = [l for t, l in primo[i + 1:i + 4] if docs[t].parole >= PAROLE_CAPITOLO]
-                if seguenti:
-                    divisori += 1
-                    if liv > min(seguenti):
-                        invertiti += 1
         # Salti di livello dentro i capitoli (h1 → h4 senza h2 e h3).
         salti = 0
         tutti = [l for s in spine for l, _ in docs[s].titoli]
@@ -674,6 +765,7 @@ def qualita_epub(percorso):
             "misure": {
                 "parole": totale, "file_spine": len(spine), "voci_toc": n_voci, "voci_rotte": rotti,
                 "inversioni_toc": inversioni, "toc_annidati": annidati, "quota_max_senza_voce": None if quota_max is None else round(quota_max, 2),
+                "unita_navigabili": unita, "voci_per_unita": None if rapporto is None else round(rapporto, 2),
                 "capitoli": len(capitoli), "capitoli_con_titolo": len(con_titolo),
                 "divisori": divisori, "divisori_invertiti": invertiti, "salti_livello": salti,
                 "quota_file_max": round(quota_file_max, 2), "briciole": briciole,

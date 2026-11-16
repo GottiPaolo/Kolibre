@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import os
 import shutil
@@ -71,6 +72,131 @@ _CFI_PROGRESS_PREFIX = "cfi:"
 _LIST_DESCRIPTION_EXCERPT_CHARS = 400
 
 
+# ── «Che cosa è cambiato?», per un client con una copia locale ──
+#
+# **Il problema** (letto il 16/11/2026, mentre si preparava il client
+# nativo). Un client con una copia locale del registro dei libri non aveva
+# nessun modo di sapere se la sua copia era vecchia: poteva solo
+# riscaricare tutto per scoprire che non era cambiato niente. Su 100.000
+# libri l'elenco completo costa 9,4 secondi e 66 MB — misurati, vedi la
+# docstring di `list_books`. Il gettone di cambiamento esisteva, ma solo per
+# i dispositivi KOReader (`devices.py::_library_token`), e sulle liste di
+# libri non c'era nessun ETag: l'unico ETag del server stava sui file
+# immagine.
+#
+# **La forma scelta è un ETag, non un endpoint nuovo.** Un «dammi il numero
+# di versione della biblioteca» sarebbe stata una rotta in più da conoscere,
+# da documentare e da ricordarsi di chiamare prima di ogni elenco. Un ETag è
+# HTTP normale: il client rimanda quello che ha ricevuto in
+# `If-None-Match`, e si prende un 304 senza corpo. Lo capiscono il browser,
+# `curl`, e qualunque libreria HTTP di qualunque linguaggio — compreso il Qt
+# del client nuovo — senza che nessuno scriva niente.
+#
+# **E il risparmio è prima del lavoro, non dopo.** Il 304 si decide leggendo
+# quattro byte di un'intestazione di file: l'elenco non si costruisce
+# nemmeno. È il punto di tutta la cosa — un ETag calcolato sulla risposta
+# già costruita avrebbe risparmiato la rete e non il lavoro.
+
+# Si alza quando cambia la FORMA della risposta, non il suo contenuto: un
+# client che ha in cache una risposta di un server più vecchio deve
+# ricevere un 200, non un 304 che gli conferma una forma che non esiste più.
+_FORMA_ELENCO = "1"
+
+
+def _impronta_di_sqlite(percorso: str):
+    """Tutto quello che, cambiando, dice che questo database è cambiato.
+
+    **Tre numeri e non uno, e la ragione è il modo WAL.** Kolibre apre le
+    biblioteche di Calibre con `journal_mode=WAL`
+    (`calibre/connection.py:109`), e in quel modo un commit **non scrive
+    affatto** nel file principale: va in coda al file `-wal`, e `metadata.db`
+    resta identico fino al checkpoint successivo. Quindi:
+
+      * la **dimensione** e il **mtime** di `metadata.db` da soli non vedono
+        niente di quello che fa la webapp — nessuna modifica a un libro,
+        finché non scatta un checkpoint;
+      * il **contatore di modifiche** nell'intestazione (byte 24-27, che
+        SQLite incrementa a ogni commit) non si muove nemmeno lui in WAL:
+        verificato, resta 1 mentre il file `-wal` cresce;
+      * il file **`-wal`**, invece, cresce a ogni commit.
+
+    Trovato il 16/11/2026 dalla prova `cosa_e_cambiato`,
+    non leggendo il codice: avevo scritto il contatore dell'intestazione
+    convinto che bastasse, e la prova ha detto che non cambiava. Senza di
+    lei, un client si sarebbe sentito rispondere «non è cambiato niente»
+    dopo ogni modifica fatta dalla webapp — cioè il difetto esatto che
+    questo gettone esiste per non avere.
+
+    Si guardano tutti e tre, perché nessuno dei due modi è garantito per
+    sempre: in modo `delete` si muovono i primi due e il contatore, in WAL
+    si muove il `-wal`, e dopo un checkpoint si muovono gli altri. Un
+    cambiamento in più è innocuo (il client riscarica una volta di troppo);
+    un cambiamento mancato no.
+    """
+    pezzi = []
+    try:
+        stato = os.stat(percorso)
+        pezzi.append(f"{stato.st_size}:{stato.st_mtime_ns}")
+    except OSError:
+        return None
+    try:
+        with open(percorso, "rb") as f:
+            testa = f.read(28)
+        pezzi.append(str(int.from_bytes(testa[24:28], "big")) if len(testa) >= 28 else "?")
+    except OSError:
+        pezzi.append("?")
+    # Il `-wal`: se non c'è, il database non è in modo WAL (o è stato chiuso
+    # pulito), e la sua assenza è a sua volta un fatto che vale registrare.
+    try:
+        wal = os.stat(percorso + "-wal")
+        pezzi.append(f"wal{wal.st_size}:{wal.st_mtime_ns}")
+    except OSError:
+        pezzi.append("wal-")
+    return "|".join(pezzi)
+
+
+def _gettone_elenco(db: Session, library: str, limit=None, offset=0,
+                    sort="date_added", order="desc", q=""):
+    """Il gettone di questa RISPOSTA: biblioteca più domanda. `None` se non si sa.
+
+    **Perché la domanda ci sta dentro.** La stessa biblioteca interrogata con
+    un ordinamento o un filtro diversi dà una risposta diversa. Un gettone
+    che dicesse solo «lo stato della biblioteca» farebbe rispondere «non è
+    cambiato niente» a un client che ha appena cambiato ordinamento, e quel
+    client continuerebbe a mostrare l'ordine di prima convinto di essere
+    aggiornato.
+
+    **Perché c'è anche il nome mostrato della biblioteca.** Perché finisce
+    nella risposta: rinominandola dalle Impostazioni, la risposta cambia
+    senza che `metadata.db` sia stato toccato.
+
+    **Perché c'è la versione del server.** Perché un deploy può cambiare
+    come un campo viene calcolato senza cambiare niente nella biblioteca.
+    Legarsi anche a quella rende impossibile servire un 304 che conferma
+    una risposta costruita da un codice diverso.
+
+    `None` quando la biblioteca non si trova: senza un gettone non si manda
+    nessun ETag, e il client riscarica — che è la risposta prudente.
+    """
+    try:
+        percorso = os.path.join(config.library_path(library), "metadata.db")
+    except Exception:
+        return None
+    impronta = _impronta_di_sqlite(percorso)
+    if impronta is None:
+        return None
+    pezzi = [
+        _FORMA_ELENCO,
+        os.environ.get("KOLIBRE_VERSION", "dev"),
+        str(library),
+        impronta,
+        str(library_display_name(db, library) or ""),
+        f"limit={limit}", f"offset={offset}",
+        f"sort={sort}", f"order={order}", f"q={q}",
+    ]
+    return hashlib.md5("|".join(pezzi).encode("utf-8")).hexdigest()
+
+
 @router.get(
     "",
     # **Due forme dallo stesso indirizzo**: senza `limit` l'elenco nudo
@@ -81,6 +207,8 @@ _LIST_DESCRIPTION_EXCERPT_CHARS = 400
     responses={200: {"model": Union[list[LibroInElenco], PaginaDiLibri]}},
 )
 def list_books(
+    request: Request,
+    response: Response,
     library: str = Depends(default_library_param),
     db: Session = Depends(database.get_db),
     limit: int = None,
@@ -103,6 +231,25 @@ def list_books(
     "library_pagination" (vedi services/app_settings.py), non questo
     endpoint: qui si serve quello che viene chiesto.
     """
+    # Il 304 si decide QUI, prima di aprire la biblioteca: è il punto di
+    # tutta la cosa. Vedi `_gettone_elenco`.
+    gettone = _gettone_elenco(db, library, limit=limit, offset=offset,
+                              sort=sort, order=order, q=q)
+    if gettone:
+        etichetta = f'"{gettone}"'
+        if _etag_matches(request, etichetta):
+            # Senza corpo, e con l'ETag ripetuto: un 304 che si portasse
+            # dietro la risposta intera non risparmierebbe niente.
+            return Response(status_code=304, headers={
+                "ETag": etichetta,
+                # Niente cache a tempo: la risposta vale finché l'ETag
+                # combacia, e un tempo di scadenza farebbe mostrare al
+                # client dei libri vecchi senza nemmeno chiedere.
+                "Cache-Control": "no-cache",
+            })
+        response.headers["ETag"] = etichetta
+        response.headers["Cache-Control"] = "no-cache"
+
     lib = CalibreLibrary(config.library_path(library))
     display_name = library_display_name(db, library)
     if limit is not None:
@@ -501,8 +648,9 @@ def get_book_stats(
     current_user: models.User = Depends(auth.get_current_user),
 ):
     """
-    Per-book reading-stats panel payload (book-detail page) — mirrors
-    KoServer's own /books/{id}/stats: total time/sessions, first/last read,
+    Per-book reading-stats panel payload (book-detail page) — same shape as
+    the per-book stats of an earlier, unpublished project of mine: total
+    time/sessions, first/last read,
     a day-by-day time breakdown for the panel's chart, and the highlight
     count already tracked elsewhere (Highlight, unified across web/KOReader/
     Calibre-import sources).
@@ -606,7 +754,7 @@ async def recompute_book_page_count(
 
     await write_queue.submit("update_book", {"book_id": id, "fields": page_count_fields(pages)}, library_path)
     try:
-        opf_metadata.embed_page_count(library_path, file_path, fmt, pages)
+        opf_metadata.embed_page_count(library_path, file_path, fmt, pages, book_id=id)
     except Exception as e:
         log_message("warning", "books", f"Embedding the page count in the OPF failed for '{file_path}': {e}")
 

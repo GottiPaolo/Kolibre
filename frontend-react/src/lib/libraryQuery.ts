@@ -1,9 +1,31 @@
 // Porting del motore del Navigatore Biblioteca da frontend/src/App.vue
 // (tokenizeQuery/parseQuery/evalQueryNode + browserFieldDefs/browserTree,
-// righe ~5184-5570). Interamente client-side: il backend non offre alcun
-// endpoint di ricerca/filtro testuale sui libri (verificato — vedi
-// backend/app/api/books.py), quindi questa logica va riprodotta qui pari
-// pari, non chiamata da remoto.
+// righe ~5184-5570).
+//
+// **ATTENZIONE, questo motore esiste DUE volte, ed è voluto.** Qui sopra
+// c'era scritto «il backend non offre alcun endpoint di ricerca/filtro
+// testuale sui libri (verificato)»: era vero quando è stato scritto e **non
+// lo è più** — corretto il 16/11/2026. `GET /api/kolibre/books` prende un
+// parametro `q`, e `backend/app/calibre/query_sql.py` (`where_da_query`)
+// implementa la STESSA grammatica — stessi token, stessa precedenza
+// `not > and > or`, stesse virgolette, stesso `=` per la corrispondenza
+// esatta — ma invece di dire sì/no su un libro già caricato produce un pezzo
+// di WHERE.
+//
+// **Chi filtra, quando.** Sotto la soglia di impaginazione il browser ha in
+// mano tutta la biblioteca e filtra qui, senza un giro di rete per ogni
+// lettera digitata. Sopra la soglia ha in mano duecento libri per volta, e
+// filtrare qui vorrebbe dire filtrare un ventesimo della biblioteca: là la
+// domanda va al server. La fedeltà fra le due implementazioni è quello che
+// conta, e ha una prova sua, `ricerca_fedele`. La stessa
+// query deve dare lo stesso risultato sotto e sopra la soglia, o la soglia
+// diventa un confine visibile.
+//
+// **Per chi scrive un client nuovo** (il client nativo, 16/11/2026): questo
+// motore non è obbligatorio. Un client che manda sempre `q` al server ha le
+// stesse risposte senza riscrivere 500 righe — paga un giro di rete per
+// ricerca, e si risparmia una terza implementazione da tenere fedele alle
+// altre due.
 import type { Book, CustomColumn } from '@/types/library'
 import { foldAccents } from './foldAccents'
 import { splitAuthorNames } from './authorNames'

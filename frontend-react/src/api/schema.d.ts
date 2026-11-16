@@ -13,12 +13,24 @@ export interface paths {
         };
         /**
          * Get Version
-         * @description Versione in esecuzione — nessuna autenticazione richiesta apposta, cosi'
-         *     si puo' controllare con un semplice curl/browser senza login, per capire
-         *     a colpo d'occhio se il server e' allineato all'ultimo tag pushato. Il
-         *     valore arriva da KOLIBRE_VERSION, che si scrive in .env prima del build
-         *     (la propria automazione di deploy lo ricava da `git describe`); se non
-         *     c'e', risponde "dev".
+         * @description Chi sei, che contratto parli, e da quale commit giri.
+         *
+         *     **Nessuna autenticazione, apposta** — e dal 16/11/2026 e' una ragione in
+         *     piu' che prima: oltre a poter controllare con un curl se il server e'
+         *     allineato all'ultimo tag, questa e' la prima domanda che fa un client che
+         *     NON HA ANCORA un account. Dietro l'autenticazione sarebbe inutile
+         *     proprio nel momento in cui serve.
+         *
+         *     **Perche' non e' una rotta nuova chiamata `/api/version`.** Perche'
+         *     questa c'era gia', ed e' quella che il frontend web interroga
+         *     (`components/ConnectionStatus.tsx`). Due indirizzi che rispondono «chi
+         *     sei» sono il modo di farli divergere: uno viene aggiornato e l'altro no,
+         *     e chi legge quello sbagliato crede a una versione che non gira.
+         *
+         *     `version` arriva da KOLIBRE_VERSION, che si scrive in .env prima del
+         *     build (la propria automazione di deploy lo ricava da `git describe`); se
+         *     non c'e', risponde "dev". Vedi `API` e `CLIENT_MINIMO` per la differenza
+         *     fra la versione del deploy e quella del contratto.
          */
         get: operations["get_version_api_kolibre_version_get"];
         put?: never;
@@ -1086,8 +1098,9 @@ export interface paths {
         };
         /**
          * Get Book Stats
-         * @description Per-book reading-stats panel payload (book-detail page) — mirrors
-         *     KoServer's own /books/{id}/stats: total time/sessions, first/last read,
+         * @description Per-book reading-stats panel payload (book-detail page) — same shape as
+         *     the per-book stats of an earlier, unpublished project of mine: total
+         *     time/sessions, first/last read,
          *     a day-by-day time breakdown for the panel's chart, and the highlight
          *     count already tracked elsewhere (Highlight, unified across web/KOReader/
          *     Calibre-import sources).
@@ -2284,6 +2297,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/{device_id}/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Device Diagnostics
+         * @description I registri che questo lettore ha mandato, dal più recente.
+         */
+        get: operations["list_device_diagnostics_api_devices__device_id__diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/diagnostics/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Device Diagnostic
+         * @description Un registro, come testo da leggere nel browser.
+         *
+         *     `text/plain` e non un allegato: serve aprirlo e guardarlo, non salvarlo.
+         */
+        get: operations["read_device_diagnostic_api_devices__device_id__diagnostics__filename__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/{device_id}/backups/download": {
         parameters: {
             query?: never;
@@ -3118,6 +3173,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/devices/books/removed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Book Removed
+         * @description «Questo lettore non vuole piu' questo libro»: lo chiede il plugin, quando
+         *     si tiene premuto un libro nella vista Kolibre e si sceglie «elimina dal
+         *     dispositivo». Corpo: l'identita' del libro, come per `/progress`
+         *     ({hash} oppure {library, calibre_book_id}, piu' {format} facoltativo).
+         *
+         *     **Perche' il dispositivo deve passare da qui e non cancellare e basta**
+         *     (ed e' la ragione per cui questo endpoint esiste). Lo stato desiderato —
+         *     «quali libri stanno su questo lettore» — lo tiene il server: e' lui che
+         *     al prossimo handshake offre al dispositivo quello che gli manca. Un
+         *     plugin che cancellasse il file per conto suo si vedrebbe **riconsegnare
+         *     lo stesso libro** alla sincronizzazione dopo, e chi ha premuto «elimina»
+         *     non lo capirebbe mai. Quindi la cancellazione comincia qui, e il file
+         *     sparisce dopo.
+         *
+         *     **Il dispositivo poteva gia' AGGIUNGERE** da se' (`/books/delivered`, lo
+         *     sfoglia-catalogo sul lettore): questa e' l'operazione simmetrica, e la
+         *     riga che nasce la' con `requested_by = "device"` se ne va qui.
+         *
+         *     **Una riga mai consegnata non si segna, si butta.** Se il libro era in
+         *     coda di invio e non e' mai arrivato, «eliminarlo dal dispositivo» vuol
+         *     dire annullare l'invio: e' quello che fa anche il pulsante del sito
+         *     (`queue_device_book_action`, ramo `queued_delete`), e qui si fa lo
+         *     stesso perche' la domanda e' la stessa.
+         *
+         *     **La riga se ne va anche quando il libro era consegnato**, e non diventa
+         *     `pending_delete`: quello stato vuol dire «il server vuole che il
+         *     dispositivo lo cancelli, e aspetta conferma». Qui la conferma e' la
+         *     richiesta stessa — il dispositivo sta per cancellarlo, e lo sa lui. E'
+         *     la stessa scelta che `/sync/ack` fa quando il plugin dichiara
+         *     `result = deleted`: la riga se ne va e la storia ne conserva la traccia.
+         */
+        post: operations["report_book_removed_api_kolibre_devices_books_removed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/devices/books/delivered": {
         parameters: {
             query?: never;
@@ -3440,6 +3544,31 @@ export interface paths {
          *     (vedi upload_device_backup sopra) — qui si registra solo l'esito.
          */
         post: operations["complete_device_restore_request_api_kolibre_devices_sync_restore_request__request_id__complete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/diagnostic-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Diagnostic Log
+         * @description Il registro di un lettore, mandato a richiesta dal suo menu.
+         *
+         *     Corpo grezzo come `upload_device_backup`: è testo, non serve multipart.
+         *     Il nome del file lo decide il SERVER e non il dispositivo — un nome che
+         *     arriva da fuori è un modo di scrivere dove non si dovrebbe, e qui non
+         *     c'è nessuna ragione per cui debba sceglierlo il lettore.
+         */
+        post: operations["upload_diagnostic_log_api_kolibre_devices_diagnostic_log_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5611,6 +5740,93 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pairing/requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Richieste In Attesa
+         * @description Le richieste che aspettano, per il pannello in cui si confermano.
+         *
+         *     **Le vede chiunque sia entrato, non solo chi le ha chieste**, e non e' una
+         *     svista: prima della conferma una richiesta non e' di nessuno — e' un
+         *     programma che ha bussato, e il server non puo' sapere a nome di chi. Chi
+         *     conferma la fa diventare sua. Fra due account dello stesso server questo
+         *     vuol dire vedere il nome e l'indirizzo del programma di un altro: e'
+         *     scritto, ed e' il prezzo di non aver niente da chiedere prima di bussare.
+         */
+        get: operations["richieste_in_attesa_api_pairing_requests_get"];
+        put?: never;
+        /**
+         * Avvia Accoppiamento
+         * @description «Voglio collegarmi»: torna il codice da mostrare e il biglietto con cui
+         *     poi si ritira il token.
+         *
+         *     Risponde **senza autenticazione**, perche' chi chiede non ha ancora
+         *     nessuna credenziale — e' il punto di tutto. I limiti che la tengono
+         *     stretta sono in testa al file.
+         */
+        post: operations["avvia_accoppiamento_api_pairing_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pairing/requests/{request_id}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Conferma Accoppiamento
+         * @description «Si', quel programma sono io»: nasce il token, e lo ritirera' il programma.
+         *
+         *     **Vuole una sessione vera, non un token.** E' la stessa regola di
+         *     `POST /api/users/me/tokens` e per la stessa ragione: se un token potesse
+         *     benedire un programma nuovo, chi ne rubasse uno se ne farebbe altri a
+         *     volonta', e spegnere quello rubato non chiuderebbe niente.
+         *
+         *     Il token nasce **a nome di chi conferma**: da quel momento il programma
+         *     puo' fare quello che quell'account puo' fare, e niente di piu'.
+         */
+        post: operations["conferma_accoppiamento_api_pairing_requests__request_id__confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/pairing/requests/{request_id}/refuse": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rifiuta Accoppiamento
+         * @description «No»: la richiesta si spegne subito e nessun token nasce.
+         *
+         *     Il rifiuto **resta** anche dopo i cinque minuti (vedi `_stato`): il
+         *     programma riceve un no e non si rimette in coda da solo.
+         */
+        post: operations["rifiuta_accoppiamento_api_pairing_requests__request_id__refuse_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/opds": {
         parameters: {
             query?: never;
@@ -6104,10 +6320,78 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/pairing/requests/{ticket}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stato Dell Accoppiamento
+         * @description «Com'e' andata?», chiesto dal programma col suo biglietto.
+         *
+         *     **Il token arriva una volta sola.** Alla prima risposta che lo porta la
+         *     riga si segna come ritirata e il token in chiaro si cancella: se quella
+         *     risposta si perde per strada, non c'e' modo di riaverla e si rifa'
+         *     l'accoppiamento. E' la scelta piu' stretta fra le due possibili, e il
+         *     prezzo e' dichiarato — un token rimasto senza padrone si spegne
+         *     dall'elenco dei token, dove compare col nome del programma.
+         */
+        get: operations["stato_dell_accoppiamento_api_pairing_requests__ticket__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccoppiamentoAvviato
+         * @description La risposta a «voglio collegarmi»: il codice da mostrare alla persona, e
+         *     il biglietto con cui ritirare il token quando sara' confermato.
+         *
+         *     **`code` si mostra, `ticket` non si mostra.** Sono due cose diverse: il
+         *     codice e' per gli occhi di chi conferma, il biglietto e' il segreto del
+         *     programma — se finisse a schermo, o in un log, chiunque l'abbia visto
+         *     potrebbe ritirare il token al posto suo.
+         */
+        AccoppiamentoAvviato: {
+            /** Code */
+            code: string;
+            /** Ticket */
+            ticket: string;
+            /** Expires At */
+            expires_at: string;
+            /** Poll Every Seconds */
+            poll_every_seconds: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AccoppiamentoConfermato
+         * @description La conferma e' fatta: il token e' nato e lo ritirera' il programma.
+         *
+         *     **Il token non c'e' nemmeno qui.** Chi conferma dal sito non deve
+         *     copiarlo, trascriverlo o custodirlo: lo ritira il programma con il suo
+         *     biglietto, e questa risposta serve solo a dire quale token e' nato — per
+         *     poterlo spegnere.
+         */
+        AccoppiamentoConfermato: {
+            /** Status */
+            status: string;
+            /** Token Id */
+            token_id: number;
+            /** Token Name */
+            token_name: string;
+        } & {
+            [key: string]: unknown;
+        };
         /** AncoraCreata */
         AncoraCreata: {
             /** Anchor Id */
@@ -7887,6 +8171,10 @@ export interface components {
             sends: components["schemas"]["LibroDaMandare"][];
             /** Removes */
             removes: components["schemas"]["LibroDaTogliere"][];
+            /** Server Pages */
+            server_pages: {
+                [key: string]: number;
+            };
             /** File Actions */
             file_actions: (components["schemas"]["AzioneDiEliminazione"] | components["schemas"]["AzioneDiSovrascrittura"])[];
             restore_request: components["schemas"]["RichiestaDiRipristino"] | null;
@@ -8530,6 +8818,8 @@ export interface components {
             folder_cover_url: string | null;
             /** Delivery Hash */
             delivery_hash: string | null;
+            /** Server Pages */
+            server_pages?: number | null;
         } & {
             [key: string]: unknown;
         };
@@ -8650,6 +8940,8 @@ export interface components {
             rating: number | null;
             /** Pubdate */
             pubdate: string | null;
+            /** Server Pages */
+            server_pages?: number | null;
             /** Has Cover */
             has_cover: boolean;
             /** Size */
@@ -9088,6 +9380,23 @@ export interface components {
             progress_percent: number;
             /** Highlights Count */
             highlights_count: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LibroToltoDalDispositivo
+         * @description «Questo lettore non vuole piu' questo libro»: la risposta dice quante
+         *     righe dello stato desiderato se ne sono andate.
+         *
+         *     `removed` puo' essere piu' di uno: lo stesso libro puo' essere sul
+         *     dispositivo in due formati, e togliere «il libro» significa togliere
+         *     quello che c'e'. Se il plugin dichiara il formato, se ne va solo quello.
+         */
+        LibroToltoDalDispositivo: {
+            /** Status */
+            status: string;
+            /** Removed */
+            removed: number;
         } & {
             [key: string]: unknown;
         };
@@ -10203,6 +10512,33 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * RichiestaDiAccoppiamentoInAttesa
+         * @description Una richiesta che aspetta, come la vede chi deve confermarla.
+         *
+         *     Porta il **codice** perche' e' con quello che si riconosce la propria: il
+         *     nome lo scrive il programma e si puo' scrivere qualunque cosa, l'indirizzo
+         *     dice solo da quale macchina arriva. Il codice invece e' sullo schermo di
+         *     chi sta aspettando, e due richieste insieme si distinguono solo cosi'.
+         */
+        RichiestaDiAccoppiamentoInAttesa: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Client Name */
+            client_name: string;
+            /** Platform */
+            platform: string | null;
+            /** Ip */
+            ip: string | null;
+            /** Created At */
+            created_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * RichiestaDiRipristino
          * @description «Rimetti su questo lettore il backup di quell'altro».
          *
@@ -10240,6 +10576,16 @@ export interface components {
             status: string;
             /** Id */
             id: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * RichiesteDiAccoppiamento
+         * @description Le richieste vive: le scadute, le confermate e le rifiutate non ci sono.
+         */
+        RichiesteDiAccoppiamento: {
+            /** Items */
+            items: components["schemas"]["RichiestaDiAccoppiamentoInAttesa"][];
         } & {
             [key: string]: unknown;
         };
@@ -11061,6 +11407,38 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * StatoDellAccoppiamento
+         * @description Com'e' andata, chiesto dal programma con il suo biglietto.
+         *
+         *     **`status`**:
+         *       * `pending` — nessuno ha ancora confermato ne' rifiutato;
+         *       * `confirmed` — confermato: questa risposta, **e solo questa**, porta
+         *         il token;
+         *       * `collected` — il token era gia' stato ritirato. Se il programma vede
+         *         questo e non ha un token, la risposta con il token e' andata perduta:
+         *         non c'e' modo di riaverla, e si rifa' l'accoppiamento da capo (il
+         *         token rimasto senza padrone si spegne dal sito);
+         *       * `refused` — la persona ha detto no;
+         *       * `expired` — sono passati i cinque minuti.
+         *
+         *     **Prima della conferma `token` e `user` sono nulli**, e non per prudenza:
+         *     questa rotta risponde **senza autenticazione**, e tutto quello che
+         *     dicesse in piu' sarebbe un modo di sapere cose su un server altrui
+         *     presentando un biglietto inventato.
+         */
+        StatoDellAccoppiamento: {
+            /** Status */
+            status: string;
+            /** Expires At */
+            expires_at: string | null;
+            /** Token */
+            token: string | null;
+            /** User */
+            user: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * StatoDelleStatistiche
          * @description Da dove il lettore deve ripartire, e con cosa confrontarsi.
          *
@@ -11382,13 +11760,27 @@ export interface components {
         /**
          * VersioneDelServer
          * @description Si risponde **senza autenticazione**, di proposito: serve a controllare
-         *     con un `curl` se il server e' allineato all'ultimo tag, e chiedere di
-         *     accedere per saperlo sarebbe un impiccio senza guadagno. `"dev"` quando
-         *     la versione non e' stata scritta al momento del build.
+         *     con un `curl` se il server e' allineato all'ultimo tag, e dal 16/11/2026
+         *     e' anche la prima domanda che fa un client che non ha ancora un account.
+         *
+         *     **`version` e `api` sono due cose diverse.** `version` e' il deploy che
+         *     sta girando e cambia a ogni rilascio; `api` e' il contratto, e cambia
+         *     solo quando una rotta cambia in modo che un client scritto prima non
+         *     funzioni piu'. **Un client deve guardare `api`**: legarsi a `version`
+         *     vorrebbe dire rifiutare un server compatibile perche' ha un altro numero.
+         *
+         *     `commit` e' `null`, e non una stringa come `"unknown"`, quando non si
+         *     sa: una stringa un client non la puo' distinguere da un commit vero.
          */
         VersioneDelServer: {
             /** Version */
             version: string;
+            /** Commit */
+            commit?: string | null;
+            /** Api */
+            api: number;
+            /** Client Minimo */
+            client_minimo: string;
         } & {
             [key: string]: unknown;
         };
@@ -15091,6 +15483,73 @@ export interface operations {
             };
         };
     };
+    list_device_diagnostics_api_devices__device_id__diagnostics_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_device_diagnostic_api_devices__device_id__diagnostics__filename__get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     download_device_backups_api_devices__device_id__backups_download_get: {
         parameters: {
             query?: {
@@ -15993,6 +16452,41 @@ export interface operations {
             };
         };
     };
+    report_book_removed_api_kolibre_devices_books_removed_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibroToltoDalDispositivo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     report_book_delivered_api_kolibre_devices_books_delivered_post: {
         parameters: {
             query?: never;
@@ -16402,6 +16896,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upload_diagnostic_log_api_kolibre_devices_diagnostic_log_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };
@@ -19940,6 +20456,138 @@ export interface operations {
             };
         };
     };
+    richieste_in_attesa_api_pairing_requests_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RichiesteDiAccoppiamento"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    avvia_accoppiamento_api_pairing_requests_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccoppiamentoAvviato"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    conferma_accoppiamento_api_pairing_requests__request_id__confirm_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                request_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccoppiamentoConfermato"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rifiuta_accoppiamento_api_pairing_requests__request_id__refuse_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                request_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     opds_root_opds_get: {
         parameters: {
             query?: never;
@@ -20602,6 +21250,37 @@ export interface operations {
                 };
                 content: {
                     "text/plain": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    stato_dell_accoppiamento_api_pairing_requests__ticket__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ticket: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatoDellAccoppiamento"];
                 };
             };
             /** @description Validation Error */

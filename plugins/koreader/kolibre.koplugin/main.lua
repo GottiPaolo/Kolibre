@@ -1,3 +1,17 @@
+-- Kolibre — KOReader plugin.
+-- Copyright (C) 2026 Paolo Gotti. GNU AGPL-3.0-or-later; see the LICENSE and
+-- NOTICE files next to this one. This plugin extends KOReader (AGPL-3.0)
+-- from the inside, which is why the whole project is AGPL.
+--
+-- **Perche' «next to this one» e non «in the repository», dal 16/11/2026.**
+-- Chi installa questo plugin non riceve il repository: riceve uno zip. Da
+-- oggi il server ci mette dentro LICENSE e NOTICE mentre lo costruisce
+-- (`backend/app/api/tools.py`, `_aggiungi_la_licenza`), quindi i due file
+-- stanno davvero accanto a questo — e l'AGPL chiede proprio che l'avviso
+-- viaggi con la copia. Non stanno nella cartella del sorgente di proposito:
+-- la' finirebbero nell'elenco dell'autoaggiornamento, e ogni dispositivo si
+-- scaricherebbe due testi fissi a ogni versione.
+
 --[[--
 Kolibre KOReader plugin — server-driven device sync.
 
@@ -161,8 +175,8 @@ Calibre's "Muñoz") was silently defeating the match on its own.
 v0.5.3: "Sincronizza tutto" now shows a real "[====------] 40% - Fase..."
 progress bar across every phase (handshake, download, azioni in sospeso,
 rimozioni, conteggio pagine, note/posizioni/backup) instead of plain text —
-same bar format as the plugin of KoServer (an earlier project of mine), explicitly
-matched on request. Downloaded files no longer get "(<calibre_id>)" stuffed
+same bar format as the plugin of an earlier, unpublished project of mine,
+explicitly matched on request. Downloaded files no longer get "(<calibre_id>)" stuffed
 into their on-device filename (_downloadCatalogBook / runDownloads) — that
 convention was never load-bearing (only a fallback fuzzy-match heuristic for
 files Kolibre never touched reads it back out of a filename, and only for
@@ -622,6 +636,7 @@ local KolibrePercorsi = require("kolibre_percorsi")
 -- Il registro di KOReader ripulito e accorciato: una funzione pura, provata
 -- senza KOReader (vedi la prova «il_registro_si_ripulisce»).
 local KolibreDiagnostica = require("kolibre_diagnostica")
+local KolibreCopertine = require("kolibre_copertine")
 local KolibreAvvio    = require("kolibre_avvio")
 -- Quali patch proporre di aggiornare, e quali no: la scelta e' una funzione
 -- pura, provabile senza KOReader (vedi la prova «patch_da_aggiornare»).
@@ -630,7 +645,7 @@ local KolibrePatch = require("kolibre_patch")
 -- funzione pura (vedi la prova «aggiornamento_al_risveglio»).
 local KolibreRinvii = require("kolibre_rinvii")
 
-local VERSION = "0.14.2"
+local VERSION = "0.20.0"
 
 local EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, fb2 = true, txt = true }
 
@@ -883,105 +898,129 @@ function Kolibre:addToMainMenu(menu_items)
     menu_items.kolibre = {
         text = t("koreader.menu.title"),
         sorting_hint = "tools",
-        sub_item_table = {
-            {
-                -- Renamed from "Sincronizza ora": now also pushes queued
-                -- annotations/positions and runs a backup, and asks
-                -- confirmation for pending downloads too, not just
-                -- deletions — see syncNow/_syncNowRun/_confirmDownloads.
-                text = t("koreader.menu.sync_all"),
-                -- Tenendo premuta una voce, KOReader mostra il suo
-                -- `help_text` (verificato in frontend/ui/widget/
-                -- touchmenu.lua, che lo fa anche per le voci disattivate).
-                -- Qui dentro va l'elenco di cosa viene sincronizzato: e' la
-                -- domanda che si fa davanti a un comando che fa sette cose,
-                -- e la risposta non sta nel nome.
-                help_text = t("koreader.menu.sync_all_help"),
-                icon = "sync",
-                keep_menu_open = true,
-                callback = function() self:syncNow(true, "manual") end,
-            },
-            {
-                -- La meta' veloce: solo i libri in arrivo e in uscita.
-                -- Sta fra le voci di tutti i giorni e non sotto "Strumenti"
-                -- perche' e' la domanda che ci si fa piu' spesso accendendo
-                -- il lettore — "c'e' qualcosa di nuovo?" — e perche' e'
-                -- anche l'automazione predefinita all'avvio: chi la trova
-                -- gia' fatta deve poterla rifare a mano senza cercarla.
-                text = t("koreader.menu.check_new_books"),
-                help_text = t("koreader.menu.check_new_books_help"),
-                keep_menu_open = true,
-                callback = function() self:syncBooksOnly(true, "manual_libri") end,
-            },
-            {
-                -- Opens the catalog dashboard (Aggiunti di recente / Da
-                -- scoprire / Sfoglia la libreria) — see openCatalogDashboard.
-                text = t("koreader.menu.catalog"),
-                keep_menu_open = true,
-                callback = function() self:openCatalogDashboard() end,
-            },
-            {
-                -- La UI di Kolibre: un file browser nostro con i soli libri
-                -- che Kolibre ha consegnato qui. Spenta per difetto
-                -- (decisione dell'11/11): si accende da qui, e finche'
-                -- nessuno la accende KOReader resta quello di sempre.
-                text = t("koreader.ui.apri"),
-                help_text = t("koreader.ui.apri_help"),
-                callback = function() self:apriLibreria() end,
-            },
-            {
-                text = t("koreader.menu.tools"),
-                sub_item_table_func = function() return self:_toolsMenuItems() end,
-            },
-            {
-                text = t("koreader.menu.settings"),
-                sub_item_table = {
-                    {
-                        text = t("koreader.settings.connection"),
-                        keep_menu_open = true,
-                        callback = function() self:showSettings() end,
-                    },
-                    {
-                        text = t("koreader.settings.test_connection"),
-                        keep_menu_open = true,
-                        callback = function() self:testConnection() end,
-                    },
-                    {
-                        -- Il popup delle sincronizzazioni AUTOMATICHE. Quelle
-                        -- chieste a mano rispondono sempre: un comando che
-                        -- non dice niente sembra rotto.
-                        text = t("koreader.ui.usa_la_vista"),
-                        help_text = t("koreader.ui.usa_la_vista_help"),
-                        checked_func = function() return self:_libreriaAllAvvio() end,
-                        callback = function()
-                            local acceso = not self:_libreriaAllAvvio()
-                            self:_impostaLibreriaAllAvvio(acceso)
-                            self:_applicaSceltaLibreria(acceso)
-                        end,
-                    },
-                    {
-                        text = t("koreader.settings.sync_popup"),
-                        help_text = t("koreader.settings.sync_popup_help"),
-                        checked_func = function() return self:_popupDiSincronizzazione() end,
-                        callback = function()
-                            self:_impostaPopupDiSincronizzazione(not self:_popupDiSincronizzazione())
-                        end,
-                    },
-                    {
-                        -- La versione della UI accanto a quella del plugin,
-                        -- e non una voce in piu': sono due numeri che
-                        -- rispondono alla stessa domanda («cosa ho
-                        -- installato?»), e una riga sola li tiene insieme.
-                        -- Chiesta a `pcall` perche' il modulo della UI puo'
-                        -- non caricarsi, e allora la riga dice solo il
-                        -- plugin invece di sparire.
-                        text = t("koreader.settings.info", {
-                            version = VERSION,
-                            ui = self:_versioneDellaUI(),
-                        }),
-                        keep_menu_open = true,
-                        callback = function() self:showInfo() end,
-                    },
+        sub_item_table_func = function() return self:_vociPrimoLivello() end,
+    }
+end
+
+--- Le voci del primo livello del menu di Kolibre.
+--
+-- **Perche' una funzione e non la tabella scritta dentro `addToMainMenu`**
+-- (16/11/2026). Dal 16/11 lo stesso elenco serve in due posti: il menu del
+-- plugin, e il menu che si apre tenendo premuto il logo dentro la vista
+-- libreria (Paolo: «tenendo premuto il logo si apre un menu che coincide
+-- con il primo livello di quello del plugin»). Scriverlo due volte
+-- vorrebbe dire due elenchi che alla prima voce aggiunta non coincidono
+-- piu' — ed e' proprio «coincide» la cosa che Paolo ha chiesto.
+--
+-- `sub_item_table_func` e non `sub_item_table`: questa lista si rilegge a
+-- ogni apertura, quindi una voce che dipende dallo stato (la riga delle
+-- informazioni, che porta il numero di versione) non si ferma a quello che
+-- era al caricamento del plugin.
+function Kolibre:_vociPrimoLivello()
+    return {
+        {
+            -- Renamed from "Sincronizza ora": now also pushes queued
+            -- annotations/positions and runs a backup, and asks
+            -- confirmation for pending downloads too, not just
+            -- deletions — see syncNow/_syncNowRun/_confirmDownloads.
+            text = t("koreader.menu.sync_all"),
+            -- Tenendo premuta una voce, KOReader mostra il suo
+            -- `help_text` (verificato in frontend/ui/widget/
+            -- touchmenu.lua, che lo fa anche per le voci disattivate).
+            -- Qui dentro va l'elenco di cosa viene sincronizzato: e' la
+            -- domanda che si fa davanti a un comando che fa sette cose,
+            -- e la risposta non sta nel nome.
+            help_text = t("koreader.menu.sync_all_help"),
+            icon = "sync",
+            keep_menu_open = true,
+            callback = function() self:syncNow(true, "manual") end,
+        },
+        {
+            -- La meta' veloce: solo i libri in arrivo e in uscita.
+            -- Sta fra le voci di tutti i giorni e non sotto "Strumenti"
+            -- perche' e' la domanda che ci si fa piu' spesso accendendo
+            -- il lettore — "c'e' qualcosa di nuovo?" — e perche' e'
+            -- anche l'automazione predefinita all'avvio: chi la trova
+            -- gia' fatta deve poterla rifare a mano senza cercarla.
+            text = t("koreader.menu.check_new_books"),
+            help_text = t("koreader.menu.check_new_books_help"),
+            keep_menu_open = true,
+            callback = function() self:syncBooksOnly(true, "manual_libri") end,
+        },
+        {
+            -- Opens the catalog dashboard (Aggiunti di recente / Da
+            -- scoprire / Sfoglia la libreria) — see openCatalogDashboard.
+            text = t("koreader.menu.catalog"),
+            keep_menu_open = true,
+            callback = function() self:openCatalogDashboard() end,
+        },
+        {
+            -- La UI di Kolibre: un file browser nostro con i soli libri
+            -- che Kolibre ha consegnato qui. Spenta per difetto
+            -- (decisione dell'11/11): si accende da qui, e finche'
+            -- nessuno la accende KOReader resta quello di sempre.
+            text = t("koreader.ui.apri"),
+            help_text = t("koreader.ui.apri_help"),
+            -- Un nome per questa voce, che non e' il suo testo: il menu che
+            -- si apre tenendo premuto il logo DENTRO la vista la salta — si
+            -- e' gia' dentro — e riconoscerla dalla sua etichetta tradotta
+            -- vorrebbe dire un filtro che si rompe cambiando lingua.
+            kolibre_id = "apri_libreria",
+            callback = function() self:apriLibreria() end,
+        },
+        {
+            text = t("koreader.menu.tools"),
+            sub_item_table_func = function() return self:_toolsMenuItems() end,
+        },
+        {
+            -- **Una sezione sua** (Paolo, 16/11/2026: «potremmo anche
+            -- creare una sezione del plugin apposita per la UI dove si
+            -- abilita e si sceglie il numero di record per row etc.»).
+            -- Prima queste voci stavano in mezzo alle impostazioni della
+            -- connessione, che e' un'altra cosa: li' si dice a quale
+            -- server parlare, qui come si vede la libreria. Il menu di
+            -- Kolibre Paolo l'ha gia' chiamato «confusionale» una volta,
+            -- e la cura non e' togliere voci — sono tutte usate — e'
+            -- metterle vicino a quelle che gli somigliano.
+            text = t("koreader.ui.sezione"),
+            help_text = t("koreader.ui.sezione_help"),
+            sub_item_table_func = function() return self:_uiMenuItems() end,
+        },
+        {
+            text = t("koreader.menu.settings"),
+            sub_item_table = {
+                {
+                    text = t("koreader.settings.connection"),
+                    keep_menu_open = true,
+                    callback = function() self:showSettings() end,
+                },
+                {
+                    text = t("koreader.settings.test_connection"),
+                    keep_menu_open = true,
+                    callback = function() self:testConnection() end,
+                },
+                {
+                    text = t("koreader.settings.sync_popup"),
+                    help_text = t("koreader.settings.sync_popup_help"),
+                    checked_func = function() return self:_popupDiSincronizzazione() end,
+                    callback = function()
+                        self:_impostaPopupDiSincronizzazione(not self:_popupDiSincronizzazione())
+                    end,
+                },
+                {
+                    -- La versione della UI accanto a quella del plugin,
+                    -- e non una voce in piu': sono due numeri che
+                    -- rispondono alla stessa domanda («cosa ho
+                    -- installato?»), e una riga sola li tiene insieme.
+                    -- Chiesta a `pcall` perche' il modulo della UI puo'
+                    -- non caricarsi, e allora la riga dice solo il
+                    -- plugin invece di sparire.
+                    text = t("koreader.settings.info", {
+                        version = VERSION,
+                        ui = self:_versioneDellaUI(),
+                    }),
+                    keep_menu_open = true,
+                    callback = function() self:showInfo() end,
                 },
             },
         },
@@ -1374,11 +1413,11 @@ function Kolibre:_closeProgress()
 end
 
 -- Rendered "[====------] 40% - Label..." bar, same exact math/format as the
--- KOReader plugin of KoServer, an earlier unreleased project of my own (its
+-- KOReader plugin of an earlier, unpublished project of my own (its
 -- syncAll) — reused on purpose, not designed from scratch. `current` is
--- 1-based (the bar shows how far in you are BEFORE this step runs, as in
--- KoServer), reusing
--- the existing _showProgress InfoMessage-reuse mechanic underneath.
+-- 1-based (the bar shows how far in you are BEFORE this step runs, as it
+-- was there), reusing the existing _showProgress InfoMessage-reuse mechanic
+-- underneath.
 function Kolibre:_showProgressBar(current, total, label)
     local n = math.max(total, 1)
     local filled = math.floor((current - 1) / n * 10)
@@ -2122,6 +2161,139 @@ end
 -- con un `pcall` perche' il modulo potrebbe non caricarsi, e in quel caso
 -- la risposta onesta e' «no», non un errore che ferma l'avvio.
 --- Il numero di versione dell'interfaccia, o un trattino.
+--- Le voci della sezione «Interfaccia libreria».
+--
+-- **Costruite quando il menu si apre** (`sub_item_table_func`) e non una
+-- volta per sempre: i segni di spunta e il numero delle righe devono dire
+-- com'e' adesso, non com'era all'avvio del lettore.
+function Kolibre:_uiMenuItems()
+    local voci = {
+        {
+            text = t("koreader.ui.usa_la_vista"),
+            help_text = t("koreader.ui.usa_la_vista_help"),
+            checked_func = function() return self:_libreriaAllAvvio() end,
+            callback = function()
+                local acceso = not self:_libreriaAllAvvio()
+                self:_impostaLibreriaAllAvvio(acceso)
+                self:_applicaSceltaLibreria(acceso)
+            end,
+        },
+        {
+            -- Quante righe per schermata, da 4 a 8 (Paolo, 15/11/2026). Un
+            -- sottomenu e non cinque voci in fila: cinque righe in piu' in
+            -- un menu gia' lungo lo peggiorerebbero, una voce che si apre
+            -- ne aggiunge una sola.
+            text_func = function()
+                local quante = self:_righeDellaVista()
+                return t("koreader.ui.righe_scelte",
+                    { count = quante and tostring(quante) or "-" })
+            end,
+            help_text = t("koreader.ui.righe_help"),
+            sub_item_table_func = function()
+                local righe = {}
+                for quante = 4, 8 do
+                    table.insert(righe, {
+                        text = t("koreader.ui.righe_n", { count = quante }),
+                        -- `checked_func` e non `checked`: il segno di
+                        -- spunta si ricalcola ogni volta che il menu si
+                        -- apre, invece di restare quello di quando e' stato
+                        -- costruito.
+                        checked_func = function()
+                            return self:_righeDellaVista() == quante
+                        end,
+                        radio = true,
+                        callback = function()
+                            self:_scegliRigheDellaVista(quante)
+                        end,
+                    })
+                end
+                return righe
+            end,
+            separator = true,
+        },
+        {
+            -- Le due finestre che la vista apre dai suoi tasti, raggiungibili
+            -- anche da qui. **Non e' un doppione inutile**: dalla barra della
+            -- libreria si arriva al pannello degli invii tenendo premuta la
+            -- casa, e una pressione prolungata e' un gesto che non si scopre
+            -- da solo. Questa voce e' il posto in cui lo si scopre — e il
+            -- testo di aiuto lo dice.
+            text = t("koreader.ui.consegne_voce"),
+            help_text = t("koreader.ui.consegne_voce_help"),
+            callback = function() self:_apriFinestraElenco("kolibre_ui_consegne") end,
+        },
+        {
+            text = t("koreader.ui.cronologia_voce"),
+            callback = function() self:_apriFinestraElenco("kolibre_ui_cronologia") end,
+        },
+    }
+    return voci
+end
+
+--- Apre una delle finestre di elenco (gli invii, la cronologia).
+--
+-- Tutto sotto `pcall` e con un messaggio in chiaro se non si apre: un modulo
+-- che non si carica — un aggiornamento arrivato a meta' — deve dare un
+-- messaggio, non portarsi via il menu di Kolibre mentre si apre.
+function Kolibre:_apriFinestraElenco(modulo)
+    local ok, Finestra = pcall(require, modulo)
+    if not ok then
+        logger.err("Kolibre: " .. modulo .. " non si carica:", Finestra)
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.menu_non_disponibile") })
+        return
+    end
+    if type(Finestra.aperta) == "function" and Finestra.aperta() then return end
+    local vista
+    local costruita, errore = pcall(function()
+        vista = Finestra:new{
+            manifest = self.manifest,
+            kolibre = self,
+            agganciato = self.manifest:getMeta("mai_agganciato") and true or false,
+            cartella_logo = self.path and (self.path .. "/risorse") or nil,
+        }
+        UIManager:show(vista)
+    end)
+    if costruita then return end
+    logger.err("Kolibre: " .. modulo .. " non si apre:", errore)
+    if vista then pcall(function() UIManager:close(vista) end) end
+    UIManager:show(InfoMessage:new{ text = t("koreader.ui.menu_non_disponibile") })
+end
+
+-- ── le righe per schermata della vista libreria ──
+--
+-- **Perche' passano da qui e non dal menu diretto.** Il modulo della vista
+-- puo' non caricarsi (un file mancante dopo un aggiornamento a meta'), e un
+-- menu che muore mentre si apre porta via tutto il menu di Kolibre. Con
+-- `pcall` la voce risponde «-» invece di sparire, come fa gia' la riga della
+-- versione.
+function Kolibre:_righeDellaVista()
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if not ok or type(KolibreUI.righe) ~= "function" then return nil end
+    local ok2, quante = pcall(KolibreUI.righe)
+    return ok2 and quante or nil
+end
+
+function Kolibre:_scegliRigheDellaVista(quante)
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if not ok or type(KolibreUI.scegliRighe) ~= "function" then return end
+    pcall(KolibreUI.scegliRighe, quante)
+    -- **La vista aperta si rifa', non si lascia com'era.** Il numero di
+    -- righe si legge all'apertura: senza questo, cambiarlo non si vedrebbe
+    -- fino alla prossima volta, e Paolo avrebbe toccato un'impostazione che
+    -- sembra non fare niente. Si chiude e si riapre sullo stesso percorso,
+    -- cosi' non si perde il posto dov'era.
+    local vista = nil
+    if type(KolibreUI.aperta) == "function" then
+        local ok2, aperta = pcall(KolibreUI.aperta)
+        vista = ok2 and aperta or nil
+    end
+    if vista then
+        local dove = vista.path
+        pcall(function() UIManager:close(vista) end)
+        pcall(function() self:apriLibreria(dove) end)
+    end
+end
+
 function Kolibre:_versioneDellaUI()
     local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
     if not ok or type(KolibreUI.versione) ~= "function" then return "-" end
@@ -2220,12 +2392,27 @@ function Kolibre:_mandaIlRegistroDavvero(percorso)
     end
 end
 
-function Kolibre:apriLibreria()
+--- Apre la vista libreria. `dove` e' facoltativo.
+--
+-- **A che serve `dove`.** Quando si cambia il numero di righe per schermata
+-- la vista aperta va rifatta, perche' quel numero si legge all'apertura.
+-- Rifarla senza dire dove vorrebbe dire riportare Paolo alla radice della
+-- libreria: ha toccato un'impostazione e si e' perso la cartella in cui
+-- stava. Con `dove` si riapre esattamente li'.
+--
+-- Il percorso si controlla prima di usarlo: una cartella che nel frattempo
+-- non c'e' piu' (una scheda tolta, un libro cancellato dal computer) farebbe
+-- nascere una vista su niente, e il ripiego giusto e' la radice.
+function Kolibre:apriLibreria(dove)
     local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
     if not ok then
         logger.err("Kolibre: la vista libreria non si carica:", KolibreUI)
         UIManager:show(InfoMessage:new{ text = t("koreader.ui.menu_non_disponibile") })
         return
+    end
+    local partenza = self.books_dir
+    if dove and dove ~= "" and lfs.attributes(dove, "mode") == "directory" then
+        partenza = dove
     end
     local vista
     local costruita, errore = pcall(function()
@@ -2234,7 +2421,7 @@ function Kolibre:apriLibreria()
             kolibre = self,
             agganciato = self.manifest:getMeta("mai_agganciato") and true or false,
             cartella_logo = self.path and (self.path .. "/risorse") or nil,
-            path = self.books_dir,
+            path = partenza,
             close_callback = function() UIManager:close(vista) end,
         }
         UIManager:show(vista)
@@ -2620,6 +2807,159 @@ end
 -- were actually queried against the server, downloaded = how many of those
 -- the server actually had a photo for (the rest are normal 404s, not
 -- errors: the server just doesn't have that author's photo yet).
+-- ── le copertine dei libri ──
+--
+-- **Che cosa fa.** Scarica dal server le copertine dei libri che il
+-- dispositivo ha e che una copertina ancora non l'hanno, e le mette nella
+-- cache condivisa (`kolibre_copertine.lua`), da cui le leggono sia la vista
+-- libreria sia il catalogo.
+--
+-- **Perche' qui e non quando si disegna.** Perche' una vista che va in rete
+-- mentre disegna una riga e' uno schermo fermo, e su un e-ink si vede. La
+-- sincronizzazione e' il momento in cui il dispositivo e' gia' in rete e
+-- Paolo si aspetta che qualcosa duri un po'.
+--
+-- **Perche' venti per volta** (`PER_SINCRONIZZAZIONE`): e' la misura chiesta
+-- da Paolo il 15/11. Centocinquanta copertine tutte insieme sarebbero una
+-- sincronizzazione che sembra piantata; venti sono un paio di MB, e le altre
+-- arrivano al giro dopo. Un ordine stabile garantisce che il giro dopo si
+-- riparta da dove si era arrivati — vedi `daScaricare`.
+--
+-- **Perche' dopo la fine della sincronizzazione e non dentro.** Il riepilogo
+-- deve comparire quando la sincronizzazione e' finita, non dopo le
+-- copertine: queste sono un extra, e un extra non fa aspettare. Girano in
+-- rinvii da due, cosi' fra un download e l'altro KOReader resta vivo e
+-- risponde ai tocchi.
+--
+-- **I fallimenti si ricordano solo per questa sessione.** Un libro che il
+-- server non ha ancora convertito dara' 404 oggi e una copertina domani:
+-- ricordarselo per sempre vorrebbe dire non riprovare mai. Ricordarlo per
+-- questa accensione basta a non spendere i venti posti sempre sugli stessi.
+-- ── le foto d'autore che mancano ──
+--
+-- **Il difetto che questa funzione chiude** (trovato il 16/11/2026 leggendo
+-- i dati veri, non il codice). Sul Mac di Paolo quattro cartelle d'autore su
+-- venticinque mostravano il riquadro grigio col nome invece della foto, e le
+-- cause erano QUATTRO, diverse fra loro:
+--
+--   * **Luciano Battaia**: il server non ha una foto e non ce l'avra' —
+--     nessuna voce su Wikipedia con quel nome. Il riquadro col nome e' la
+--     risposta giusta, e non c'e' niente da correggere.
+--   * **TEMP**: non e' un autore. E' una cartella fatta a mano, e dentro c'e'
+--     un EPUB che Kolibre non ha mai consegnato. Niente da correggere qui.
+--   * **Émile Armand**: il server ha la foto, ma sotto il nome SENZA
+--     l'accento — due righe per la stessa persona. Si corregge sul server,
+--     non qui.
+--   * **Paul A.M. Dirac**: ed e' questo. Il libro e' stato consegnato il
+--     6 settembre alle 15:50; la foto il server l'ha presa il 18 settembre,
+--     **dodici giorni dopo**. Alla consegna il 404 era giusto. Il
+--     ripescaggio (`_backfillAuthorFolderCovers`) esiste proprio per questo,
+--     ma gira **solo** su due comandi a mano: «Verifica libreria» e
+--     «Sincronizza tutto». Finche' Paolo non ne tocca uno, una foto arrivata
+--     dopo il libro non raggiunge mai il dispositivo.
+--
+-- **Perche' qui dentro non costa niente.** `_backfillAuthorFolderCovers`
+-- parte da una CAMMINATA del dispositivo, e una camminata non si aggiunge a
+-- una sincronizzazione automatica — e' la regola di questo plugin. Ma le
+-- cartelle degli autori il manifesto le sa gia': sono le cartelle dei libri
+-- che ci stanno dentro. Di camminate zero; di domande al disco una per
+-- cartella d'autore (venticinque sul Mac di Paolo), cioe' niente.
+--
+-- Il tetto e' basso di proposito: le cartelle d'autore sono poche e
+-- cambiano piano, e questi download non devono mangiare il giro delle
+-- copertine.
+function Kolibre:_fotoDAutoreCheMancano()
+    local mancanti = {}
+    local write_folder_cover = self.write_folder_cover
+    if write_folder_cover == nil then write_folder_cover = true end
+    if not write_folder_cover or (self.folder_layout or "author") ~= "author" then
+        return mancanti
+    end
+    self._foto_autore_fallite = self._foto_autore_fallite or {}
+
+    -- Le cartelle, ricavate dai percorsi del manifesto. In ordine, per la
+    -- stessa ragione per cui `daScaricare` ordina: senza, le prime cinque
+    -- sarebbero cinque a caso e qualcuna non arriverebbe mai.
+    local cartelle = {}
+    for _chiave, voce in pairs(self.manifest:all()) do
+        if voce.path then
+            local dir = voce.path:match("^(.*)/[^/]+$")
+            if dir and dir ~= "" and dir ~= self.books_dir then
+                cartelle[dir] = true
+            end
+        end
+    end
+    local elenco = {}
+    for dir in pairs(cartelle) do table.insert(elenco, dir) end
+    table.sort(elenco)
+
+    for _i, dir in ipairs(elenco) do
+        if #mancanti >= 5 then break end
+        local foto = dir .. "/.folder.jpg"
+        local autore = dir:match("([^/]+)$")
+        if autore and autore ~= "" and not self._foto_autore_fallite[autore]
+            and lfs.attributes(foto, "mode") ~= "file" then
+            table.insert(mancanti, {
+                chiave = "autore:" .. autore,
+                percorso = foto,
+                indirizzo = "/api/kolibre/authors/" .. urlEncode(autore) .. "/photo/thumbnail",
+                autore = autore,
+            })
+        end
+    end
+    return mancanti
+end
+
+function Kolibre:scaricaLeCopertine()
+    local cartella = KolibreCopertine.cartella(DataStorage)
+    if not cartella then return end
+    self._copertine_fallite = self._copertine_fallite or {}
+    KolibreCopertine.pota(cartella)
+    local coda = KolibreCopertine.daScaricare(
+        cartella, self.manifest:all(),
+        KolibreCopertine.PER_SINCRONIZZAZIONE, self._copertine_fallite)
+    -- Nello stesso giro anche le FOTO D'AUTORE che mancano: vedi
+    -- `_fotoDAutoreCheMancano` per il difetto che chiude.
+    for _i, foto in ipairs(self:_fotoDAutoreCheMancano()) do
+        table.insert(coda, foto)
+    end
+    if #coda == 0 then return end
+    logger.info("Kolibre: immagini da scaricare in questo giro:", #coda)
+
+    local presi, mancati = 0, 0
+    local function passo()
+        for _i = 1, 2 do
+            local voce = table.remove(coda, 1)
+            if not voce then break end
+            -- `voce.indirizzo` per le foto d'autore, che hanno una rotta
+            -- loro; le copertine se lo fanno costruire dal modulo.
+            local indirizzo = voce.indirizzo
+                or KolibreCopertine.indirizzo(voce.biblioteca, voce.id)
+            local ok = self.api:downloadTo(indirizzo, voce.percorso,
+                KolibreCopertine.MAX_BYTE)
+            if ok then
+                presi = presi + 1
+            else
+                -- Non e' un errore da mostrare: il caso normale e' «il
+                -- server non ha una copertina per questo libro».
+                mancati = mancati + 1
+                if voce.autore then
+                    self._foto_autore_fallite = self._foto_autore_fallite or {}
+                    self._foto_autore_fallite[voce.autore] = true
+                else
+                    self._copertine_fallite[voce.chiave] = true
+                end
+            end
+        end
+        if #coda > 0 then
+            UIManager:scheduleIn(0.05, passo)
+        else
+            logger.info("Kolibre: copertine prese:", presi, "non disponibili:", mancati)
+        end
+    end
+    UIManager:scheduleIn(0.15, passo)
+end
+
 function Kolibre:_backfillAuthorFolderCovers(scanned)
     local write_folder_cover = self.write_folder_cover
     if write_folder_cover == nil then write_folder_cover = true end
@@ -5278,8 +5618,8 @@ end
 -- allow_migration: the one-time local scan has explicit consent (or isn't
 -- needed at all) — see syncNow above for why this can never be silent.
 -- Number of labeled steps shown on the "Sincronizza tutto" progress bar —
--- see _showProgressBar's own comment for why this mirrors KoServer's
--- syncAll() bar exactly. Kept as one flat sequence (handshake, download,
+-- see _showProgressBar's own comment for why this mirrors that earlier
+-- project's syncAll() bar exactly. Kept as one flat sequence (handshake, download,
 -- pending actions, removals, page counts, notes/positions/backup) even
 -- though the real work is callback-chained rather than a plain for-loop,
 -- so each phase just calls _showProgressBar(i, SYNC_STEP_COUNT, label)
@@ -5496,6 +5836,10 @@ function Kolibre:_syncNowRun(interactive, trigger, allow_migration, solo_libri)
             -- acks): from here on the manifest is in sync with the server.
             self.manifest:markClean()
             self:_closeProgress()
+            -- Le copertine: dopo la fine, in rinvii, senza far aspettare il
+            -- riepilogo. Sotto `pcall` perche' sono un extra, e un extra non
+            -- deve poter rovinare una sincronizzazione andata bene.
+            pcall(function() self:scaricaLeCopertine() end)
 
             -- Stay silent on a no-op background sync; anything that actually
             -- happened — or any interactive call — is worth a summary.
@@ -5878,6 +6222,155 @@ function Kolibre:_writeLocalProgress(file_path, is_paged, percent, progress)
     end
     doc_settings:flush()
     return true
+end
+
+-- ── Un libro alla volta, da chi tiene premuto nella vista ───────────────
+--
+-- **Perche' esistono queste due funzioni** (Paolo, 16/11/2026: tenendo
+-- premuto un libro si apre un menu con «scarica posizione dal server» e
+-- «manda posizione al server»). Quelle che c'erano prima non servivano:
+-- `pushProgress`/`pullProgress` lavorano sul libro **aperto adesso**
+-- (`self.ui.document`), e `syncAllProgress` scandisce tutto il dispositivo e
+-- chiede conferma a lotti. Qui il libro e' uno, e' chiuso, e l'ha scelto una
+-- persona: nessuna scansione, nessun confronto, nessuna conferma a lotti.
+--
+-- Non si riscrive niente: i mattoni sono gli stessi che il confronto a lotti
+-- usa da sempre — `_readLocalProgress` e `_writeLocalProgress`, che leggono e
+-- scrivono il sidecar di un libro chiuso.
+
+--: L'estensione, in maiuscolo, per i casi in cui il manifesto non dice il
+--  formato (un libro che il server non ha mai consegnato: la cronologia
+--  mostra anche quelli).
+local function formatoDaPercorso(path)
+    local ext = path and path:match("%.([%a%d]+)$")
+    return ext and ext:upper() or nil
+end
+
+--- «Manda la posizione di questo libro», oppure «scaricala».
+--
+-- `verso` e' "manda" o "scarica". Interattiva per forza: l'ha chiesta
+-- qualcuno guardando lo schermo, quindi ogni esito si dice — compreso
+-- «non c'era niente da mandare», che e' un esito e non un errore.
+function Kolibre:posizioneDiUnLibro(path, verso)
+    if not path or lfs.attributes(path, "mode") ~= "file" then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.libro_non_c_e") })
+        return
+    end
+    -- **Il libro aperto non si tocca da qui.** Scrivergli il sidecar sotto il
+    -- naso significa farselo sovrascrivere dal lettore quando lo chiude —
+    -- e' la stessa ragione per cui `_computeProgressDiff` salta il libro
+    -- corrente. Per quello ci sono le due voci di Strumenti, che passano dal
+    -- documento vero.
+    if self.ui and self.ui.document and self.ui.document.file == path then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.posizione_libro_aperto") })
+        return
+    end
+    if not self:_requireReachable(true) then return end
+
+    local m = self.manifest:findByPath(path) or {}
+    local formato = m.format or formatoDaPercorso(path)
+    local is_paged = PAGED_FORMATS[formato] or false
+    local hash = util.partialMD5(path)
+
+    if verso == "manda" then
+        local locale = self:_readLocalProgress(path, is_paged)
+        if not locale then
+            -- Un libro mai aperto su questo lettore non ha una posizione, e
+            -- mandare uno zero cancellerebbe quella vera di un altro
+            -- dispositivo.
+            UIManager:show(InfoMessage:new{ text = t("koreader.ui.posizione_niente_da_mandare") })
+            return
+        end
+        local ok, err = self.api:request("PUT", "/api/kolibre/devices/progress",
+            self:_withIdentity({
+                hash = hash, format = formato,
+                percentage = locale.percent, progress = locale.progress,
+            }, path))
+        if ok then
+            UIManager:show(InfoMessage:new{
+                text = t("koreader.ui.posizione_mandata", {
+                    percento = math.floor((locale.percent or 0) * 100 + 0.5) }),
+                timeout = 3 })
+        else
+            UIManager:show(InfoMessage:new{
+                text = t("koreader.ui.posizione_errore", { error = tostring(err) }) })
+        end
+        return
+    end
+
+    local risposta = self.api:request("GET", self:_progressPath(hash, formato, path))
+    -- `nil` e' «non ho potuto chiedere», una risposta senza percentuale e'
+    -- «il server non ne ha una». Sono due cose diverse e si dicono diverse:
+    -- confonderle e' il difetto che il confronto a lotti ha avuto per mesi.
+    if risposta == nil then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.posizione_errore", { error = "-" }) })
+        return
+    end
+    if not risposta.percentage or not risposta.progress then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.posizione_niente_sul_server") })
+        return
+    end
+    if self:_writeLocalProgress(path, is_paged, risposta.percentage, risposta.progress) then
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.ui.posizione_scaricata", {
+                percento = math.floor(risposta.percentage * 100 + 0.5) }),
+            timeout = 3 })
+    else
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.posizione_errore", { error = "sidecar" }) })
+    end
+end
+
+--- «Togli questo libro da questo lettore.»
+--
+-- **Prima il server, poi il file**, e l'ordine e' la decisione che conta.
+-- Lo stato desiderato — quali libri stanno su questo lettore — lo tiene il
+-- server: se si cancellasse il file e basta, alla sincronizzazione dopo il
+-- server lo rimanderebbe qui, e chi ha premuto «elimina» non capirebbe
+-- perche'. Quindi si chiede al server di non volerlo piu'
+-- (`/books/removed`), e solo se dice si' si cancella.
+--
+-- Il rischio dell'ordine scelto, dichiarato: se la cancellazione locale
+-- fallisce (disco in sola lettura, permessi) il server dice «non ce l'ha» e
+-- il file e' ancora li'. Resta un file che Kolibre non gestisce piu', e
+-- l'inventario della prossima sincronizzazione lo segnala come «da
+-- rivedere» — cioe' finisce in un elenco che esiste e che si guarda.
+-- L'ordine opposto avrebbe il guasto invisibile: il libro torna da se'.
+--
+-- `al_termine` serve alla vista per rileggere l'elenco: la riga deve
+-- sparire, altrimenti il comando sembra non aver fatto niente.
+function Kolibre:toglieQuestoLibro(path, al_termine)
+    if not path then return end
+    if not self:_requireReachable(true) then return end
+
+    local m = self.manifest:findByPath(path)
+    local hash = util.partialMD5(path)
+    if not hash and not m then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.elimina_sconosciuto") })
+        return
+    end
+    -- La chiave del manifesto si prende PRIMA: `_deleteManagedBook` la
+    -- cancella, e serve per dirgli quale riga togliere.
+    local chiave = nil
+    for k, e in pairs(self.manifest:all()) do
+        if e.path == path then chiave = k break end
+    end
+
+    local risposta, err = self.api:request("POST", "/api/kolibre/devices/books/removed",
+        self:_withIdentity({ hash = hash, format = m and m.format or formatoDaPercorso(path) }, path))
+    if not risposta then
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.ui.elimina_server_no", { error = tostring(err) }) })
+        return
+    end
+
+    local ok, errore = self:_deleteManagedBook(path, { manifest_key = chiave })
+    if ok then
+        UIManager:show(InfoMessage:new{ text = t("koreader.ui.elimina_fatto"), timeout = 3 })
+    else
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.ui.elimina_file_no", { error = tostring(errore) }) })
+    end
+    if al_termine then pcall(al_termine) end
 end
 
 -- Scans the whole device, classifies every OTHER book (the open one, if

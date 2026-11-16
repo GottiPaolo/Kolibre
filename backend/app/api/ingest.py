@@ -651,7 +651,7 @@ async def import_book_from_ingest(
             if not qualita_job.travasa_da_ingest(db, item, library_name, book_id, dest_file):
                 qualita_job.analizza_libro_async(library_name, book_id, dest_file)
         except Exception as e:
-            log_message("warning", "qualita", f"Qualita' non registrata per '{title}': {e}")
+            log_message("warning", "qualita", f"Quality not recorded for '{title}': {e}")
 
         item.status = "confirmed"
         item.processed_at = datetime.utcnow()
