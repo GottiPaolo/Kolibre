@@ -21,7 +21,7 @@ from ..calibre.library import CalibreLibrary
 from ..calibre.functions import string_to_authors
 from ..calibre.write_queue import CalibreWriteQueue
 from ..deps import get_write_queue
-from ..services import stats_service, library_scanner, page_counter, app_settings, book_hash_service, opf_metadata, author_ingest_hook, author_stats_service, permessi
+from ..services import stats_service, library_scanner, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, permessi
 
 router = APIRouter(prefix="/api/kolibre/libraries", tags=["libraries"])
 
@@ -795,17 +795,38 @@ async def recompute_page_counts(
         await write_queue.submit(
             "update_book", {"book_id": book["id"], "fields": page_count_fields(pages)}, library_path
         )
-        # Best-effort, same reasoning as ingest.py's own call site — see
-        # opf_metadata.py's docstring. Runs here too so already-imported
-        # books (this endpoint's whole reason to exist) get the embedded
-        # value retroactively, not just newly-ingested ones.
+        # **Da `chiudi_i_formati` e non da `embed_page_count`** (17/11/2026).
+        #
+        # Incorporare il conteggio ricostruisce lo zip e lo rimette al suo
+        # posto: il file **diventa un altro file**, con un'altra impronta. E
+        # l'impronta e' la cosa con cui un lettore dice «questo libro che ho
+        # in mano e' quello». Qui si incorporava e si andava avanti, quindi
+        # dopo questo endpoint il database descriveva, per ogni libro della
+        # biblioteca, un file che non esisteva piu'.
+        #
+        # **Misurato sul server di Paolo, ed e' il difetto piu' grosso dei
+        # tre**: 107 righe di consegna su 296 portavano l'impronta di un file
+        # riscritto, e tutte e 107 nella stessa biblioteca — quella su cui
+        # questo pulsante e' stato premuto sette volte. Non si vedeva perche'
+        # un `Recompute hashes` a mano, giorni dopo, rimetteva in pari.
+        #
+        # `chiudi_i_formati` incorpora **e poi** registra, e tiene quell'ordine
+        # scritto in un posto solo: la scansione qui sopra passa da la' dal
+        # 04/11, questo e il ricalcolo di un libro singolo no. La stessa
+        # regola in tre copie, e due si erano perse.
         try:
+            percorsi = {}
+            for f in formats:
+                percorso = lib.get_format_file_path(book["id"], f["format"])
+                if percorso:
+                    percorsi[f["format"]] = percorso
             await run_in_threadpool(
-                opf_metadata.embed_page_count, library_path, file_path, fmt, pages,
-                book_id=book["id"],
+                book_hash_service.chiudi_i_formati,
+                db, library_path, folder_name, book["id"], percorsi, pages, fmt,
             )
         except Exception as e:
-            log_message("warning", "libraries", f"Embedding the page count in the OPF failed for '{file_path}': {e}")
+            log_message("warning", "libraries",
+                        f"Closing the formats failed for book {book['id']}: {e}")
         updated += 1
 
     # I conteggi caratteri raccolti nel giro qui sopra: un commit solo alla

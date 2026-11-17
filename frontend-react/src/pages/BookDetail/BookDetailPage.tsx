@@ -17,6 +17,8 @@ import { useShortcuts } from '@/lib/useShortcuts'
 import { openBookFormatInReader } from '@/lib/readerActions'
 import { HighlightsPanel } from './HighlightsPanel'
 import { StatsPanel } from './StatsPanel'
+import { QualitaDelLibro } from './QualitaDelLibro'
+import { BookContextMenu } from '@/components/BookContextMenu'
 import { identifierUrl } from '@/lib/identifiers'
 import { TagFiltrabili, ValoreFiltrabile } from '@/components/ValoreFiltrabile'
 
@@ -138,6 +140,25 @@ export function BookDetailPage() {
         </div>
       </div>
 
+      {/* **I comandi del libro, col tasto destro** (Paolo, 17/11/2026:
+          «solo il tasto destro»). È lo stesso menu della tabella Libreria,
+          non una copia: `BookContextMenu` è un involucro, e le azioni stanno
+          in `bookActionsContext` — che questa pagina usa già per «vai
+          all'autore» e «modifica metadati». Riusarlo vuol dire che una voce
+          aggiunta là compare anche qui, e che non esistono due elenchi di
+          azioni da tenere allineati.
+
+          **Avvolge la testata e non la pagina intera** di proposito: la
+          copertina e i dati del libro sono «il libro», e il tasto destro là
+          sopra vuol dire «su questo libro». Più in basso ci sono le
+          evidenziazioni e le statistiche, dove il destro del browser serve a
+          copiare un brano — prendersi anche quello sarebbe togliere un gesto
+          invece di darne uno.
+
+          **E questo non diventerà un pulsante «Azioni»**: Paolo ha detto che
+          a breve sarà un pannello più dettagliato. Vedi la sua voce nel
+          ROADMAP. */}
+      <BookContextMenu book={book}>
       <div className="flex gap-5">
         {/* self-start: senza, questo box (cross-axis di un flex row) viene
             stirato in altezza per pareggiare la colonna di testo a fianco —
@@ -265,6 +286,11 @@ export function BookDetailPage() {
                 <dd>{String(estimatedPages)}</dd>
               </>
             )}
+            {/* La qualità dell'EPUB, dopo le pagine stimate: sono due
+                numeri che parlano del FILE e non del libro, e stanno bene
+                vicini. La riga non c'è quando quel libro non è mai stato
+                analizzato — vedi `QualitaDelLibro`. */}
+            <QualitaDelLibro libraryFolder={libraryFolder} bookId={book.id} />
             <dt className="text-muted-foreground">{t('library.field.published')}</dt>
             <dd>{formatDate(book.pubdate)}</dd>
             <dt className="text-muted-foreground">{t('library.field.lastModified')}</dt>
@@ -284,6 +310,7 @@ export function BookDetailPage() {
           </dl>
         </div>
       </div>
+      </BookContextMenu>
 
       {book.description && (
         <div>

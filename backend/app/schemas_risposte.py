@@ -2002,6 +2002,13 @@ class Handshake(Permissivo):
     #: scaricati prima che il campo esistesse. Si ripete a ogni giro, cosi'
     #: un ricalcolo delle stime sul server arriva ai lettori da se'.
     server_pages: dict[str, int]
+    #: **Quando il server ha consegnato ciascun libro a questo lettore**, in
+    #: secondi, con la stessa chiave di `server_pages`. In secondi e non in
+    #: ISO perche' il plugin ci fa dei conti e un intero non ha fusi da
+    #: sbagliare. Serve al pannello «ultimi invii»: la data che il plugin si
+    #: scrive da se' e' quella in cui ha scritto la riga del manifesto, che
+    #: per un libro **adottato** invece che consegnato e' tutt'altro momento.
+    delivered_at: dict[str, int]
     file_actions: list[AzioneSuFile]
     #: Valorizzato **solo** quando una persona l'ha confermata dal portale.
     restore_request: Optional[RichiestaDiRipristino]
@@ -3822,100 +3829,88 @@ class LibroToltoDalDispositivo(Permissivo):
 # ── L'accoppiamento per codice ───────────────────────────────────────────
 #
 # Il modo in cui un programma che gira sul computer di una persona si collega
-# al server senza farsi dare la password: mostra un codice, la persona lo
-# conferma dal sito, e il programma riceve un token. Il disegno e il perche'
-# stanno in `models.RichiestaDiAccoppiamento` e in `api/accoppiamento.py`.
+# al server senza farsi dare la password: **dal server nasce un invito**, cioe'
+# un codice usa e getta, la persona lo porta nel programma, e il programma lo
+# scambia con un token suo. Il disegno e il perche' del verso — che il 16/11
+# era l'opposto — stanno in `models.InvitoDiAccoppiamento` e in testa a
+# `api/accoppiamento.py`.
 
 
-class AccoppiamentoAvviato(Permissivo):
+class InvitoCreato(Permissivo):
     """
-    La risposta a «voglio collegarmi»: il codice da mostrare alla persona, e
-    il biglietto con cui ritirare il token quando sara' confermato.
+    Il codice appena nato. **Si vede una volta sola.**
 
-    **`code` si mostra, `ticket` non si mostra.** Sono due cose diverse: il
-    codice e' per gli occhi di chi conferma, il biglietto e' il segreto del
-    programma — se finisse a schermo, o in un log, chiunque l'abbia visto
-    potrebbe ritirare il token al posto suo.
-    """
-    #: Sei caratteri. Da mostrare come sono, in chiaro e grandi.
-    code: str
-    #: Il segreto del programma. Si conserva in memoria e si usa per chiedere
-    #: com'e' andata; **non si mostra e non si scrive in un file di log**.
-    ticket: str
-    #: Dopo questo istante il codice non vale piu' e si ricomincia.
-    expires_at: str
-    #: Ogni quanti secondi conviene richiedere lo stato. E' un consiglio del
-    #: server, non un limite: serve a non far scegliere al client un intervallo
-    #: cosi' breve da diventare un disturbo.
-    poll_every_seconds: int
-
-
-class StatoDellAccoppiamento(Permissivo):
-    """
-    Com'e' andata, chiesto dal programma con il suo biglietto.
-
-    **`status`**:
-      * `pending` — nessuno ha ancora confermato ne' rifiutato;
-      * `confirmed` — confermato: questa risposta, **e solo questa**, porta
-        il token;
-      * `collected` — il token era gia' stato ritirato. Se il programma vede
-        questo e non ha un token, la risposta con il token e' andata perduta:
-        non c'e' modo di riaverla, e si rifa' l'accoppiamento da capo (il
-        token rimasto senza padrone si spegne dal sito);
-      * `refused` — la persona ha detto no;
-      * `expired` — sono passati i cinque minuti.
-
-    **Prima della conferma `token` e `user` sono nulli**, e non per prudenza:
-    questa rotta risponde **senza autenticazione**, e tutto quello che
-    dicesse in piu' sarebbe un modo di sapere cose su un server altrui
-    presentando un biglietto inventato.
-    """
-    status: str
-    expires_at: Optional[str]
-    #: Il token, **una volta sola**, quando `status` e' `confirmed`.
-    token: Optional[str]
-    #: A nome di chi parlera' il programma: il nome utente di chi ha
-    #: confermato. Nullo prima della conferma.
-    user: Optional[str]
-
-
-class RichiestaDiAccoppiamentoInAttesa(Permissivo):
-    """
-    Una richiesta che aspetta, come la vede chi deve confermarla.
-
-    Porta il **codice** perche' e' con quello che si riconosce la propria: il
-    nome lo scrive il programma e si puo' scrivere qualunque cosa, l'indirizzo
-    dice solo da quale macchina arriva. Il codice invece e' sullo schermo di
-    chi sta aspettando, e due richieste insieme si distinguono solo cosi'.
+    Non e' una precauzione di stile: in database c'e' solo l'impronta del
+    codice (vedi `models.InvitoDiAccoppiamento`), quindi da adesso il server
+    non e' in grado di ridirlo nemmeno volendo. Chi lo perde ne fa un altro.
     """
     id: int
+    #: Dieci caratteri, mostrati a gruppi di cinque: `ABCDE-FGHJK`. Il
+    #: trattino **non fa parte del codice** — il riscatto lo butta via con gli
+    #: spazi, quindi si puo' riscrivere con o senza.
     code: str
-    #: Come il programma si e' presentato. **Testo di uno sconosciuto**: va
-    #: mostrato come testo e mai interpretato.
-    client_name: str
-    platform: Optional[str]
-    #: L'indirizzo da cui e' arrivata, come il server l'ha visto.
-    ip: Optional[str]
+    #: Il nome che gli e' stato dato, se gliene e' stato dato uno. Diventa il
+    #: nome del token nell'elenco dei token dell'account.
+    name: Optional[str]
+    #: Dopo questo istante il codice non apre piu' niente.
+    expires_at: str
+    #: Quanto vive, in secondi: serve al sito per disegnare un conto alla
+    #: rovescia senza doversi fidare dell'orologio di chi guarda.
+    expires_in_seconds: int
+
+
+class InvitoDiAccoppiamento(Permissivo):
+    """
+    Un invito nell'elenco di chi l'ha creato.
+
+    **Il codice non c'e'**, in nessuno stato: non e' tenuto nascosto, non
+    esiste piu' — in database c'e' la sua impronta. Quello che c'e' risponde
+    alle due domande di chi guarda: quale aspetta ancora, e quello di
+    stamattina chi l'ha usato.
+
+    **`status`**:
+      * `pending` — vivo, aspetta di essere usato;
+      * `redeemed` — usato: `redeemed_at`, `client_name` e `ip` dicono da chi
+        e da dove;
+      * `revoked` — spento a mano prima di scadere;
+      * `expired` — e' passato il suo quarto d'ora.
+    """
+    id: int
+    name: Optional[str]
+    #: `site` oppure `terminal`: da quale delle due strade e' nato.
+    origin: str
+    status: str
     created_at: Optional[str]
     expires_at: Optional[str]
+    redeemed_at: Optional[str]
+    #: Come il programma si e' presentato al riscatto. **Testo di un
+    #: programma**: va mostrato come testo e mai interpretato.
+    client_name: Optional[str]
+    platform: Optional[str]
+    #: L'indirizzo da cui e' arrivato il riscatto, come il server l'ha visto.
+    ip: Optional[str]
 
 
-class RichiesteDiAccoppiamento(Permissivo):
-    """Le richieste vive: le scadute, le confermate e le rifiutate non ci sono."""
-    items: list[RichiestaDiAccoppiamentoInAttesa]
+class InvitiDiAccoppiamento(Permissivo):
+    """Gli ultimi inviti di chi guarda, dal piu' recente. Solo i suoi."""
+    items: list[InvitoDiAccoppiamento]
 
 
-class AccoppiamentoConfermato(Permissivo):
+class AccoppiamentoRiscattato(Permissivo):
     """
-    La conferma e' fatta: il token e' nato e lo ritirera' il programma.
+    Il codice e' stato scambiato: questo e' il token del programma.
 
-    **Il token non c'e' nemmeno qui.** Chi conferma dal sito non deve
-    copiarlo, trascriverlo o custodirlo: lo ritira il programma con il suo
-    biglietto, e questa risposta serve solo a dire quale token e' nato — per
-    poterlo spegnere.
+    **Arriva una volta sola**, nella risposta alla richiesta che il programma
+    ha fatto lui — non c'e' nessun secondo giro in cui riprenderlo. Se questa
+    risposta si perde per strada, il codice e' bruciato e il token e' nato
+    senza padrone: si rifa' l'accoppiamento con un codice nuovo, e il token
+    orfano si spegne dall'elenco dei token, dove compare col suo nome.
     """
-    status: str
-    #: L'id del token nato, lo stesso che si usa per revocarlo.
-    token_id: int
-    #: Il nome con cui comparira' nell'elenco dei token.
+    #: Comincia per `kolibre_app_`. Si usa come `Authorization: Bearer <token>`
+    #: su tutta l'API, non scade, e si spegne dal sito.
+    token: str
+    #: A nome di chi parla il programma, da adesso.
+    user: str
+    #: Il nome con cui il token compare nell'elenco dei token dell'account,
+    #: cioe' quello che si leggera' il giorno in cui si decide se spegnerlo.
     token_name: str

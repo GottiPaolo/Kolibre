@@ -3,7 +3,6 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Save, Settings, Smartphone, Star } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useDevices, useDeviceFlaggedBooks } from '@/lib/deviceQueries'
 import {
@@ -20,6 +19,7 @@ import { formatBytes } from '@/lib/format'
 import { useSetPageHeader } from '@/lib/pageHeaderContext'
 import type { Device, DeviceBookRow, DeviceFlaggedBook } from '@/types/device'
 import { PatchElenco } from './PatchInfo'
+import { VersioneNelDettaglio } from './VersionePlugin'
 import { DizionariDaMandare } from './DizionariDaMandare'
 import type { Book } from '@/types/library'
 import { DeviceBooksTable } from './DeviceBooksTable'
@@ -175,11 +175,6 @@ export function DeviceDetailPage() {
         <div className="flex items-center gap-2.5">
           <Smartphone className={device.is_default ? 'size-5 text-[var(--positive)]' : 'size-5 text-primary'} />
           <h1 className="font-serif text-[20px] font-semibold">{device.name}</h1>
-          {device.plugin_version && (
-            <Badge variant="outline" title={t('devices.pluginVersionTitle')}>
-              v{device.plugin_version}
-            </Badge>
-          )}
           {device.last_seen_at && (
             <span className="text-[11px] text-muted-foreground" title={t('devices.lastSeenTitle', { time: device.last_seen_at })}>
               {t('devices.seenPrefix', { time: relativeTimeFrom(device.last_seen_at, t) })}
@@ -224,6 +219,13 @@ export function DeviceDetailPage() {
         <div>
           <strong className="text-foreground">{t('devices.detail.deletePolicyLabel')}</strong> {deletePolicyLabel(device.delete_policy, t)}
         </div>
+        {/* La versione del plugin, con lo stato: era una pastiglia grigia
+            accanto al nome, e diceva soltanto un numero. Dal 17/11/2026 sta
+            qui, nella stessa forma della riga delle patch — perche' e' la
+            stessa domanda, «che cosa sa fare questo lettore?» — e dice anche
+            se e' indietro, che e' la parte che prima stava in un riquadro in
+            cima all'elenco dei dispositivi. Vedi `VersionePlugin.tsx`. */}
+        <VersioneNelDettaglio device={device} />
         <PatchElenco device={device} />
         <DizionariDaMandare device={device} onChange={invalidateDevices} />
       </div>

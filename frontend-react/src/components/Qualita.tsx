@@ -29,10 +29,25 @@ export function PunteggioQualita({
   punteggio,
   pronto,
   grande = false,
+  senzaColore = false,
 }: {
   punteggio: number | null | undefined
   pronto?: boolean | null
   grande?: boolean
+  /**
+   * Il numero in nero, senza la fascia di colore.
+   *
+   * **Chiesto da Paolo il 17/11/2026** per i due posti in cui la qualità è
+   * un dato fra gli altri — la scheda di un libro e il pannello della
+   * Libreria: «solo come numero da 0 a 100, senza colori». In quei due posti
+   * il colore non aiuta a leggere, perché non c'è niente con cui
+   * confrontarlo: è un numero solo.
+   *
+   * In Interventi il colore **resta**, e non per inerzia: là la tabella ha
+   * mille righe e si scorre per trovare i libri scadenti, quindi il colore
+   * non è decorazione — è il modo in cui si legge la tabella.
+   */
+  senzaColore?: boolean
 }) {
   const { t } = useLingua()
   if (punteggio == null) {
@@ -40,7 +55,11 @@ export function PunteggioQualita({
   }
   return (
     <span className="inline-flex items-center gap-1.5">
-      <span className={`${grande ? 'text-base' : 'text-[13px]'} font-semibold tabular-nums ${tono(punteggio)}`}>
+      <span
+        className={`${grande ? 'text-base' : 'text-[13px]'} font-semibold tabular-nums ${
+          senzaColore ? '' : tono(punteggio)
+        }`}
+      >
         {punteggio}
       </span>
       {pronto === false && (

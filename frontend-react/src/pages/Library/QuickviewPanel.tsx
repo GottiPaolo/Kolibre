@@ -17,6 +17,7 @@ import {
   type QuickviewDeviceInfo,
 } from '@/lib/quickviewFieldLayout'
 import { useLingua, type Valori } from '@/lib/i18n'
+import { QualitaNelPannello } from './QualitaNelPannello'
 
 // Un campo può non avere nulla da mostrare per QUESTO libro (es. "Serie" su
 // un libro senza serie) — null qui vuol dire "salta la riga", indipendente
@@ -309,6 +310,13 @@ export function QuickviewPanel({
           {fieldLayout.map((entry) => {
             if (!entry.visible) return null
             if (entry.kind === 'fixed') {
+              // La qualità non arriva col libro: si chiede a parte, quindi
+              // ha bisogno di un hook e `renderQuickviewField` è una
+              // funzione pura. Si intercetta qui invece di sporcare quello
+              // switch con un caso che non può funzionarci dentro.
+              if (entry.id === 'qualita') {
+                return <QualitaNelPannello key={entry.id} book={book} libraryFolder={libraryFolder} />
+              }
               return <Fragment key={entry.id}>{renderQuickviewField(entry.id, book, libraryFolder, t)}</Fragment>
             }
             if (entry.kind === 'device') {

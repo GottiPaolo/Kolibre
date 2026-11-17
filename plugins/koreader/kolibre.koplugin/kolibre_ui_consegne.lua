@@ -27,17 +27,31 @@ libreria sarebbe rumore.
 sesto tasto in cima, ma la stessa domanda fatta da vicino — la casa dice
 «tutta la libreria», tenendola premuta si chiede «e di nuovo, cosa c'e'?».
 
-**Da dove vengono le date.** Dal manifesto, che e' il file in cui il plugin
-segna ogni libro che scarica: `downloaded_at` e' l'ora in cui **questo
-dispositivo** l'ha preso. Non e' la data in cui il libro e' entrato nella
-biblioteca sul server, ed e' quella giusta: la domanda e' «cos'e' arrivato
-QUI».
+**Da dove viene la data, e perche' NON da qui** (corretto il 17/11/2026,
+dopo una segnalazione di Paolo: «non capisco che ordinamento sta usando»).
 
-**Un libro senza data non si butta: va in fondo.** Le versioni del plugin
-fino al novembre 2026 non scrivevano `downloaded_at`, quindi i libri
-consegnati allora non ce l'hanno. Metterli in cima direbbe una cosa falsa,
-toglierli ne direbbe un'altra: stanno in fondo, e la loro riga dice che la
-data non si sa. «Non lo so» non e' «oggi».
+La prima versione usava `downloaded_at`, il campo che il plugin si scrive da
+se'. Sembrava la cosa ovvia e non lo era: quel campo dice **quando la riga
+del manifesto e' stata scritta**, che coincide con la consegna solo quando il
+libro e' arrivato davvero scaricandolo. Si scrive anche quando il libro sul
+dispositivo **c'era gia'** e Kolibre lo riconosce (`_linkHashMatch`), e la
+vecchia migrazione ne adottava in blocco tutti quelli che trovava — tutti
+nello stesso secondo. Misurato sul Mac di Paolo: **25 libri su 29 in due soli
+istanti**, cioe' un pannello in cui l'ordine fra venticinque righe non
+significava niente.
+
+Il server invece lo sa per davvero (`DeviceBook.synced_at`, scritto quando il
+download riesce) e lo manda a ogni sincronizzazione, insieme alle stime delle
+pagine. Il plugin lo tiene come `consegnato_il`. Sul Kindle di Paolo quelle
+date sono sparse su diciannove giorni fra luglio e novembre: la storia vera,
+che il manifesto non aveva.
+
+**`downloaded_at` resta come ripiego**, per la finestra fra l'installazione di
+questa versione e la prima sincronizzazione — dopo, non serve piu'.
+
+**Un libro senza nessuna delle due date non si butta: va in fondo**, e la sua
+riga non scrive niente. Metterlo in cima direbbe una cosa falsa, toglierlo ne
+direbbe un'altra. «Non lo so» non e' «oggi».
 ]]
 
 local BookList = require("ui/widget/booklist")
@@ -73,9 +87,17 @@ function KolibreConsegne:voci()
             table.insert(tutte, m)
         end
     end
+    -- La data del server se c'e', la nostra altrimenti. Vedi in testa al
+    -- file: la seconda e' spesso la data dell'adozione, non della consegna.
+    local function consegna(m)
+        return m.consegnato_il or m.downloaded_at
+    end
     table.sort(tutte, function(a, b)
-        local da, db = a.downloaded_at or -1, b.downloaded_at or -1
+        local da, db = consegna(a) or -1, consegna(b) or -1
         if da ~= db then return da > db end
+        -- A parita' di istante — un invio in blocco arriva tutto nello stesso
+        -- secondo — si ordina per titolo: e' l'unico ordine che non cambia
+        -- fra un'apertura e l'altra.
         return (a.title or a.path or "") < (b.title or b.path or "")
     end)
 
@@ -102,10 +124,10 @@ function KolibreConsegne:voci()
             -- La forma delle parole la decide `Pezzi.quando`, una per tutte e
             -- due le finestre.
             --
-            -- Un libro senza `downloaded_at` non scrive niente: `quando`
-            -- torna `nil` e la colonna resta vuota. «Non lo so» non e'
-            -- «oggi».
-            quando = m.downloaded_at,
+            -- Un libro di cui non si sa la data non scrive niente:
+            -- `quando` torna `nil` e la colonna resta vuota. «Non lo so»
+            -- non e' «oggi».
+            quando = consegna(m),
         })
     end
     return voci

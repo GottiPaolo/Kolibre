@@ -645,7 +645,7 @@ local KolibrePatch = require("kolibre_patch")
 -- funzione pura (vedi la prova «aggiornamento_al_risveglio»).
 local KolibreRinvii = require("kolibre_rinvii")
 
-local VERSION = "0.20.0"
+local VERSION = "0.22.0"
 
 local EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, fb2 = true, txt = true }
 
@@ -2125,6 +2125,50 @@ end
 -- file, e quello esiste gia' da prima — quindi bisognava riavviare KOReader
 -- oppure entrare e uscire da un libro per vedere qualcosa. Chi accende un
 -- interruttore e non vede niente pensa che sia rotto, e ha ragione.
+--- Rifa' gli elenchi aperti, dopo una sincronizzazione che ha cambiato i
+--- libri che stanno su questo lettore.
+--
+-- **Da zero: il difetto che chiude** (Paolo, 17/11/2026). La vista libreria e
+-- le finestre a elenco (gli ultimi invii, la cronologia, la ricerca) leggono
+-- il disco e il manifesto **quando si aprono**. Una sincronizzazione che
+-- arriva mentre una di quelle e' aperta scarica libri nuovi e cancella quelli
+-- che il server ha tolto, ma l'elenco a schermo e' quello di prima: compare
+-- il riepilogo «3 scaricati», e sotto non c'e' nessuno dei tre. Con la
+-- libreria divisa in cartelle per autore si vede ancora meglio — **un autore
+-- nuovo non compare, e uno rimasto senza libri non sparisce** — perche' la
+-- cartella e' la prima cosa che cambia.
+--
+-- Chi vede un comando riuscire e lo schermo non muoversi pensa che non sia
+-- riuscito, e ha ragione a pensarlo: era la stessa ragione per cui il tasto
+-- Kolibre di quelle finestre, dal 16/11, rilegge l'elenco dopo aver
+-- sincronizzato (`Elenco:_tastoKolibre`). Quella era la sincronizzazione
+-- chiesta DA li'; questa e' ogni altra — il menu, l'automatismo, l'avvio.
+--
+-- **Si chiama solo se qualcosa e' cambiato** (vedi chi la chiama): rileggere
+-- per niente vuol dire ridisegnare lo schermo di un lettore a inchiostro, che
+-- e' una cosa che si vede e che costa.
+--
+-- Tutto sotto `pcall` e con i controlli di esistenza: una vista che non si
+-- rinfresca e' un fastidio, una sincronizzazione che si schianta alla fine
+-- perche' non le e' piaciuta una vista e' un danno.
+function Kolibre:ricaricaLeViste()
+    local ok, KolibreUI = pcall(require, "kolibre_ui_libreria")
+    if ok and type(KolibreUI.aperta) == "function" then
+        local vista = KolibreUI.aperta()
+        if vista and type(vista.rileggi) == "function" then
+            pcall(function() vista:rileggi() end)
+        end
+    end
+    local ok2, Elenco = pcall(require, "kolibre_ui_elenco")
+    if ok2 and type(Elenco.tutteAperte) == "function" then
+        for _i, vista in ipairs(Elenco.tutteAperte()) do
+            if type(vista.rileggi) == "function" then
+                pcall(function() vista:rileggi() end)
+            end
+        end
+    end
+end
+
 function Kolibre:_applicaSceltaLibreria(acceso)
     if not acceso then
         -- Spenta: si toglie di mezzo adesso, e sotto c'e' il gestore di file
@@ -5721,6 +5765,9 @@ function Kolibre:_syncNowRun(interactive, trigger, allow_migration, solo_libri)
     -- prima dei download: un libro che arriva in questo giro la sua stima ce
     -- l'ha gia' nella consegna, e riscriverla dopo sarebbe un giro a vuoto.
     self.manifest:applicaStimeDelServer(result.server_pages)
+    -- Le date di consegna vere, che il plugin da solo non sa: vedi
+    -- `KolibreManifest:applicaConsegneDelServer`.
+    self.manifest:applicaConsegneDelServer(result.delivered_at)
 
     -- The handshake response is the implicit ack of our missing_books report:
     -- those entries can now leave the manifest.
@@ -5836,6 +5883,21 @@ function Kolibre:_syncNowRun(interactive, trigger, allow_migration, solo_libri)
             -- acks): from here on the manifest is in sync with the server.
             self.manifest:markClean()
             self:_closeProgress()
+
+            -- **La vista si rifa' da se'** (Paolo, 17/11/2026: dopo una sync
+            -- che consegna o toglie libri «la vista si deve ricaricare da
+            -- sola, cosi' compaiono o spariscono gli autori»). Prima del
+            -- riepilogo, non dopo: il riepilogo e' una finestra che aspetta un
+            -- tocco, e dietro quel tocco si deve trovare l'elenco giusto.
+            --
+            -- La condizione e' «e' cambiato qualcosa sul disco»: i download,
+            -- le cancellazioni, e le azioni messe in coda dal sito (che
+            -- cancellano o riscrivono un file). Una sincronizzazione che non
+            -- ha spostato nessun libro non ha niente da far rileggere.
+            if downloaded > 0 or deleted > 0 or #applied_action_ids > 0 then
+                pcall(function() self:ricaricaLeViste() end)
+            end
+
             -- Le copertine: dopo la fine, in rinvii, senza far aspettare il
             -- riepilogo. Sotto `pcall` perche' sono un extra, e un extra non
             -- deve poter rovinare una sincronizzazione andata bene.

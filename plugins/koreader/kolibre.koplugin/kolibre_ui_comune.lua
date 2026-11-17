@@ -35,6 +35,7 @@ local Screen = require("device").screen
 local Size = require("ui/size")
 local TextBoxWidget = require("ui/widget/textboxwidget")
 local UIManager = require("ui/uimanager")
+local logger = require("logger")
 local VerticalSpan = require("ui/widget/verticalspan")
 local Pezzi = require("kolibre_ui_pezzi")
 
@@ -330,6 +331,85 @@ function Comune.ridisegna(vista, righe, vuoto, select_number, no_recalculate_dim
         local da_rifare = old_dimen and old_dimen:combine(vista.dimen) or vista.dimen
         return "ui", da_rifare
     end)
+end
+
+--- Fra due voci che parlano dello stesso file, quale vale.
+--
+-- **Lo stesso libro puo' avere DUE righe nel manifesto**, e non e' un caso
+-- strano: la vecchia migrazione adottava quello che trovava sul dispositivo
+-- sotto una chiave `hash:<impronta>`, e quando poi il server riconosceva quel
+-- libro, `_linkHashMatch` ne scriveva una seconda con l'identita' vera
+-- (`biblioteca:id:formato`) — **senza togliere la prima**. Che e' anche
+-- scritto in `_deleteManagedBook`, che cancellando un libro va a caccia
+-- proprio delle voci di migrazione rimaste.
+--
+-- Prima qui vinceva l'ultima che capitava, e `pairs` non ha un ordine: la
+-- stessa finestra, riaperta, poteva prendere l'altra riga — con un'altra
+-- data, e quindi un altro posto nell'elenco. E' meta' della ragione per cui
+-- Paolo il 17/11/2026 non capiva che ordinamento stesse usando il pannello.
+--
+-- La regola, in ordine: vince chi ha un'identita' vera (la voce di
+-- migrazione non ce l'ha), poi chi ha la data del server, poi la piu'
+-- recente. Deterministica: due aperture danno lo stesso elenco.
+function Comune.miglioreFra(vecchia, nuova)
+    if vecchia == nil then return nuova end
+    local function punteggio(v)
+        return (v.calibre_book_id and 4 or 0)
+            + (v.consegnato_il and 2 or 0)
+            + (v.downloaded_at and 1 or 0)
+    end
+    local pv, pn = punteggio(vecchia), punteggio(nuova)
+    if pn ~= pv then return pn > pv and nuova or vecchia end
+    local qv = vecchia.consegnato_il or vecchia.downloaded_at or 0
+    local qn = nuova.consegnato_il or nuova.downloaded_at or 0
+    if qn ~= qv then return qn > qv and nuova or vecchia end
+    return vecchia
+end
+
+--- Apre la finestra dei risultati per il testo cercato.
+--
+-- **Da dove arriva il testo.** Dal riquadro di ricerca di KOReader, quello
+-- che si apre toccando il numero di pagina in fondo: `Menu` lo passa a
+-- `search_callback`, che ogni nostra finestra imposta a questa funzione. La
+-- porta d'ingresso e' la sua, quello che c'e' dietro e' nostro — vedi
+-- `kolibre_ui_ricerca.lua` per il perche' di una finestra invece di un
+-- filtro sulla vista.
+--
+-- **Una sola finestra di risultati per volta.** Cercando di nuovo da dentro
+-- i risultati, la vecchia si chiude prima che nasca la nuova: due finestre
+-- impilate vorrebbero dire due «indietro» da premere per tornare dove si
+-- era, e nessuno si ricorda di averne aperte due.
+function Comune.cerca(vista, testo)
+    testo = type(testo) == "string" and testo:gsub("^%s+", ""):gsub("%s+$", "") or ""
+    -- Il riquadro di KOReader lascia premere «Search…» anche a vuoto: senza
+    -- questo controllo si aprirebbe una finestra con dentro tutto.
+    if testo == "" then return end
+
+    local ok, Ricerca = pcall(require, "kolibre_ui_ricerca")
+    if not ok then
+        logger.err("Kolibre: la ricerca non si carica:", Ricerca)
+        return
+    end
+    if type(Ricerca.aperta) == "function" then
+        local gia = Ricerca.aperta()
+        if gia then pcall(function() UIManager:close(gia) end) end
+    end
+
+    local finestra
+    local costruita, errore = pcall(function()
+        finestra = Ricerca:new{
+            testo = testo,
+            manifest = vista.manifest,
+            kolibre = vista.kolibre,
+            agganciato = vista.agganciato,
+            cartella_logo = vista.cartella_logo,
+            righe_per_schermata = vista.righe_per_schermata,
+        }
+        UIManager:show(finestra)
+    end)
+    if costruita then return finestra end
+    logger.err("Kolibre: la ricerca non si apre:", errore)
+    if finestra then pcall(function() UIManager:close(finestra) end) end
 end
 
 return Comune

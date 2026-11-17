@@ -168,6 +168,42 @@ function KolibreManifest:applicaStimeDelServer(mappa)
     return cambiate
 end
 
+--- Le date di consegna che il server manda a ogni sincronizzazione.
+--
+-- **Perche' la data della consegna la tiene il server** (17/11/2026). Il
+-- campo `downloaded_at` di una voce dice quando QUESTO plugin ha scritto la
+-- riga, che non e' sempre quando il libro e' arrivato: si scrive anche
+-- quando il libro sul dispositivo c'era gia' e Kolibre lo riconosce
+-- (`_linkHashMatch`), e la vecchia migrazione ne adottava in blocco decine
+-- tutte nello stesso secondo. Il pannello «ultimi invii» ordinava con
+-- quella, e in un blocco l'ordine non significava piu' niente — misurato
+-- sul Mac di Paolo: 25 libri su 29 in due soli istanti.
+--
+-- `consegnato_il` e' invece il `synced_at` del server, cioe' quando la
+-- consegna e' riuscita davvero. Si scrive accanto a `downloaded_at` e non
+-- al suo posto: sono due fatti diversi, e il secondo serve ancora a sapere
+-- da quando questo dispositivo ha il file.
+--
+-- Non sporca il manifesto (`no_dirty`): e' un dato che arriva dal server,
+-- quindi rimandarglielo indietro non servirebbe a niente.
+function KolibreManifest:applicaConsegneDelServer(mappa)
+    if type(mappa) ~= "table" then return 0 end
+    local books = self.settings:readSetting("books")
+    local cambiate = 0
+    for chiave, quando in pairs(mappa) do
+        local voce = books[chiave]
+        if voce and type(quando) == "number" and voce.consegnato_il ~= quando then
+            voce.consegnato_il = quando
+            cambiate = cambiate + 1
+        end
+    end
+    if cambiate > 0 then
+        self.settings:saveSetting("books", books)
+        self.settings:flush()
+    end
+    return cambiate
+end
+
 -- ── library_token: the server's cheap change-detection token ──
 -- Cached from every /sync response; sent back on the next handshake so the
 -- server can grant a "light" sync (no managed_books reconciliation).

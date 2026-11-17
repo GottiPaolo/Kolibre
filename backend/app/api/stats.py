@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, database, auth, schemas
 from ..istanti import quando
+from ..logging_utils import log_message
 from ..services import stats_service
 from ..schemas_risposte import (
     Esito, GiornoDiLettura, GraficoSalvato, IntensitaAnnotazioni, LibriLetti,
@@ -15,6 +16,24 @@ from ..schemas_risposte import (
 from .libraries import default_library_param, resolve_default_library_folder
 
 router = APIRouter(prefix="/api/kolibre/stats", tags=["stats"])
+
+
+def _chi(utente) -> str:
+    """Il nome dell'account che ha fatto la richiesta, o un segnaposto."""
+    return getattr(utente, "username", None) or "?"
+
+
+def _impronta(md5) -> str:
+    """
+    Un'impronta accorciata, perche' in un registro serve a riconoscere e non
+    a ricalcolare.
+
+    Dodici caratteri su trentadue bastano a ritrovare la riga giusta in
+    mezzo a mille e non bastano a nessun altro uso: e' la stessa prudenza con
+    cui qui non si scrive il titolo di un libro quando basta il suo id.
+    """
+    testo = str(md5 or "")
+    return (testo[:12] + "…") if len(testo) > 12 else (testo or "?")
 
 
 def _get_cache(db: Session, library: str, user_id: int):
@@ -135,7 +154,8 @@ def get_libri_letti(
 
 
 @router.post("/recompute", responses={200: {"model": StatisticheRicalcolate}})
-def recompute_stats(db: Session = Depends(database.get_db)):
+def recompute_stats(db: Session = Depends(database.get_db),
+                    chi: models.User = Depends(auth.get_current_user_flexible)):
     """
     Manual trigger for reprocess_all_device_backups + refresh_stats_cache —
     normally these only run once at server startup and then once every 24h
@@ -150,6 +170,15 @@ def recompute_stats(db: Session = Depends(database.get_db)):
     """
     reprocess_summary = stats_service.reprocess_all_device_backups(db)
     libraries_refreshed = stats_service.refresh_stats_cache(db)
+    # **Si scrive quello che il giro ha SPOSTATO**, non che e' stato chiesto.
+    # Questo e' il comando che si preme quando le statistiche sembrano
+    # sbagliate, e la domanda dopo averlo premuto e' sempre la stessa: «ha
+    # trovato qualcosa?». Senza questa riga la risposta vive solo nella
+    # finestra del browser di chi l'ha premuto, cioe' per trenta secondi.
+    log_message("info", "stats",
+                f"'{_chi(chi)}' recomputed the statistics by hand: "
+                f"{reprocess_summary} and {libraries_refreshed} "
+                f"librar{'y' if libraries_refreshed == 1 else 'ies'} refreshed.")
     return {**reprocess_summary, "libraries_refreshed": libraries_refreshed}
 
 
@@ -218,6 +247,15 @@ def pair_orphan_sessions(
 
     result = stats_service.pair_orphan_sessions(db, current_user.id, md5, library, int(calibre_book_id))
     stats_service.refresh_stats_cache(db)
+    # **E' una decisione a mano che non si puo' rifare da se'**: da qui in poi
+    # quelle sessioni appartengono a quel libro, e nessun automatismo
+    # ricalcolera' l'abbinamento. Chi fra sei mesi trovera' delle ore attaccate
+    # al libro sbagliato deve poter risalire a quando e da chi, e questa e' la
+    # sola riga che glielo dice.
+    log_message("info", "stats",
+                f"'{_chi(current_user)}' paired the orphan reading sessions of "
+                f"md5 {_impronta(md5)} to book {calibre_book_id} "
+                f"of library '{library}': {result}.")
     return {"status": "ok", **result}
 
 
@@ -242,6 +280,15 @@ def discard_orphan_sessions(
 
     removed = stats_service.discard_orphan_sessions(db, current_user.id, md5)
     stats_service.refresh_stats_cache(db)
+    # **Questa cancella, e la decisione resta.** Le sessioni vanno via e il
+    # server si ricorda di non ricrearle piu' nemmeno se il lettore le
+    # rimanda: e' la scrittura piu' definitiva di tutto questo modulo, e
+    # finora non lasciava nessuna traccia. Se un giorno «mi sono sparite le
+    # ore di lettura di quel libro», la risposta e' qui.
+    log_message("info", "stats",
+                f"'{_chi(current_user)}' discarded the orphan reading sessions of "
+                f"md5 {_impronta(md5)}: {removed} removed, and they will not "
+                f"come back.")
     return {"status": "ok", "sessions_discarded": removed}
 
 
@@ -324,6 +371,13 @@ def create_saved_chart(
     )
     db.add(chart)
     db.commit()
+    # **Il nome del grafico NON si scrive**, l'id si'. Il nome l'ha scritto
+    # una persona e non serve a ritrovare la riga; l'id si'. E' la regola che
+    # vale per tutto questo giro di registro: si identifica, non si cita.
+    log_message("info", "stats",
+                f"'{_chi(current_user)}' saved a new chart (id {chart.id}, "
+                f"{chart.chart_type} on {chart.data_source}) in library "
+                f"'{chart.library}'.")
     return _serialize_chart(chart)
 
 
@@ -350,6 +404,9 @@ def update_saved_chart(
     chart.sort_by = payload.sort_by or None
     chart.sort_order = payload.sort_order or None
     db.commit()
+    log_message("info", "stats",
+                f"'{_chi(current_user)}' changed chart {chart.id} "
+                f"({chart.chart_type} on {chart.data_source}).")
     return _serialize_chart(chart)
 
 
@@ -360,6 +417,10 @@ def delete_saved_chart(
     db: Session = Depends(database.get_db),
 ):
     chart = _get_owned_chart(db, id, current_user)
+    tipo, sorgente = chart.chart_type, chart.data_source
     db.delete(chart)
     db.commit()
+    log_message("info", "stats",
+                f"'{_chi(current_user)}' deleted chart {id} "
+                f"({tipo} on {sorgente}).")
     return {"status": "ok"}

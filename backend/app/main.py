@@ -976,7 +976,22 @@ app.add_middleware(
 # ignora. Togliere un campo, rinominarlo, cambiarne il tipo o il significato
 # invece si': quello e' il momento di alzare questo numero, e di alzare anche
 # CLIENT_MINIMO.
-API = 1
+#
+# **Da 1 a 2 il 17/11/2026, e il motivo NON e' quello che si vede nel commit
+# in cui questo numero si muove.** E' la rotta dell'accoppiamento: il 16/11 un
+# programma chiedeva di entrare con `POST /api/pairing/requests` e ritirava il
+# token con `GET /api/pairing/requests/{ticket}`; il 17 quelle due rotte, piu'
+# l'elenco e le due di conferma, sono state **togliere** (l'invito parte dal
+# server, vedi `api/accoppiamento.py`). Togliere rotte e' esattamente il caso
+# che questo numero esiste per annunciare: un client scritto contro l'1 non
+# funziona piu', e l'unico modo che ha di saperlo prima di provare e' leggere
+# qui.
+#
+# **Doveva muoversi in quel commit e non si e' mosso**: l'ho dimenticato, e me
+# ne sono accorto cercando dove fosse la «VERSION» da alzare per il giro dei
+# log. I log non c'entrano — non cambiano nessun contratto — ma il numero e'
+# questo e andava a 2 comunque.
+API = 2
 
 # **La versione minima di client che questo server accetta di servire.** Non
 # e' un controllo che il server fa — e' un'informazione che da', e che il
@@ -1114,7 +1129,7 @@ app.include_router(stats_router.router, dependencies=_AUTH)
 app.include_router(interventions_router.router, dependencies=_AUTH)
 app.include_router(dictionaries_router.router, dependencies=_AUTH)
 app.include_router(vocabulary_router.router, dependencies=_AUTH)
-app.include_router(accoppiamento_router.router, dependencies=_AUTH)  # il pannello di chi conferma
+app.include_router(accoppiamento_router.router, dependencies=_AUTH)  # chi crea gli inviti
 
 # OPDS ha gia' la sua autenticazione, HTTP Basic (require_opds_auth): i
 # lettori esterni che consumano il feed non sanno nulla del JWT di Kolibre.
@@ -1122,17 +1137,21 @@ app.include_router(opds_router.router)
 
 # Endpoint che il browser o il plugin caricano senza poter allegare un
 # header: copertine e foto in <img src>, font in @font-face, self-update
-# del plugin KOReader. In sola lettura tutti tranne l'accoppiamento qui
-# sotto, che e' la sola parte SENZA autenticazione che scriva nel database
-# (anche il suo GET scrive: segna il token come ritirato) —
-# vedi il commento accanto a ciascun public_router nel rispettivo modulo.
+# del plugin KOReader. In sola lettura tutti tranne il riscatto di un invito
+# qui sotto, che e' la sola parte SENZA autenticazione che scriva nel
+# database — e scrive soltanto se il codice che le arriva e' uno di quelli
+# nati dentro il server. Vedi il commento accanto a ciascun public_router nel
+# rispettivo modulo.
 app.include_router(users_router.public_router)
 app.include_router(ingest_router.public_router)
 app.include_router(books_router.device_or_user_router)                    # persona O dispositivo
 app.include_router(books_router.public_router)
 app.include_router(authors_router.public_router)
 app.include_router(tools_router.public_router)
-# Senza autenticazione per forza: un programma che chiede di accoppiarsi non
-# ha ancora nessuna credenziale. I limiti che tengono stretta questa
-# superficie stanno in testa a `api/accoppiamento.py`.
+# Senza autenticazione per forza: un programma che scambia un codice di
+# accoppiamento col suo token non ha ancora nessuna credenziale da
+# presentare. **E' una rotta sola** (`POST /api/pairing/redeem`), e dal
+# 17/11/2026 non ce n'e' piu' nessuna con cui un programma possa far
+# comparire qualcosa nel server: l'invito lo crea chi e' dentro. I limiti che
+# tengono stretta questa superficie stanno in testa a `api/accoppiamento.py`.
 app.include_router(accoppiamento_router.public_router)

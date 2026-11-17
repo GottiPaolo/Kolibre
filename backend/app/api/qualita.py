@@ -16,14 +16,20 @@ import json
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from .. import config, database, models
+from .. import auth, config, database, models
 from ..calibre.library import CalibreLibrary
+from ..logging_utils import log_message
 from ..schemas_risposte import (Esito, QualitaDettaglio, QualitaElenco,
                                 QualitaImpostazioni, QualitaStato)
 from ..services import app_settings, qualita_job
 from .libraries import biblioteca_scrivibile, default_library_param
 
 router = APIRouter(prefix="/api/kolibre/qualita", tags=["qualita"])
+
+
+def _chi(utente) -> str:
+    """Il nome dell'account che ha fatto la richiesta, o un segnaposto."""
+    return getattr(utente, "username", None) or "?"
 
 
 @router.get("/settings", response_model=QualitaImpostazioni)
@@ -33,13 +39,25 @@ def leggi_impostazioni(library: str = Depends(default_library_param), db: Sessio
 
 @router.put("/settings", response_model=QualitaImpostazioni)
 def scrivi_impostazioni(payload: dict, library: str = Depends(biblioteca_scrivibile),
-                        db: Session = Depends(database.get_db)):
+                        db: Session = Depends(database.get_db),
+                        chi: models.User = Depends(auth.get_current_user_flexible)):
     acceso = bool(payload.get("enabled", True))
+    prima = app_settings.is_qualita_enabled(db, library)
     app_settings.set_qualita_enabled(db, library, acceso)
     # Accendere vuol dire «fallo»: senza questo l'interruttore sarebbe una
     # promessa che si avvera al prossimo riavvio del server.
-    if acceso:
-        qualita_job.accoda(library)
+    accodata = qualita_job.accoda(library) if acceso else False
+    # **Due righe e non una**, perche' sono due fatti diversi: l'interruttore
+    # e' cambiato, e un lavoro e' partito. Il secondo e' quello che poi
+    # spiega il carico sul server per i dieci minuti successivi, e chi legge
+    # il registro cercando «perche' era lento alle tre» cerca quello.
+    if prima != acceso:
+        log_message("info", "qualita",
+                    f"'{_chi(chi)}' turned the quality check "
+                    f"{'on' if acceso else 'off'} for library '{library}'.")
+    if accodata:
+        log_message("info", "qualita",
+                    f"Library '{library}' was queued for a quality pass.")
     return {"enabled": acceso}
 
 
@@ -76,7 +94,8 @@ def stato(library: str = Depends(default_library_param), db: Session = Depends(d
 
 
 @router.post("/analizza", response_model=Esito)
-def analizza(payload: dict = None, library: str = Depends(biblioteca_scrivibile)):
+def analizza(payload: dict = None, library: str = Depends(biblioteca_scrivibile),
+             chi: models.User = Depends(auth.get_current_user_flexible)):
     """
     Mette la biblioteca in coda. Con `{"forza": true}` rifa' anche i libri
     che hanno gia' un punteggio buono: chi preme quel pulsante lo fa quando
@@ -86,7 +105,18 @@ def analizza(payload: dict = None, library: str = Depends(biblioteca_scrivibile)
     avviato = qualita_job.accoda(library, forza=forza)
     if not avviato:
         # Non e' un errore: o e' spenta, o e' gia' in coda. Lo stato lo dice.
+        #
+        # **Ma si scrive**, ed e' il caso che vale la pena spiegare: una
+        # richiesta che non fa niente e non lo dice e' il modo in cui si
+        # finisce a premere lo stesso pulsante cinque volte convinti che il
+        # server non risponda. WARNING perche' e' un rifiuto, non un guasto.
+        log_message("warning", "qualita",
+                    f"'{_chi(chi)}' asked for a quality pass on '{library}', "
+                    f"nothing started: it is switched off, or already queued.")
         return {"status": "ok", "messaggio": "already queued, or switched off"}
+    log_message("info", "qualita",
+                f"'{_chi(chi)}' started a quality pass on '{library}'"
+                f"{', redoing the books that already have a score' if forza else ''}.")
     return {"status": "ok"}
 
 
@@ -133,17 +163,75 @@ def elenco(library: str = Depends(default_library_param), db: Session = Depends(
             "errore": r.errore,
         })
 
-    # L'ordinamento: i libri senza punteggio (errore di analisi) stanno in
-    # fondo in tutti e due i versi, perche' non sono «i peggiori» — sono
-    # quelli di cui non si sa niente, e metterli primi fra i peggiori direbbe
-    # una cosa falsa.
-    senza = [f for f in fuori if f["punteggio"] is None]
-    con = [f for f in fuori if f["punteggio"] is not None]
-    chiave = {"titolo": lambda f: (f["title"] or "").lower(),
-              "autore": lambda f: (f["author"] or "").lower()}.get(ordina, lambda f: f["punteggio"])
-    con.sort(key=chiave, reverse=(verso == "desc"))
-    ordinati = con + senza
+    ordinati = ordina_le_righe(fuori, ordina, verso)
     return {"libri": ordinati[salta:salta + max(1, min(limite, 2000))], "totale": len(ordinati)}
+
+
+#: I nomi di colonna che NON sono una dimensione. Le dimensioni si chiedono
+#: come `dimensioni.<nome>` e non si elencano qui di proposito: la misura puo'
+#: aggiungerne (vedi `qualita_job.VERSIONE`), e un elenco scritto a mano
+#: smetterebbe di ordinare la colonna nuova in silenzio — che e' il difetto
+#: che questa funzione sta chiudendo, visto dall'altro lato.
+PREFISSO_DIMENSIONE = "dimensioni."
+
+
+def _valore_da_ordinare(riga: dict, ordina: str):
+    """
+    Il valore su cui ordinare, o `None` se quella riga non ce l'ha.
+
+    `None` non vuol dire «zero»: vuol dire «di questa riga non si sa». Chi
+    chiama lo tiene separato, vedi `ordina_le_righe`.
+    """
+    if ordina == "titolo":
+        return (riga["title"] or "").lower()
+    if ordina == "autore":
+        return (riga["author"] or "").lower()
+    if ordina == "difetti":
+        return riga["difetti"]
+    if ordina.startswith(PREFISSO_DIMENSIONE):
+        nome = ordina[len(PREFISSO_DIMENSIONE):]
+        valore = (riga.get("dimensioni") or {}).get(nome)
+        return valore if isinstance(valore, (int, float)) else None
+    return riga["punteggio"]
+
+
+def ordina_le_righe(righe: list, ordina: str, verso: str) -> list:
+    """
+    La tabella ordinata per la colonna chiesta, con una regola sola.
+
+    **Il difetto che questa funzione chiude** (17/11/2026, chiesto da Paolo:
+    «ogni colonna deve essere ordinabile, non solo alcune»). Prima
+    l'ordinamento era un dizionario con due chiavi — titolo e autore — e un
+    ripiego:
+
+        chiave = {"titolo": ..., "autore": ...}.get(ordina, lambda f: f["punteggio"])
+
+    cioe' **qualunque altra colonna ordinava per punteggio, senza dirlo**.
+    Mettere un bottone sulle colonne delle dimensioni senza toccare questo
+    avrebbe dato tre colonne che sembrano ordinare e ordinano per un'altra
+    cosa — che e' peggio di una colonna che non si clicca, perche' una
+    colonna che non si clicca almeno non mente.
+
+    **Le righe a cui quel valore manca vanno in fondo, in tutti e due i
+    versi.** Non sono «le peggiori»: sono quelle di cui non si sa niente, e
+    metterle prime fra le peggiori direbbe una cosa falsa. Era la regola che
+    c'era gia' per il punteggio, **generalizzata alla colonna chiesta**: se si
+    ordina per una dimensione, in fondo vanno i libri che quella dimensione
+    non l'hanno (una misura piu' vecchia, un'analisi fallita), non quelli
+    senza punteggio.
+
+    **E una conseguenza da dichiarare, perche' e' un cambiamento.** Prima i
+    libri con l'analisi fallita stavano in fondo **anche ordinando per
+    titolo**, perche' la regola guardava sempre il punteggio. Adesso no: un
+    titolo c'e' sempre, quindi ordinando per titolo quei libri si mescolano
+    agli altri al loro posto alfabetico. E' la regola applicata per davvero
+    invece che a meta' — e chi li vuole tutti insieme ha il filtro «errori»,
+    che e' fatto per quello.
+    """
+    con = [r for r in righe if _valore_da_ordinare(r, ordina) is not None]
+    senza = [r for r in righe if _valore_da_ordinare(r, ordina) is None]
+    con.sort(key=lambda r: _valore_da_ordinare(r, ordina), reverse=(verso == "desc"))
+    return con + senza
 
 
 @router.get("/libri/{book_id}", response_model=QualitaDettaglio)

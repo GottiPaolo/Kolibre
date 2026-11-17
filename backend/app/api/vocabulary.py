@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from .. import auth, config, database, models
 from ..istanti import quando
+from ..logging_utils import log_message
 from ..calibre.library import CalibreLibrary
 from ..schemas_risposte import (
     ParolaDelVocabolario, SovrapposizioniDelVocabolario, Vocabolario,
@@ -14,6 +15,22 @@ from ..services import dictionary_service, preferenze_utente
 router = APIRouter(prefix="/api/kolibre/vocabulary", tags=["vocabulary"])
 
 
+def _chi(utente) -> str:
+    """Il nome dell'account che ha fatto la richiesta, o un segnaposto."""
+    return getattr(utente, "username", None) or "?"
+
+
+# ── Perche' in queste righe NON c'e' la parola ──────────────────────────────
+#
+# **Una parola cercata dice che cosa stai leggendo, e come lo stai leggendo.**
+# Un registro che elenca «miasma», «probity», «egregious» e' il diario di
+# lettura di una persona: non e' un segreto come un token, ma e' un dato suo,
+# e la regola di questo giro (Paolo, 17/11/2026) e' «niente dati personali
+# oltre l'id». Quindi qui si scrive **l'id della voce e l'id del libro**, che
+# bastano a ritrovare la riga nel database, e non la parola.
+#
+# E' la stessa scelta che il registro dei dizionari aveva gia' fatto da se':
+# le sue righe dicono la lingua installata, mai le parole cercate.
 def _book_title(library: str, calibre_book_id: int):
     try:
         book = CalibreLibrary(config.library_path(library)).get_book(calibre_book_id)
@@ -200,12 +217,23 @@ def add_word_from_reader(
             create_time=datetime.utcnow(),
         )
         db.add(entry)
+    nuova = entry.id is None
     if definition:
         entry.definition = definition
         entry.definition_source = definition_source
         entry.definition_fetched_at = datetime.utcnow()
     db.commit()
     db.refresh(entry)
+    # Una parola riaggiunta non crea una riga nuova: aggiorna il contesto di
+    # quella che c'e'. Sono due fatti diversi e il registro li distingue,
+    # perche' «ne ho aggiunte dieci» e «ne ho riguardate dieci» non sono la
+    # stessa cosa quando si guarda crescere un vocabolario.
+    log_message("info", "vocabulary",
+                f"'{_chi(current_user)}' "
+                f"{'added a word to' if nuova else 'refreshed a word of'} "
+                f"the vocabulary (entry {entry.id}, book {calibre_book_id} "
+                f"of library '{library}')"
+                f"{', with its definition' if definition else ''}.")
     return _serialize_web_entry(entry)
 
 
@@ -261,12 +289,28 @@ def fetch_definition_unified(
             entry.word, preferenze_utente.lingua_di(db, current_user.id)
         )
     except dictionary_service.RicercaDaRifare as e:
+        # **ERROR, e non WARNING**: qui non abbiamo rifiutato niente — una
+        # cosa da cui dipendiamo non ha risposto. E' l'unico guasto di questo
+        # modulo, ed e' quello che il 16/11 si mascherava da «parola non
+        # trovata»: senza questa riga, un dizionario che da due giorni
+        # risponde «rallenta» si vede solo come un vocabolario che non si
+        # riempie piu'.
+        log_message("error", "vocabulary",
+                    f"The dictionary did not answer for entry {composite_id} "
+                    f"of '{_chi(current_user)}': {e.motivo}.")
         raise HTTPException(
             status_code=503,
             detail=f"The dictionary could not be reached, so we cannot tell whether "
                    f"'{entry.word}' has a definition: {e.motivo}. Try again in a few seconds.",
         )
     if not result:
+        # Non e' un guasto: il dizionario ha risposto, e la risposta e' «non
+        # ce l'ho». Si scrive comunque, perche' e' la riga che dice che i due
+        # esiti sono rimasti distinti — se un giorno tornassero a confondersi,
+        # il registro lo mostrerebbe prima di qualunque segnalazione.
+        log_message("info", "vocabulary",
+                    f"The dictionary has no definition for entry "
+                    f"{composite_id} of '{_chi(current_user)}'.")
         raise HTTPException(status_code=404, detail=f"No definition found for '{entry.word}'")
 
     entry.definition = result["definition"]
@@ -274,4 +318,7 @@ def fetch_definition_unified(
     entry.definition_fetched_at = datetime.utcnow()
     db.commit()
     db.refresh(entry)
+    log_message("info", "vocabulary",
+                f"Entry {composite_id} of '{_chi(current_user)}' got its "
+                f"definition from {result['source']}.")
     return serialize(entry)

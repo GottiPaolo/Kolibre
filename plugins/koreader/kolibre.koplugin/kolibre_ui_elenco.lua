@@ -81,6 +81,25 @@ local Elenco = Menu:extend{
 --- La finestra di quel nome aperta adesso, o `nil`.
 function Elenco.apertaDi(chiave) return aperte[chiave] end
 
+--- **Tutte** le finestre aperte adesso, in una tabella.
+--
+-- Serve a chi deve dire la stessa cosa a tutte quante senza sapere quali
+-- sono: `main.lua`, quando una sincronizzazione ha portato o portato via dei
+-- libri, le fa rileggere l'elenco. Torna una tabella nuova e non quella vera,
+-- cosi' chi la scorre non si trova le finestre che si chiudono sotto i piedi.
+--
+-- **Il perche' sia una funzione e non un elenco scritto a mano in `main.lua`:**
+-- un elenco scritto a mano e' una cosa da ricordarsi di aggiornare. La
+-- quarta finestra — la ricerca e' nata il 17/11 — non si e' dovuta aggiungere
+-- da nessuna parte, e la quinta non si dovra'.
+function Elenco.tutteAperte()
+    local fuori = {}
+    for _chiave, vista in pairs(aperte) do
+        table.insert(fuori, vista)
+    end
+    return fuori
+end
+
 --- Le tre cose che una sottoclasse deve dire. Qui rispondono il minimo che
 --- non rompe niente: una finestra senza nome, vuota, che lo dichiara.
 function Elenco:titolo() return "" end
@@ -137,6 +156,13 @@ function Elenco:init()
     -- libreria. Scrivendo `perpage`, `Menu` lo ricalcola al primo ridisegno
     -- leggendo `items_per_page`, e le righe tornano quattordici.
     self.items_per_page = self.righe_per_schermata
+    -- **Il riquadro di ricerca di KOReader diventa il nostro** (Paolo,
+    -- 17/11/2026). `Menu` dichiara questo campo: quando c'e', il pulsante
+    -- del riquadro — quello che si apre toccando il numero di pagina in
+    -- fondo — si chiama «Search…» e chiama noi invece di saltare alla prima
+    -- riga che corrisponde. Lo usano gia' il gestore di file e la cronologia
+    -- di KOReader per aprirci la loro. Vedi `kolibre_ui_ricerca.lua`.
+    self.search_callback = function(testo) Comune.cerca(self, testo) end
     self.item_table = self:_vociDaMostrare()
     self.custom_title_bar = Pezzi.BarraAlta:new{
         larghezza = Screen:getWidth(),
@@ -291,7 +317,9 @@ function Elenco:_manifestoPerPercorso()
     if not self.manifest then return per_percorso end
     local ok = pcall(function()
         for _chiave, voce in pairs(self.manifest:all()) do
-            if voce.path then per_percorso[voce.path] = voce end
+            if voce.path then
+                per_percorso[voce.path] = Comune.miglioreFra(per_percorso[voce.path], voce)
+            end
         end
     end)
     if not ok then return {} end

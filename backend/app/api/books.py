@@ -25,7 +25,7 @@ from ..schemas_risposte import (
     ValoriDeiCampi,
 )
 from ..services.immagini_remote import scarica_immagine
-from ..services import cover_builder, converter, metadata_scraper, page_counter, toc_editor, stats_service, author_ingest_hook, app_settings, opf_metadata, author_stats_service, book_records
+from ..services import cover_builder, converter, metadata_scraper, page_counter, toc_editor, stats_service, author_ingest_hook, app_settings, author_stats_service, book_records, book_hash_service
 from ..calibre.library import CalibreLibrary
 from ..calibre.functions import string_to_authors
 from ..calibre.connection import READ_FLAG_COLUMN_LABEL, page_count_fields
@@ -753,10 +753,41 @@ async def recompute_book_page_count(
         raise HTTPException(status_code=422, detail="Page count is not available for this format")
 
     await write_queue.submit("update_book", {"book_id": id, "fields": page_count_fields(pages)}, library_path)
+    # **Passa da `chiudi_i_formati` e non da `embed_page_count`**, e non e' un
+    # dettaglio di stile (17/11/2026).
+    #
+    # Incorporare il conteggio pagine ricostruisce lo zip e lo rimette al suo
+    # posto con `os.replace`: il file sul disco **diventa un altro file**, con
+    # altri byte e quindi un'altra impronta. L'impronta e' la cosa con cui un
+    # lettore dice «questo libro che ho in mano e' quello», quindi lasciarla
+    # vecchia vuol dire tenere in database la descrizione di un file che non
+    # esiste piu'.
+    #
+    # Fino a stamattina qui si incorporava e si andava a casa. Misurato sul
+    # server di Paolo: su 296 righe di consegna, **107 avevano un'impronta che
+    # non descriveva nessun file vivo** — il ricalcolo delle pagine le
+    # riscriveva e nessuno ricalcolava. Il buco non si vedeva perche' un
+    # `Recompute hashes` fatto a mano, giorni dopo, le rimetteva in pari.
+    #
+    # `chiudi_i_formati` fa le due cose nell'ordine giusto e **tiene l'ordine
+    # scritto in un posto solo**: la scansione di una biblioteca passava gia'
+    # da la' dal 04/11, questo e il ricalcolo di una biblioteca no. Tre copie
+    # della stessa regola, e una si era persa.
     try:
-        opf_metadata.embed_page_count(library_path, file_path, fmt, pages, book_id=id)
+        percorsi = {}
+        for f in formats:
+            percorso = lib.get_format_file_path(id, f["format"])
+            if percorso:
+                percorsi[f["format"]] = percorso
+        await run_in_threadpool(
+            book_hash_service.chiudi_i_formati,
+            db, library_path, library, id, percorsi, pages, fmt,
+        )
+        db.commit()
     except Exception as e:
-        log_message("warning", "books", f"Embedding the page count in the OPF failed for '{file_path}': {e}")
+        log_message("warning", "books",
+                    f"Closing the formats failed for book {id} in library "
+                    f"'{library}': {e}")
 
     log_message("info", "books", f"Recompute pages: book {id} in library '{library}' -> {pages}")
     return {"status": "ok", "pages": pages}
@@ -1300,8 +1331,10 @@ def generate_book_toc(id: int, payload: dict, library: str = Depends(biblioteca_
 
 
 @router.post("/{id}/toc", responses={200: {"model": IndiceSalvato}})
-def edit_book_toc(id: int, payload: dict, library: str = Depends(biblioteca_scrivibile)):
-    lib = CalibreLibrary(config.library_path(library))
+def edit_book_toc(id: int, payload: dict, library: str = Depends(biblioteca_scrivibile),
+                  db: Session = Depends(database.get_db)):
+    library_path = config.library_path(library)
+    lib = CalibreLibrary(library_path)
     fmt, file_path = _resolve_toc_target(lib, id, payload.get("format"))
     entries = payload.get("toc", [])
 
@@ -1314,5 +1347,18 @@ def edit_book_toc(id: int, payload: dict, library: str = Depends(biblioteca_scri
     if not ok:
         raise HTTPException(status_code=500, detail="Could not write the table of contents")
     lib.touch_last_modified(id)
+    # **Anche salvare un indice riscrive il file**, e quindi ne cambia
+    # l'impronta — vale per l'EPUB (zip ricostruito) come per il PDF. Era il
+    # terzo dei tre punti che riscrivevano senza ricalcolare; `pagine=None`
+    # perche' qui non c'e' niente da incorporare, si registrano le impronte
+    # dei file come stanno.
+    try:
+        book_hash_service.chiudi_i_formati(
+            db, library_path, library, id, {fmt: file_path})
+        db.commit()
+    except Exception as e:
+        log_message("warning", "books",
+                    f"Closing the formats after the TOC write failed for book "
+                    f"{id} in library '{library}': {e}")
     log_message("info", "books", f"Updated {fmt} TOC for book ID {id} in library '{library}'")
     return {"status": "ok", "format": fmt}

@@ -8,61 +8,92 @@
 // parte sul computer: è il difetto che il plugin Obsidian aveva, che
 // conservava la password dentro il vault (cioè dentro la cartella che si
 // sincronizza fra computer, a volte in un repository git). E perché nemmeno
-// copiare a mano un token è una buona idea: si incolla male, resta negli
-// appunti, finisce in un messaggio.
+// copiare a mano un token è una buona idea: è una credenziale che non scade,
+// si incolla male, resta negli appunti, finisce in un messaggio.
 //
-// **Come funziona invece.** Il programma chiede al server un codice di sei
-// caratteri e lo mostra nella sua finestra. Qui — nel sito, dove si è già
-// entrati — la richiesta compare da sé, con quel codice. Si confronta, si
-// conferma, e il programma riceve il token da sé. Nessuno copia niente.
+// **Come funziona: un invito.** Qui — nel sito, dove si è già entrati — nasce
+// un codice usa e getta. Lo si porta nel programma, il programma lo scambia
+// con un token suo, e il codice è bruciato. La password non passa mai per il
+// programma, e la credenziale che resta non è stata copiata da nessuno a mano.
 //
-// **Perché il codice si mostra in grande, e non c'è solo un pulsante.** La
-// rotta con cui un programma bussa risponde a chiunque raggiunga il server —
-// deve, perché chi bussa non ha ancora credenziali. Quindi la richiesta che
-// compare qui potrebbe non essere la propria. La difesa è il codice: quelle
-// sei lettere sono sullo schermo di chi sta aspettando, e un pulsante
-// «conferma» da solo non le farebbe guardare. Per lo stesso motivo si mostra
-// **l'indirizzo** da cui la richiesta arriva: è la sola cosa che il server sa
-// e che la richiesta non può raccontarsi da sola.
+// **Il verso conta, ed è cambiato il 17/11/2026.** Il giorno prima andava al
+// contrario: il programma bussava, e qui compariva una riga da confermare.
+// Paolo l'ha fermato: «non mi piace l'idea che qualsiasi client può mandarmi
+// una richiesta… tutto deve partire dal server». Il difetto di quel verso non
+// era il codice — era che chiunque raggiungesse il server poteva far comparire
+// qualcosa da confermare in questa pagina, che è precisamente il modo di far
+// confermare a una persona la cosa sbagliata. In questo verso non c'è niente
+// da confermare: nessuno che non sia già dentro può far nascere niente.
+//
+// **Il codice si vede una volta sola**, e non è prudenza di stile: in database
+// c'è soltanto la sua impronta, quindi da quel momento il server non è in
+// grado di ridirlo nemmeno volendo. È la stessa regola dei token delle
+// applicazioni (Impostazioni ▸ Token delle applicazioni), per la stessa
+// ragione. Chi lo perde ne fa un altro: un clic.
+//
+// **Si può fare anche senza questa pagina**, ed è l'altra richiesta di Paolo
+// dello stesso giorno: «il collegamento di nuovi device dovrebbe poter essere
+// effettuato anche senza frontend». Dal terminale del server,
+// `python3 -m backend.app.invita`. Il comando è scritto qui sotto nella
+// finestra, perché il posto in cui uno si chiede «e senza il sito?» è questo.
 //
 // **Dove si spegne un programma collegato:** Impostazioni ▸ Token delle
 // applicazioni, che è l'elenco di tutti i token dell'account — non qui, perché
 // un programma non è un dispositivo e non ha una scheda fra i lettori.
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, Link2, Loader2, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Copy, Link2, Loader2, Terminal, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { api } from '@/lib/api'
+import { copiaNegliAppunti } from '@/lib/appunti'
 import { toast } from '@/lib/toast'
 import { messaggioErrore } from '@/lib/messaggiErrore'
 import { useLingua } from '@/lib/i18n'
 
-type Richiesta = {
+type Invito = {
   id: number
-  code: string
-  client_name: string
-  platform: string | null
-  ip: string | null
+  name: string | null
+  origin: string
+  status: string
   created_at: string | null
   expires_at: string | null
+  redeemed_at: string | null
+  client_name: string | null
+  platform: string | null
+  ip: string | null
 }
 
-// Ogni quanto si richiede l'elenco. Un codice vive cinque minuti e chi lo
-// aspetta sta guardando lo schermo: tre secondi sono il tempo che fa sembrare
-// la richiesta «comparsa da sé». React Query non interroga mentre la finestra
-// non è in primo piano (`refetchIntervalInBackground` è falso per difetto),
-// quindi una pagina lasciata aperta in un'altra scheda non chiede niente.
-const OGNI = 3000
+type InvitoNato = {
+  id: number
+  code: string
+  name: string | null
+  expires_at: string
+  expires_in_seconds: number
+}
 
-export function useRichiesteDiAccoppiamento() {
+// Il comando da terminale, scritto per intero. Non è tradotto e non è
+// composto a pezzi: è una riga da copiare, e una riga da copiare che cambia
+// con la lingua è una riga che qualcuno copierà sbagliata.
+const COMANDO = 'docker compose exec backend python3 -m backend.app.invita'
+
+// Ogni quanto si richiede l'elenco. Un invito vive un quarto d'ora e chi
+// guarda questa finestra sta aspettando che un programma lo usi: cinque
+// secondi fanno comparire da sé la riga «è stato usato». React Query non
+// interroga mentre la finestra non è in primo piano
+// (`refetchIntervalInBackground` è falso per difetto), quindi questa finestra
+// lasciata aperta in un'altra scheda non chiede niente.
+const OGNI = 5000
+
+function useInviti(attivo: boolean) {
   return useQuery({
-    queryKey: ['richieste-accoppiamento'],
-    queryFn: async (): Promise<Richiesta[]> => {
-      const { data, error } = await api.GET('/api/pairing/requests')
+    queryKey: ['inviti-accoppiamento'],
+    queryFn: async (): Promise<Invito[]> => {
+      const { data, error } = await api.GET('/api/pairing/invites')
       if (error) throw error
-      return data.items as Richiesta[]
+      return data.items as Invito[]
     },
+    enabled: attivo,
     refetchInterval: OGNI,
   })
 }
@@ -75,107 +106,104 @@ function oraBreve(quando: string | null) {
     : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
-function RigaRichiesta({ richiesta }: { richiesta: Richiesta }) {
+/** Una riga dell'elenco: un invito e com'è andata. */
+function RigaInvito({ invito }: { invito: Invito }) {
   const { t } = useLingua()
   const queryClient = useQueryClient()
   const [inCorso, setInCorso] = useState(false)
 
-  async function rispondi(confermo: boolean) {
+  async function revoca() {
     setInCorso(true)
     try {
-      const indirizzo = confermo
-        ? '/api/pairing/requests/{request_id}/confirm'
-        : '/api/pairing/requests/{request_id}/refuse'
-      const { error } = await api.POST(indirizzo, {
-        params: { path: { request_id: richiesta.id } },
+      const { error } = await api.POST('/api/pairing/invites/{invite_id}/revoke', {
+        params: { path: { invite_id: invito.id } },
       })
       if (error) throw error
-      toast.success(
-        confermo
-          ? t('devices.pairing.confirmed', { name: richiesta.client_name })
-          : t('devices.pairing.refused')
-      )
-      void queryClient.invalidateQueries({ queryKey: ['richieste-accoppiamento'] })
-      // L'elenco dei token dell'account: il programma appena collegato ne ha
-      // uno nuovo, e quella pagina è dove si spegne.
-      void queryClient.invalidateQueries({ queryKey: ['token-applicazione'] })
+      toast.success(t('devices.pairing.revoked'))
+      void queryClient.invalidateQueries({ queryKey: ['inviti-accoppiamento'] })
     } catch (e) {
-      toast.error(
-        messaggioErrore(
-          e,
-          confermo ? t('devices.pairing.confirmFailed') : t('devices.pairing.refuseFailed')
-        )
-      )
+      toast.error(messaggioErrore(e, t('devices.pairing.revokeFailed')))
     } finally {
       setInCorso(false)
     }
   }
 
-  const scade = oraBreve(richiesta.expires_at)
+  // Lo stato in una riga, con le cose che si vogliono sapere di ciascuno: di
+  // uno che aspetta, quando scade; di uno usato, da chi e da dove — che è la
+  // sola cosa che il programma non si è raccontata da sé.
+  const dettaglio =
+    invito.status === 'redeemed'
+      ? [
+          invito.client_name,
+          invito.ip && t('devices.pairing.fromAddress', { ip: invito.ip }),
+          oraBreve(invito.redeemed_at) &&
+            t('devices.pairing.redeemedAt', { time: oraBreve(invito.redeemed_at) as string }),
+        ]
+      : [
+          invito.origin === 'terminal' ? t('devices.pairing.fromTerminal') : null,
+          invito.status === 'pending' && oraBreve(invito.expires_at)
+            ? t('devices.pairing.expiresAt', { time: oraBreve(invito.expires_at) as string })
+            : null,
+        ]
+
+  const colore =
+    invito.status === 'pending'
+      ? 'text-[var(--warning)]'
+      : invito.status === 'redeemed'
+        ? 'text-[var(--positive)]'
+        : 'text-muted-foreground'
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-md border border-border bg-background px-3 py-2.5">
-      {/* Il codice è la cosa che si guarda: grande, spaziato, in un carattere
-          a larghezza fissa perché sei caratteri da confrontare uno per uno si
-          leggono meglio allineati. */}
-      <code className="rounded bg-muted px-2.5 py-1 font-mono text-[18px] font-semibold tracking-[0.2em]">
-        {richiesta.code}
-      </code>
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-border bg-background px-3 py-2">
       <div className="flex min-w-0 flex-col">
-        {/* Testo scritto dal programma: si mostra come testo e non lo si
-            interpreta. React lo scrive, non lo esegue; il server l'ha già
-            tagliato e ripulito dagli «a capo». */}
-        <span className="truncate text-[13px] font-medium">{richiesta.client_name}</span>
+        <span className="truncate text-[13px] font-medium">
+          {/* Il nome che Paolo ha scritto, se l'ha scritto; altrimenti quello
+              dichiarato dal programma al riscatto. Testo, non interpretato:
+              React lo scrive e non lo esegue, e il server l'ha già tagliato e
+              ripulito dagli «a capo». */}
+          {invito.name || invito.client_name || t('devices.pairing.unnamed')}
+        </span>
         <span className="text-[11.5px] text-muted-foreground">
-          {[richiesta.platform, richiesta.ip && t('devices.pairing.fromAddress', { ip: richiesta.ip }),
-            scade && t('devices.pairing.expiresAt', { time: scade })]
-            .filter(Boolean)
-            .join(' · ')}
+          {dettaglio.filter(Boolean).join(' · ')}
         </span>
       </div>
-      <div className="ml-auto flex items-center gap-2">
-        <Button variant="ghost" size="sm" disabled={inCorso} onClick={() => void rispondi(false)}>
-          <X className="size-3.5" /> {t('devices.pairing.refuse')}
+      <span className={`ml-auto shrink-0 text-[11.5px] font-semibold ${colore}`}>
+        {t(`devices.pairing.status.${invito.status}`)}
+      </span>
+      {invito.status === 'pending' && (
+        <Button variant="ghost" size="sm" disabled={inCorso} onClick={() => void revoca()}>
+          {inCorso ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+          {t('devices.pairing.revoke')}
         </Button>
-        <Button size="sm" disabled={inCorso} onClick={() => void rispondi(true)}>
-          {inCorso ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-          {t('devices.pairing.confirm')}
-        </Button>
-      </div>
+      )}
     </div>
   )
 }
 
-/**
- * Le richieste che aspettano, in cima alla pagina dei dispositivi.
- *
- * **Non c'è quando non c'è niente.** Un riquadro che dice «nessun programma
- * sta chiedendo di collegarsi» occuperebbe per sempre il posto in cui deve
- * saltare all'occhio quello vero — è la stessa scelta dell'avviso delle
- * versioni del plugin, qui sopra nella stessa pagina. Chi vuole collegare un
- * programma senza aspettare passa dal pulsante «Collega un client».
- */
-export function RichiesteInAttesa() {
-  const { t } = useLingua()
-  const { data: richieste = [] } = useRichiesteDiAccoppiamento()
-  if (richieste.length === 0) return null
-  return (
-    <div className="flex flex-col gap-2 rounded-md border border-[var(--warning)]/40 bg-[var(--warning-soft)] p-3">
-      <div className="flex items-baseline gap-2">
-        <span className="text-[13px] font-semibold">{t('devices.pairing.waitingTitle')}</span>
-        <span className="text-[12px] text-muted-foreground">{t('devices.pairing.matchHint')}</span>
-      </div>
-      {richieste.map((r) => (
-        <RigaRichiesta key={r.id} richiesta={r} />
-      ))}
-    </div>
-  )
-}
-
-/** Il pulsante e la finestra che spiegano come si fa. */
+/** Il pulsante «Collega un client» apre questa. */
 export function CollegaUnClientDialog({ onClose }: { onClose: () => void }) {
   const { t } = useLingua()
-  const { data: richieste = [], isLoading } = useRichiesteDiAccoppiamento()
+  const queryClient = useQueryClient()
+  const [nome, setNome] = useState('')
+  const [nato, setNato] = useState<InvitoNato | null>(null)
+  const { data: inviti = [] } = useInviti(true)
+
+  const crea = useMutation({
+    mutationFn: async (): Promise<InvitoNato> => {
+      const { data, error } = await api.POST('/api/pairing/invites', {
+        body: { name: nome.trim() || undefined },
+      })
+      if (error) throw error
+      return data as InvitoNato
+    },
+    onSuccess: (dato) => {
+      setNato(dato)
+      setNome('')
+      void queryClient.invalidateQueries({ queryKey: ['inviti-accoppiamento'] })
+    },
+    onError: (e) => toast.error(messaggioErrore(e, t('devices.pairing.createFailed'))),
+  })
+
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-xl">
@@ -185,19 +213,88 @@ export function CollegaUnClientDialog({ onClose }: { onClose: () => void }) {
           </DialogTitle>
         </DialogHeader>
         <p className="text-[13px] text-muted-foreground">{t('devices.pairing.how')}</p>
-        <div className="flex flex-col gap-2">
-          {richieste.map((r) => (
-            <RigaRichiesta key={r.id} richiesta={r} />
-          ))}
-          {!isLoading && richieste.length === 0 && (
-            // Qui la riga «non c'è niente» serve, al contrario che in pagina:
-            // questa finestra l'ha aperta qualcuno che sta aspettando, e il
-            // silenzio sarebbe indistinguibile da un guasto.
-            <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-[13px] text-muted-foreground">
-              {t('devices.pairing.none')}
-            </p>
-          )}
+
+        <div className="flex items-center gap-2">
+          <input
+            value={nome}
+            onChange={(e) => setNome(e.target.value)}
+            placeholder={t('devices.pairing.namePlaceholder')}
+            aria-label={t('devices.pairing.nameLabel')}
+            maxLength={60}
+            className="min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] outline-none"
+          />
+          <Button disabled={crea.isPending} onClick={() => crea.mutate()}>
+            {crea.isPending ? <Loader2 className="size-3.5 animate-spin" /> : <Link2 className="size-3.5" />}
+            {t('devices.pairing.create')}
+          </Button>
         </div>
+        {/* Il nome non è obbligatorio, ma dire a che cosa serve lo rende
+            desiderabile: è quello che si leggerà fra sei mesi nell'elenco dei
+            token, cioè quando si dovrà decidere se spegnerlo. */}
+        <p className="-mt-1 text-[11.5px] text-muted-foreground">{t('devices.pairing.nameWhy')}</p>
+
+        {nato && (
+          <div className="rounded-md border border-[var(--warning)]/40 bg-[var(--warning-soft)] p-3">
+            <p className="mb-2 text-[12.5px]">{t('devices.pairing.codeOnce')}</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Grande, spaziato, a larghezza fissa: dieci caratteri da
+                  riscrivere su un altro schermo si leggono uno per uno, e
+                  l'alfabeto esclude già le lettere che si confondono (niente
+                  0/O, 1/I/L, 8/B). */}
+              <code className="rounded bg-background px-3 py-1.5 font-mono text-[20px] font-semibold tracking-[0.18em]">
+                {nato.code}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void copiaNegliAppunti(nato.code).then((fatto) =>
+                    fatto
+                      ? toast.success(t('devices.pairing.copied'))
+                      : toast.error(t('devices.pairing.copyFailed'))
+                  )
+                }}
+              >
+                <Copy className="size-3.5" /> {t('devices.pairing.copy')}
+              </Button>
+              {oraBreve(nato.expires_at) && (
+                <span className="text-[12px] text-muted-foreground">
+                  {t('devices.pairing.expiresAt', { time: oraBreve(nato.expires_at) as string })}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
+
+        {inviti.length > 0 && (
+          <div className="flex flex-col gap-1.5">
+            <span className="text-[12px] font-semibold text-muted-foreground">
+              {t('devices.pairing.listTitle')}
+            </span>
+            {inviti.map((i) => (
+              <RigaInvito key={i.id} invito={i} />
+            ))}
+          </div>
+        )}
+
+        {/* Il terminale, scritto qui e non in un documento: il posto in cui
+            uno si chiede «e se il sito non c'è?» è il sito. */}
+        <div className="rounded-md border border-dashed border-border px-3 py-2">
+          <p className="mb-1.5 flex items-center gap-1.5 text-[12px] text-muted-foreground">
+            <Terminal className="size-3.5" /> {t('devices.pairing.alsoFromTerminal')}
+          </p>
+          <code
+            className="block cursor-pointer break-all rounded bg-muted px-2 py-1 font-mono text-[11.5px]"
+            onClick={() => {
+              void copiaNegliAppunti(COMANDO).then((fatto) => {
+                if (fatto) toast.success(t('devices.pairing.copied'))
+              })
+            }}
+          >
+            {COMANDO}
+          </code>
+        </div>
+
         <p className="text-[12px] text-muted-foreground">{t('devices.pairing.whereToRevoke')}</p>
         <DialogFooter>
           <Button variant="ghost" onClick={onClose}>

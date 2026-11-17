@@ -1845,118 +1845,162 @@ class QualitaLibro(Base):
     errore = Column(String, nullable=True)
 
 
-class RichiestaDiAccoppiamento(Base):
+
+class InvitoDiAccoppiamento(Base):
     """
-    «Un programma chiede di entrare: questo e' il suo codice.»
+    «Io, dal server, invito un programma a entrare: questo e' il suo codice.»
 
-    **Da zero: a che domanda risponde** (16/11/2026, per il client nativo).
-    Un programma che gira sul computer di una persona deve potersi collegare
-    al server senza che quella persona gli consegni la **password del proprio
-    account**. Finora i modi erano due, e nessuno dei due va bene qui:
+    **Da zero: a che domanda risponde** (16/11/2026, per il client nativo;
+    **rovesciata il 17/11/2026** su richiesta di Paolo). Un programma che gira
+    sul computer di una persona — il client nativo di Kolibre, uno script —
+    deve avere una credenziale per parlare col server. I modi che c'erano non
+    vanno bene nessuno dei due: dargli la **password dell'account** vuol dire
+    scriverla su quel computer (e' il difetto che il plugin Obsidian aveva: la
+    teneva dentro il vault, cioe' dentro la cartella che si sincronizza fra
+    computer), e fargli **incollare a mano un token** vuol dire chiedere a una
+    persona di maneggiare una credenziale che non scade: si copia male, resta
+    negli appunti, finisce in un messaggio.
 
-      * il plugin Obsidian chiedeva nome utente e password, e per non doverli
-        richiedere ogni settimana **conservava la password** dentro il vault
-        (vedi `TokenApplicazione`: e' il difetto che quei token hanno chiuso);
-      * i dispositivi KOReader ricevono il loro token dal server, dentro un
-        pacchetto preparato dal sito — ma li' il token lo si va a prendere con
-        il browser, cioe' da un posto dove si e' gia' entrati.
-
-    Un client desktop non ha ne' l'una ne' l'altra strada: la finestra e' sua
-    e il browser e' un'altra cosa. L'accoppiamento per codice e' la terza:
-    **il programma mostra un codice, la persona lo conferma dal sito dove e'
-    gia' entrata, e il programma riceve un token.** La password non passa mai
-    per il programma, e il programma nasce senza saperla.
+    La terza strada e' un **invito**: dal server nasce un codice usa e getta a
+    vita breve, la persona lo porta nel programma, e il programma lo scambia
+    con un token suo. La password non passa mai per il programma.
 
     ────────────────────────────────────────────────────────────────────
-    LE DUE CHIAVI, CHE NON SONO LA STESSA COSA
+    PERCHE' L'INVITO PARTE DAL SERVER, E NON LA RICHIESTA DAL PROGRAMMA
     ────────────────────────────────────────────────────────────────────
 
-    **`codice`** e' per gli occhi di una persona: sei caratteri, da leggere su
-    uno schermo e ritrovare su un altro. Corto per forza, e **mostrato**.
+    La prima versione, del 16/11, andava **nell'altro verso**: il programma
+    bussava a una rotta aperta, il server apriva una richiesta in attesa, e
+    nel sito compariva una riga da confermare. Paolo l'ha fermata il giorno
+    dopo, e la ragione e' sua: *«non mi piace l'idea che qualsiasi client puo'
+    mandarmi una richiesta… tutto deve partire dal server»*.
 
-    **Il biglietto** (di cui qui si tiene solo l'impronta, `ticket_hash`) e' il
-    segreto del programma: trentadue byte casuali, che nessuno vede e che non
-    si scrivono a mano. **E' lui che autorizza a RITIRARE il token.**
+    Non e' una preferenza di gusto, ed ecco la differenza in concreto:
 
-    Tenerli separati e' il punto di tutto il disegno. Se il token si ritirasse
-    presentando il **codice**, allora chiunque, da fuori, potrebbe provare
-    codici a caso e ritirare il token **nell'istante in cui la persona
-    conferma** — e la conferma e' esattamente il momento in cui il codice
-    diventa buono. Sei caratteri non si difendono da chi li prova a macchina;
-    trentadue byte si. Quindi: il codice serve a **riconoscere** la richiesta,
-    il biglietto a **ritirarla**.
+      * **in quel verso, chiunque raggiungesse il server poteva far comparire
+        una riga nel pannello di Paolo.** La riga non apriva niente da sola —
+        ci voleva la conferma — ma il modo di far sbagliare una persona e'
+        esattamente quello: mettergli davanti qualcosa da confermare nel
+        momento in cui si aspetta di dover confermare qualcosa. Per questo
+        quella versione aveva un tetto alle richieste in attesa: serviva a non
+        riempire il pannello, cioe' era una toppa su un verso sbagliato;
+      * **in questo verso non c'e' niente da confermare.** Nessuno che non sia
+        gia' entrato puo' far nascere un invito, e quindi nessuno puo' far
+        comparire niente. La rotta aperta rimasta (il riscatto) **non scrive
+        un bel niente** se il codice non e' uno di quelli che Paolo ha creato
+        lui.
 
-    **Dell'impronta e non del biglietto**, per la stessa ragione per cui si
-    tiene l'impronta di un token d'applicazione: un database che finisse in
-    mano a qualcuno non deve regalare accessi funzionanti.
+    E c'e' una seconda ragione, pure di Paolo: *«il collegamento di nuovi
+    device dovrebbe poter essere effettuato anche senza frontend»*. Un invito
+    che nasce dal server nasce anche da **una riga di comando sul server**
+    (`python3 -m backend.app.invita`, vedi quel file), e un server senza
+    interfaccia web — o con l'interfaccia web rotta — resta collegabile.
 
     ────────────────────────────────────────────────────────────────────
-    TRE COSE CHE VALE LA PENA SPIEGARE
+    IL CODICE NON SI CONSERVA: SI CONSERVA LA SUA IMPRONTA
     ────────────────────────────────────────────────────────────────────
 
-    **1. Il codice vive cinque minuti.** Una rotta che risponde **senza
-    autenticazione** e' una superficie nuova, e la difesa migliore e' che non
-    ci sia quasi mai niente da prendere: dopo cinque minuti la riga non apre
-    piu' niente, e chi ha perso tempo deve ricominciare dal programma.
+    Qui c'e' **un solo segreto**, e questo e' il cambiamento che conta
+    rispetto al 16/11. Allora ce n'erano due: un `codice` corto da leggere con
+    gli occhi, e un `biglietto` di 32 byte che era quello che davvero
+    autorizzava a ritirare il token. Servivano due chiavi perche' il programma
+    chiedeva **prima** e ritirava **dopo**: fra le due cose c'era una finestra
+    di minuti in cui il codice era l'unica cosa in giro, e sei caratteri non
+    si difendono da chi li prova a macchina.
 
-    **2. Prima della conferma, qui non si impara niente.** La risposta a chi
-    chiede «com'e' andata?» dice soltanto lo stato. Non il nome della persona,
-    non quello del server, non quanti libri ci sono: se lo dicesse, una rotta
-    senza autenticazione diventerebbe un modo di sapere cose su un server
-    altrui, e il codice servirebbe solo a far perdere tempo.
+    Adesso il programma scambia il codice col token **in una sola richiesta**,
+    la sua. Non c'e' nessuna finestra, quindi non serve una seconda chiave —
+    ma il codice e' diventato **la** credenziale, e due cose seguono da qui:
 
-    **3. Il token in chiaro sta qui per pochi minuti, e poi non c'e' piu'.**
-    Dal momento della conferma a quello del ritiro il token deve esistere da
-    qualche parte, perche' il programma non era presente quando e' nato. Lo si
-    scrive su questa riga e si **cancella al primo ritiro**, che e' anche il
-    solo ritiro permesso. L'alternativa — il programma manda una sua chiave
-    pubblica e il server gli cifra il token — chiuderebbe anche quella
-    finestra di minuti, al prezzo di una gestione di chiavi dentro un client
-    che ancora non esiste: segnata fra le cose da decidere, non fatta.
+      1. **e' lungo dieci caratteri, non sei.** Dieci caratteri su un alfabeto
+         di ventinove sono circa 4·10^14 possibilita' (quasi 49 bit):
+         indovinarlo a macchina non e' una strada, nemmeno senza nessun
+         limite di tentativi. Sei caratteri erano 594 milioni, che con un
+         server lento sono tanti e con uno veloce no — e un numero che
+         dipende da quanto e' veloce il server non e' una difesa;
+      2. **in questa tabella non c'e' scritto da nessuna parte.** Si tiene
+         `codice_hash`, l'impronta SHA-256: il riscatto rifa' l'impronta di
+         quello che gli arriva e cerca quella. Quindi **un database che
+         finisse in mano a qualcuno non regala nessun accesso**, ed e'
+         esattamente la cosa che la versione del 16/11 non poteva promettere
+         — la' il token nasceva alla conferma e aspettava in chiaro su una
+         riga, perche' il programma non era presente quando era nato. Era
+         segnato fra le cose aperte; **questo verso lo chiude per costruzione,
+         non con una toppa.**
 
-    **Il token che nasce qui e' un `TokenApplicazione`** (`kolibre_app_…`), non
-    un token di dispositivo (`kolibre_tok_…`). La ragione e' in
-    `api/accoppiamento.py`, in testa al file.
+    **Il prezzo, dichiarato:** il codice si vede **una volta sola**, quando
+    nasce. Il sito non puo' rimostrarlo e il server non e' in grado di
+    ridirlo. Chi lo perde ne fa un altro — un clic, quindici minuti — ed e'
+    la stessa regola dei token delle applicazioni, per la stessa ragione.
+
+    ────────────────────────────────────────────────────────────────────
+    L'INVITO E' DI CHI LO CREA
+    ────────────────────────────────────────────────────────────────────
+
+    `user_id` c'e' **dal primo istante**, e non e' un dettaglio: dice a nome di
+    chi parlera' il programma, e dice di chi e' l'invito. Nella versione del
+    16/11 non poteva esserci — una richiesta arrivata da fuori non era di
+    nessuno finche' qualcuno non la confermava — e la conseguenza era che
+    **chiunque fosse entrato vedeva le richieste di chiunque altro**, cioe' il
+    nome e l'indirizzo del programma di un altro account. Era la terza cosa
+    segnata fra le aperte; anche questa si chiude qui da se'.
+
+    Il token che nasce da un invito e' un **`TokenApplicazione`**
+    (`kolibre_app_…`), non un token di dispositivo (`kolibre_tok_…`): la
+    ragione, misurata e non di gusto, e' in testa a `api/accoppiamento.py`.
     """
 
-    __tablename__ = "richieste_accoppiamento"
+    __tablename__ = "inviti_accoppiamento"
 
     id = Column(Integer, primary_key=True, index=True)
 
-    #: Sei caratteri da un alfabeto senza lettere confondibili. Unico fra le
-    #: richieste vive; una riga morta puo' averlo uguale a una viva e non e'
-    #: un problema, perche' il codice si cerca solo fra le vive.
-    codice = Column(String, nullable=False, index=True)
-    #: L'impronta SHA-256 del biglietto del programma. Vedi sopra.
-    ticket_hash = Column(String, nullable=False, unique=True, index=True)
+    #: **L'impronta SHA-256 del codice, non il codice.** Vedi sopra: il codice
+    #: e' l'unica credenziale di questo giro, quindi non si conserva in
+    #: chiaro. Unica: due inviti non possono avere lo stesso codice, e il
+    #: riscatto cerca per impronta.
+    codice_hash = Column(String, nullable=False, unique=True, index=True)
 
-    #: Come il programma si e' presentato: «Kolibre client (MacBook di
-    #: Paolo)». E' **testo di uno sconosciuto** che il sito mostra, quindi si
-    #: taglia e si ripulisce prima di scriverlo (vedi `api/accoppiamento.py`).
-    nome_client = Column(String, nullable=False)
-    #: «macOS 15», «Linux», quello che il programma dichiara. Puo' mancare.
+    #: Come Paolo ha chiamato questo invito, se gli ha dato un nome: «il
+    #: portatile», «lo script dei backup». Diventa il nome del token
+    #: nell'elenco dei token dell'account, che e' il posto da cui si spegne —
+    #: quindi un nome messo qui e' un nome che si ritrova fra sei mesi.
+    nome = Column(String, nullable=True)
+    #: Da dove e' nato: "site" oppure "terminal". Non serve al codice, serve a
+    #: chi guarda l'elenco e si chiede «questo me lo ricordo?».
+    origine = Column(String, nullable=False, default="site")
+
+    #: Come il programma si e' presentato **al riscatto**: «Kolibre client
+    #: (MacBook di Paolo)». Nullo finche' nessuno ha riscattato. E' testo di
+    #: un programma che il sito mostra, quindi si ripulisce e si taglia prima
+    #: di scriverlo (vedi `api/accoppiamento.py`).
+    nome_client = Column(String, nullable=True)
+    #: «macOS 15», «Linux»: quello che il programma dichiara di se'. Puo'
+    #: mancare.
     piattaforma = Column(String, nullable=True)
-    #: Da dove e' arrivata la richiesta. Serve a chi conferma, per capire se
-    #: quel programma e' il suo: e' l'unica cosa che il server sa e che la
-    #: richiesta non puo' raccontarsi da sola.
-    ip_richiedente = Column(String, nullable=True)
+    #: Da dove e' arrivato il riscatto, **come il server lo vede**. E' il
+    #: solo modo di rispondere, dopo, alla domanda «chi ha usato quell'invito?»
+    #: — e l'unica cosa in questa riga che il programma non si e' raccontato
+    #: da solo.
+    ip_riscatto = Column(String, nullable=True)
 
     creato_il = Column(DateTime, default=datetime.utcnow, index=True)
-    #: Dopo questo istante la riga non apre piu' niente. Vedi il punto 1.
+    #: Dopo questo istante il codice non apre piu' niente. Quindici minuti per
+    #: difetto: il tempo di portare dieci caratteri da uno schermo a un altro,
+    #: non il tempo di dimenticarselo acceso.
     scade_il = Column(DateTime, nullable=False)
 
-    confermato_il = Column(DateTime, nullable=True)
-    rifiutato_il = Column(DateTime, nullable=True)
-    #: Quando il programma ha ritirato il token. Dopo, `token_in_chiaro` e'
-    #: nullo e un secondo ritiro non da' niente.
-    ritirato_il = Column(DateTime, nullable=True)
+    #: Quando il programma l'ha scambiato col token. **Un invito vale una
+    #: volta sola**: da qui in poi non apre piu' niente.
+    riscattato_il = Column(DateTime, nullable=True)
+    #: Quando Paolo l'ha spento a mano, dal sito. Vale anche prima della
+    #: scadenza, ed e' la risposta a «ho fatto un codice e non lo uso piu'».
+    revocato_il = Column(DateTime, nullable=True)
 
-    #: Chi ha confermato, cioe' **a nome di chi** parlera' il programma. Nullo
-    #: finche' nessuno ha confermato.
+    #: **A nome di chi parlera' il programma**, e di chi e' questo invito.
+    #: Noto dal primo istante: vedi sopra.
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
-                     nullable=True, index=True)
-    #: Il token che e' nato da questa conferma, per poterlo poi spegnere.
+                     nullable=False, index=True)
+    #: Il token nato dal riscatto, per poter risalire da un invito al token
+    #: che ha prodotto (e viceversa, quando si guarda un token e si vuole
+    #: sapere da dove e' venuto).
     token_applicazione_id = Column(Integer, nullable=True)
-    #: Il token in chiaro, dalla conferma al ritiro e non oltre. Vedi il
-    #: punto 3.
-    token_in_chiaro = Column(String, nullable=True)

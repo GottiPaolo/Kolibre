@@ -33,9 +33,25 @@ Sei dimensioni, ciascuna da 0 a 1:
     integrità      cancello: se il file non si legge, il resto non conta
     indice         30  bersagli validi, ordine di lettura, copertura, presenza
     struttura      25  titoli veri, gerarchia coerente, suddivisione, paragrafi
-    pulizia        20  residui di OCR: numeri di pagina, sillabazione, righe spezzate
-    presentazione  15  CSS vero, copertina dichiarata
+    pulizia        25  residui di OCR: numeri di pagina, sillabazione, righe spezzate
+    presentazione  10  CSS vero, copertina dichiarata
     metadati       10  titolo, autore, lingua, identificativo
+
+**La v2.2 (17/11/2026) cambia quattro cose**, tutte dallo studio
+`Progetti_metis/Kolibre - Qualità EPUB/studio-2026-11-17/` (variante P9,
+approvata da Paolo). Il perché di ciascuna sta accanto al codice che la fa:
+
+  1. **l'indice si giudica sui buchi EVITABILI**: un tratto senza voci che
+     dentro non ha nessun titolo non è un difetto dell'indice ma del testo.
+     E si giudica così **solo dove i titoli sono marcati**: un libro con i
+     capitoli in testo semplice («I», «libro secondo») li ha, e noi non li
+     vediamo;
+  2. **la pulizia si combina per prodotto**: un residuo al suo peggio svuota
+     la dimensione, invece di essere mediato dagli altri. Con due aggiunte
+     perché non punisca la poesia e le forme che non sono prosa;
+  3. **le note incollate** contano come collegamenti che mancano: un numero
+     di nota rimasto nel testo senza la sua nota è un link che non c'è;
+  4. **i pesi** passano da 30/25/20/15/10 a **30/25/25/10/10**.
 
 Il peso del file non entra: dice poco della qualità (un file grosso è spesso
 una scansione) e rende il punteggio relativo.
@@ -52,15 +68,16 @@ import posixpath
 import re
 import sys
 import zipfile
+from collections import Counter
 from html.parser import HTMLParser
 from urllib.parse import unquote
 from xml.etree import ElementTree as ET
 
 # Si alza a ogni cambio che cambia i risultati: Kolibre rianalizza i libri
 # che hanno una versione più vecchia (standard concordato con kolibre-14, 14/11).
-VERSIONE = "2.1"
+VERSIONE = "2.2"
 
-PESI = {"indice": 30, "struttura": 25, "pulizia": 20, "presentazione": 15, "metadati": 10}
+PESI = {"indice": 30, "struttura": 25, "pulizia": 25, "presentazione": 10, "metadati": 10}
 
 # Sotto queste parole un libro non ha bisogno di un indice articolato.
 LIBRO_BREVE = 8000
@@ -102,6 +119,102 @@ UNITA_MINIME_PER_GIUDICARE = 10
 
 FINE_FRASE = tuple('.!?…»"”’:;)]—–*')
 
+# ── v2.2: i versi non sono paragrafi spezzati ─────────────────────────────
+#
+# **Il difetto che queste tre soglie chiudono** (studio del 17/11/2026,
+# `versi.py`). Il rilevatore dei paragrafi spezzati conta una riga di più di 40
+# caratteri che non finisce con la punteggiatura ed è seguita da una riga che
+# comincia in minuscolo. **Molti versi sono fatti esattamente così**, e con la
+# pulizia combinata per prodotto la poesia crollava: «Antologia di Spoon River»
+# da 44 a 25.
+#
+# **La lunghezza della riga non basta a distinguerli**, e questo è il punto che
+# costa due giorni a chi lo rifà da capo: ci sono OCR che fanno un paragrafo
+# per ogni riga stampata, e le loro righe sono brevi come i versi (la riga
+# spezzata mediana è 56 caratteri, contro i 42-50 della poesia). Nemmeno la
+# regolarità delle lunghezze separa i due casi: la metrica di Petrarca è
+# regolare quanto una colonna giustificata.
+#
+# **Quello che separa è COME FINISCE la riga.** La riga stampata si spezza dove
+# capita: spesso dopo una parola vuota («del», «the»), spesso con la parola
+# tagliata dal trattino, di rado sulla punteggiatura. Il verso finisce dove
+# finisce un'unità di senso o di metro. Misurato su 11 libri di poesia e 11 di
+# prosa con paragrafi spezzati:
+#
+#              finisce con punteggiatura   con parola vuota   col trattino
+#   poesia              50-77%                  0-3%              0%
+#   riga stampata       17-36%                 15-34%           1-30%
+#
+# La regola non guarda il titolo né il libro, guarda la forma delle righe
+# **intorno alla coppia**: funziona anche sui versi citati dentro un libro in
+# prosa (il Giobbe di Negri, i versi latini in Colombo).
+VERSO_RIGA_MAX = 100       # una riga di verso sta sotto questa lunghezza
+VERSO_FINESTRA_MIN = 6     # servono almeno tante righe brevi di fila per giudicare
+VERSO_SOGLIA = 0.30        # punteggiatura − parole vuote − 2 × trattini, sulla finestra
+
+# Le parole su cui una riga stampata si spezza e un verso no. Cinque lingue:
+# italiano, inglese, francese, spagnolo, tedesco.
+PAROLE_VUOTE = set("""
+di a da in con su per tra fra il lo la i gli le un uno una del dello della dei degli delle al allo alla ai agli alle
+dal dallo dalla dai dagli dalle nel nello nella nei negli nelle sul sullo sulla sui sugli sulle col coi e o ma che se
+non come più anche ed od né ci si ne mi ti vi è sono ha hanno era quale quali questo questa questi queste quel quella
+the a an of to in on at by for with from and or but that as is was are were his her its their this these which who
+le la les un une des du de et à au aux en que qui dans par pour sur ne se son sa ses ce cette est
+el los las y en con por para del al que lo su
+der die das und in mit von zu den dem des ein eine auf für ist nicht
+""".split())
+FINE_PUNT = tuple(".,;:!?…»\"”’')]—–")
+
+# **Sotto questo numero di coppie la pulizia non giudica** (scelta di Paolo,
+# 17/11/2026). Due paragrafi spezzati veri in un opuscolo di 23 paragrafi fanno
+# l'8,7%, cioè portano la pulizia a zero: il residuo c'è, il giudizio è
+# sproporzionato («Anarchia e violenza» di Malatesta, da 89 a 66). È lo stesso
+# spirito di UNITA_MINIME_PER_GIUDICARE per l'indice, e come là **tace anche il
+# difetto**: un difetto che non toglie un punto è un nome senza conseguenze, e
+# qui la regola è l'opposta — ogni punto perso ha un nome.
+COPPIE_MINIME_PER_GIUDICARE = 10
+
+# Una coppia non è prosa continua quando fra le due righe c'è un oggetto
+# (un'equazione come immagine, una tabella), quando la seconda riga è fatta
+# solo di un link, o quando sono due voci «termine: definizione» di un
+# glossario. Trovate leggendo i libri che scendevano di più: Rovelli
+# («…questa diventa» [equazione] «dove ψ…»), le «Omelie» di Colombo (righe
+# fatte solo da un link «audio»), il glossario di Rapino.
+VOCE_GLOSSARIO = re.compile(r"^[^\s:]{1,30}( [^\s:]{1,20})?: \S")
+
+# ── v2.2: le note incollate ───────────────────────────────────────────────
+#
+# Un numero di nota rimasto attaccato a una parola nel testo («sublime3») è il
+# segno di una nota che **non c'è o non si raggiunge**: il rimando è nel testo,
+# la nota no. Letti a mano i 18 libri sopra 1 ogni 1000 parole: 11 avevano note
+# vere non collegate, 2 un residuo vero di altro genere, 5 erano falsi allarmi
+# — tutti manuali tecnici («Var1», «GNS3», «IPv4», «wlan0»).
+#
+# Le due correzioni che li distinguono:
+#   1. **il codice non è testo**: dentro <pre>, <code>, <tt>, <kbd>, <samp> non
+#      si guarda;
+#   2. **una parola incollata a un numero tre volte o più è un nome**, non una
+#      nota: le note cambiano parola e numero ogni volta, un identificativo no.
+#
+# E una cosa che il rilevatore fa di proposito: intorno a <a> e <sup> si mette
+# uno spazio, quindi una nota **marcata come si deve** non viene contata. Si
+# contano solo i numeri rimasti nudi nel testo.
+NOTA_INCOLLATA = re.compile(r"^[^\W\d_]{3,}[\.,;:!?»”\")\]]*\d{1,3}[\.,;:]?$")
+RIPETIZIONI_IDENTIFICATIVO = 3
+TAG_CODICE = ("pre", "code", "tt", "kbd", "samp")
+# Note ogni 1000 parole: a 0,3 nessuna penalità, a 2,0 penalità piena.
+NOTE_SCALA = (2.0, 0.3)
+
+# ── v2.2: la pulizia si combina per prodotto ──────────────────────────────
+#
+# Prima era una media pesata, e un residuo al suo peggio veniva diluito dagli
+# altri tre: un libro con i paragrafi tutti spezzati prendeva comunque 70 di
+# pulizia perché numeri, sillabazione e testatine erano a posto. Per prodotto,
+# **ogni residuo toglie la sua quota**, come la copertura fa da sempre con
+# l'indice. Il peso è quanto quel residuo può togliere da solo: i paragrafi
+# spezzati tutto, i numeri di pagina e la sillabazione metà, le testatine meno.
+PULIZIA_PESI = {"num": 0.5, "sill": 0.5, "spez": 1.0, "test": 0.4}
+
 # ── La tabella delle regole ───────────────────────────────────────────────
 # codice: (dimensione, gravità 1-3, blocca, chi lo sistema, codice EPUBCheck)
 #   gravità   3 grave, 2 media, 1 lieve
@@ -141,6 +254,10 @@ POLITICA = {
     "numeri_pagina":       ("pulizia", 1, False, "auto", "—"),
     "sillabazione":        ("pulizia", 1, False, "ia",   "—"),
     "paragrafi_spezzati":  ("pulizia", 2, False, "ia",   "—"),
+    # v2.2: un rimando di nota rimasto nel testo senza la sua nota. Il «chi» lo
+    # decide il caso: «auto» se le note ci sono in fondo al libro e basta
+    # ricollegarle, «no» se dal file mancano del tutto.
+    "note_scollegate":     ("struttura", 2, False, "auto", "—"),
     "testatine":           ("pulizia", 1, False, "auto", "—"),
     "css_assente":         ("presentazione", 1, False, "auto", "—"),
     "copertina":           ("presentazione", 1, False, "auto", "—"),
@@ -163,12 +280,100 @@ def _lineare(x, peggio, meglio):
     return max(0.0, min(1.0, t))
 
 
+# ── v2.2: quali coppie di righe sono prosa spezzata per davvero ──────────
+#
+# Il rilevatore della v2.1 segna una coppia quando la prima riga è lunga, non
+# finisce con la punteggiatura, e la seconda comincia in minuscolo. Queste
+# funzioni togliono da quell'elenco le coppie che non sono prosa continua: i
+# versi (vedi le soglie in testa al file) e tre forme strutturali.
+
+
+def _fine_riga(t):
+    """Come finisce la riga: «punt», «trattino», «vuota» o «altro»."""
+    t = t.rstrip()
+    if re.search(r"[^\W\d_]-$", t):
+        return "trattino"
+    if t.endswith(FINE_PUNT):
+        return "punt"
+    pezzi = t.split()
+    ultima = pezzi[-1].lower() if pezzi else ""
+    if ultima.endswith(("'", "’")) or ultima in PAROLE_VUOTE:
+        return "vuota"
+    return "altro"
+
+
+def _finestra(lung, i, tetto=VERSO_RIGA_MAX, raggio=30):
+    """Le righe brevi di fila intorno alla riga `i`, al massimo `raggio` per lato."""
+    j0 = i
+    while j0 > 0 and lung[j0 - 1] < tetto and i - j0 < raggio:
+        j0 -= 1
+    j1 = i + 1
+    while j1 + 1 < len(lung) and lung[j1 + 1] < tetto and j1 - i < raggio:
+        j1 += 1
+    return range(j0, j1 + 1)
+
+
+def _profilo_fine(testi, indici):
+    """Le quote dei quattro modi di finire, su quelle righe."""
+    tipi = [_fine_riga(testi[j]) for j in indici]
+    n = len(tipi) or 1
+    return {k: sum(1 for x in tipi if x == k) / n for k in ("punt", "trattino", "vuota", "altro")}
+
+
+def _non_prosa(testi, solo_link, oggetto_prima, i):
+    """
+    Perché quella coppia non è prosa continua, o `None`.
+
+    Tre forme viste leggendo i libri che il prodotto faceva scendere di più:
+    un oggetto in mezzo (l'equazione di Rovelli), una riga fatta solo da un
+    link (le «Omelie» di Colombo), due voci di glossario (Rapino).
+    """
+    if i + 1 >= len(testi):
+        return None
+    if oggetto_prima[i + 1]:
+        return "oggetto"
+    if solo_link[i + 1]:
+        return "link"
+    if VOCE_GLOSSARIO.match(testi[i]) and VOCE_GLOSSARIO.match(testi[i + 1]):
+        return "voci"
+    return None
+
+
+def _coppie_di_prosa(testi, solo_link, oggetto_prima, coppie):
+    """
+    Delle coppie segnate, quelle che sono davvero prosa spezzata.
+
+    Una coppia esce dall'elenco se è un verso — la finestra di righe brevi
+    intorno finisce come finiscono i versi — oppure se non è prosa continua.
+    """
+    lung = [len(t) for t in testi]
+    restano = []
+    for i in coppie:
+        if lung[i] >= VERSO_RIGA_MAX:
+            restano.append(i)
+            continue
+        idx = [j for j in _finestra(lung, i) if lung[j] < VERSO_RIGA_MAX]
+        if len(idx) < VERSO_FINESTRA_MIN:
+            restano.append(i)
+            continue
+        q = _profilo_fine(testi, idx)
+        if q["punt"] - q["vuota"] - 2 * q["trattino"] >= VERSO_SOGLIA:
+            continue                      # versi
+        restano.append(i)
+    return [i for i in restano if not _non_prosa(testi, solo_link, oggetto_prima, i)]
+
+
 # ── Lettura di un documento XHTML ─────────────────────────────────────────
 
 class _Doc(HTMLParser):
     """Raccoglie in un passaggio: parole, titoli, id con la loro posizione, paragrafi."""
 
     BLOCCHI = {"p", "div", "li", "blockquote", "td", "dd", "dt"}
+    # I confini dei blocchi per il flusso delle note: come i BLOCCHI qui
+    # sopra, piu' i titoli e i <br>. Una parola non si legge a cavallo di un
+    # confine di blocco, e un numero attaccato alla riga di sotto non e' una
+    # nota incollata.
+    BLOCCHI_NOTE = BLOCCHI | {"h1", "h2", "h3", "h4", "h5", "h6", "br"}
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
@@ -176,6 +381,13 @@ class _Doc(HTMLParser):
         self.id_pos = {}          # id -> parole prima dell'id
         self.titoli = []          # (livello, posizione in parole)
         self.paragrafi = []       # testo dei <p>, per la pulizia
+        # v2.2, in parallelo a `paragrafi` (stesso indice): due cose che
+        # servono a dire se una coppia di righe è prosa continua o no.
+        #   solo_link      il <p> non ha testo fuori dai link (una riga «audio»)
+        #   oggetto_prima  fra il <p> precedente e questo c'è un'immagine, una
+        #                  formula o una tabella
+        self.p_solo_link = []
+        self.p_oggetto_prima = []
         self.n_p = 0
         self.parole_in_p = 0
         self.br = 0
@@ -184,10 +396,22 @@ class _Doc(HTMLParser):
         self.link = []            # href dei <a>: indice fatto a pagina, link rotti
         self.risorse = []         # src delle immagini, per le risorse mancanti
         self.xml_ok = True        # il file è XML ben formato (RSC-016)
+        # v2.2: le note incollate. Si contano mentre si legge invece di tenere
+        # il testo: su un libro da cinque megabyte tenerlo tutto costa più
+        # della misura. `note_radici` conta quante volte ogni parola compare
+        # incollata a un numero — serve a riconoscere un identificativo
+        # («GNS3» tre volte) da una nota (parola e numero sempre diversi).
+        self.note_radici = Counter()
+        self.note_parole = 0
+        self._n_buf = []
+        self._n_skip = 0
         self._in_body = False
         self._p_depth = 0
         self._p_buf = []
         self._skip = 0
+        self._in_a = 0
+        self._p_fuori_link = False
+        self._oggetto = False
 
     def handle_starttag(self, tag, attrs):
         tag = tag.lower()
@@ -196,6 +420,15 @@ class _Doc(HTMLParser):
             self._in_body = True
         if tag in ("script", "style", "head"):
             self._skip += 1
+        # v2.2, flusso delle note: il codice non è testo, e intorno a <a> e
+        # <sup> si mette uno spazio — così una nota marcata come si deve non
+        # viene contata, e si contano solo i numeri rimasti nudi nel testo.
+        if tag in TAG_CODICE:
+            self._n_skip += 1
+        if tag in ("a", "sup"):
+            self._n_buf.append(" ")
+        if tag in self.BLOCCHI_NOTE:
+            self._chiudi_note()
         if "id" in a:
             self.id_pos.setdefault(a["id"], self.parole)
         if tag == "a" and "name" in a:
@@ -210,39 +443,100 @@ class _Doc(HTMLParser):
             self.n_p += 1
             self._p_depth += 1
             self._p_buf = []
+            self._p_fuori_link = False
         elif tag == "br":
             self.br += 1
+        elif tag in ("table", "math", "object"):
+            # Non si contano (non sono immagini): servono solo a sapere che fra
+            # due righe c'è un oggetto, quindi non sono prosa continua.
+            self._oggetto = True
         elif tag in ("img", "image", "svg"):
             self.img += 1
+            self._oggetto = True
             src = a.get("src") or a.get("xlink:href") or a.get("href")
             if tag != "svg" and src and not src.startswith(("http:", "https:", "data:")):
                 self.risorse.append(src)
         elif tag == "a" and a.get("href") and not a["href"].startswith(("http:", "https:", "mailto:")):
             self.link.append(a["href"])
+        if tag == "a":
+            self._in_a += 1
 
     def handle_startendtag(self, tag, attrs):
         self.handle_starttag(tag, attrs)
-        if tag.lower() == "p":
-            self.handle_endtag("p")
+        # **Anche `a`, e non solo `p`** (corretto il 17/11/2026, misurando).
+        # Un'ancora autochiudente — `<a id="x"/>`, comunissima negli XHTML
+        # degli EPUB — apriva il conto dei link e non lo chiudeva mai: da quel
+        # punto in poi `_in_a` restava sopra zero, quindi ogni paragrafo
+        # risultava «fatto solo di un link». Su «Introduction to Logic» di
+        # Tarski erano 2847 paragrafi su 2858, e la regola che scarta le righe
+        # fatte solo da un link buttava via tutte le coppie: 41 residui veri
+        # diventavano 0. Trovato confrontando i conti con la copia di studio,
+        # non leggendo.
+        if tag.lower() in ("p", "a"):
+            self.handle_endtag(tag.lower())
 
     def handle_endtag(self, tag):
         tag = tag.lower()
         if tag in ("script", "style", "head") and self._skip:
             self._skip -= 1
+        if tag in TAG_CODICE and self._n_skip:
+            self._n_skip -= 1
+        if tag in ("a", "sup"):
+            self._n_buf.append(" ")
+        if tag in self.BLOCCHI_NOTE:
+            self._chiudi_note()
+        if tag == "a" and self._in_a:
+            self._in_a -= 1
         if tag == "p" and self._p_depth:
             self._p_depth -= 1
             testo = " ".join("".join(self._p_buf).split())
             if testo:
                 self.paragrafi.append(testo)
+                self.p_solo_link.append(not self._p_fuori_link)
+                self.p_oggetto_prima.append(self._oggetto)
+                # L'oggetto «vale» per la prima riga che lo segue e poi è
+                # consumato: due paragrafi dopo un'immagine sono prosa fra
+                # loro.
+                self._oggetto = False
+
+    def _chiudi_note(self):
+        """
+        Chiude un blocco di testo e conta i numeri rimasti incollati.
+
+        Si conta qui e non alla fine perche' il testo non si tiene: si tiene
+        il conto. `note_radici` conta per PAROLA, perche' la stessa parola
+        incollata a un numero tre volte o piu' e' un identificativo e non una
+        nota (vedi RIPETIZIONI_IDENTIFICATIVO).
+        """
+        testo = " ".join("".join(self._n_buf).split())
+        self._n_buf = []
+        if not testo:
+            return
+        for tok in testo.split():
+            self.note_parole += 1
+            t = tok.strip("«»“”(")
+            if NOTA_INCOLLATA.match(t) and not re.search(r"\d{4}", tok):
+                radice = re.match(r"[^\W\d_]+", t)
+                if radice:
+                    self.note_radici[radice.group(0).lower()] += 1
+
+    def close(self):
+        # L'ultimo blocco non ha un tag che lo chiuda.
+        super().close()
+        self._chiudi_note()
 
     def handle_data(self, data):
         if self._skip or not self._in_body:
             return
+        if not self._n_skip:
+            self._n_buf.append(data)
         n = len(data.split())
         self.parole += n
         if self._p_depth:
             self.parole_in_p += n
             self._p_buf.append(data)
+            if not self._in_a and data.strip():
+                self._p_fuori_link = True
 
 
 def _leggi_doc(z, nome):
@@ -508,18 +802,54 @@ def qualita_epub(percorso):
         ordine = 1 - inversioni / max(1, len(sequenza) - 1) if len(sequenza) > 1 else (1.0 if sequenza else 0.0)
         if inversioni:
             difetto("toc_ordine", f"{inversioni} voci tornano indietro rispetto all'ordine di lettura")
-        # Copertura: la sezione più lunga senza una voce d'indice, in quota del libro.
+        # ── Copertura: il tratto più lungo senza una voce d'indice ─────
+        #
+        # **v2.2: si contano solo i buchi EVITABILI.** Un tratto senza voci
+        # che dentro non ha nessun titolo non è un difetto dell'indice: è un
+        # difetto del testo, e lo dice già `monolite`. Il caso che l'ha fatta
+        # nascere è Bakunin, «Il principio dello Stato»: un saggio continuo
+        # senza titoli interni, che l'indice non poteva elencare meglio di
+        # così — da 60 a 94.
+        #
+        # **Ma si giudica così solo dove i titoli sono marcati.** Un libro che
+        # ha i capitoli in testo semplice («I», «II», «libro secondo») li ha
+        # per davvero, e noi non li vediamo: trattarlo come «buco inevitabile»
+        # lo premierebbe per un difetto. Senza questo cancello «Memorie dal
+        # sottosuolo» saliva da 41 a 77 e «Utopia» da 42 a 78, tutti e due a
+        # torto. Il prezzo, dichiarato: «Il vecchio e il mare», che davvero non
+        # ha capitoli, resta basso (43) — senza titoli marcati non si distingue
+        # un libro senza capitoli da uno coi capitoli in testo semplice.
+        #
+        # `titoli_veri` è la stessa misura che la struttura usa per
+        # `titoli_assenti`, calcolata qui perché serve prima.
+        con_titolo = [s for s in capitoli if docs[s].titoli]
+        titoli = len(con_titolo) / len(capitoli) if capitoli else (1.0 if breve else 0.0)
+        titoli_veri = titoli >= 0.5
         if sequenza and not breve:
             punti = sorted(set(sequenza)) + [totale]
             sezioni = [punti[0]] + [b - a for a, b in zip(punti, punti[1:])]
             quota_max = max(sezioni) / totale
-            copertura = _lineare(quota_max, 0.5, 0.2)
-            if quota_max > 0.35:
-                difetto("toc_grossolano", f"Un tratto pari al {quota_max:.0%} del libro non ha voci d'indice",
-                        gravita=2 if quota_max > 0.6 else 1,
+            # I punti in cui il libro «avrebbe potuto» avere una voce: un
+            # titolo h1–h6, o l'inizio di un capitolo. Margine di 50 parole,
+            # perché un titolo subito dopo una voce è quella voce.
+            unita_pos = sorted({inizio[s] + p_ for s in spine if s in docs for _, p_ in docs[s].titoli}
+                               | {inizio[s] for s in capitoli})
+            tratti = [(0, punti[0])] + list(zip(punti, punti[1:]))
+            evitabili = [b - a for a, b in tratti if any(a + 50 < u < b for u in unita_pos)]
+            quota_ev = max(evitabili) / totale if evitabili else 0.0
+            # Il buco su cui si giudica: quello evitabile dove i titoli ci
+            # sono, altrimenti quello di sempre.
+            quota_giudicata = quota_ev if titoli_veri else quota_max
+            copertura = _lineare(quota_giudicata, 0.5, 0.2)
+            if quota_giudicata > 0.35:
+                difetto("toc_grossolano",
+                        f"Un tratto pari al {quota_giudicata:.0%} del libro non ha voci d'indice"
+                        + (" e dentro ha titoli che l'indice avrebbe potuto elencare" if titoli_veri else ""),
+                        gravita=2 if quota_giudicata > 0.6 else 1,
                         chi="auto" if sum(len(d.titoli) for d in docs.values()) > 3 else "ia")
         else:
             quota_max = None
+            quota_giudicata = None
             copertura = 1.0 if (sequenza or breve) else 0.0
         # Annidamento: una voce che punta a un divisore (titolo di parte) non può
         # stare dentro una voce che punta a un capitolo intero.
@@ -593,8 +923,9 @@ def qualita_epub(percorso):
             indice *= 0.8
 
         # ── Struttura ──────────────────────────────────────────────────
-        con_titolo = [s for s in capitoli if docs[s].titoli]
-        titoli = len(con_titolo) / len(capitoli) if capitoli else (1.0 if breve else 0.0)
+        # `titoli` e `con_titolo` sono già stati calcolati sopra: la copertura
+        # evitabile ne ha bisogno prima, e una misura calcolata due volte è
+        # una misura che prima o poi diverge.
         if capitoli and titoli < 0.5:
             difetto("titoli_assenti",
                     f"Solo {len(con_titolo)} capitoli su {len(capitoli)} hanno un titolo vero (h1–h6)")
@@ -652,6 +983,40 @@ def qualita_epub(percorso):
         if link_rotti:
             difetto("link_rotti", f"{link_rotti} link interni su {n_link} puntano a file o ancore che non esistono",
                     dove=dove_link, gravita=2 if link_rotti / n_link > 0.1 else 1)
+        # ── v2.2: le note incollate contano come collegamenti che mancano ──
+        #
+        # Un numero di nota rimasto attaccato a una parola nel testo
+        # («sublime3») è un rimando che non porta da nessuna parte: la nota non
+        # c'è, o c'è in fondo al libro e non si raggiunge. È un link che manca,
+        # quindi entra qui dentro — e **si prende il minimo** fra i due, non la
+        # media: due modi diversi di non arrivare da nessuna parte non si
+        # compensano.
+        #
+        # Il conto l'ha fatto il parser mentre leggeva (`note_radici`). Una
+        # parola che compare incollata a un numero tre volte o più non è una
+        # nota ma un nome: «GNS3» in un manuale di rete, «Var1» in uno di
+        # Excel. Era la causa di tutti e cinque i falsi allarmi del campione.
+        note_radici = Counter()
+        note_parole = 0
+        for d in docs.values():
+            note_radici.update(d.note_radici)
+            note_parole += d.note_parole
+        note_incollate = sum(c for c in note_radici.values() if c < RIPETIZIONI_IDENTIFICATIVO)
+        note_1k = 1000 * note_incollate / max(1, note_parole)
+        s_note = _lineare(note_1k, *NOTE_SCALA)
+        collegamenti = min(collegamenti, s_note)
+        if note_1k > NOTE_SCALA[1]:
+            # «auto» se le note ci sono in fondo al libro e basta ricollegarle,
+            # «no» se mancano del tutto (il caso di Chomsky): la differenza la
+            # fa l'esistenza di un file di note fra quelli dello spine.
+            ci_sono = any(re.search(r"(note|notes|footnote|endnote)", s_, re.I) for s_ in spine)
+            difetto("note_scollegate",
+                    f"{note_incollate} rimandi di nota sono rimasti nel testo "
+                    f"({note_1k:.1f} ogni 1000 parole)"
+                    + (": le note ci sono ma non si raggiungono" if ci_sono
+                       else ": le note non sono nel file"),
+                    gravita=2 if note_1k > 1.0 else 1,
+                    chi="auto" if ci_sono else "no")
         struttura = 0.35 * titoli + 0.3 * gerarchia + 0.15 * suddivisione + 0.1 * paragrafi + 0.1 * collegamenti
         malformati = [s for s in spine if not docs[s].xml_ok]
         if malformati:
@@ -661,14 +1026,22 @@ def qualita_epub(percorso):
         # ── Pulizia (su un campione di paragrafi) ──────────────────────
         tutti_p = [p for s in spine for p in docs[s].paragrafi]
         campione = tutti_p[:20000]
+        # Le due informazioni in parallelo, nello stesso ordine e tagliate allo
+        # stesso punto: servono a dire se una coppia è prosa continua.
+        tutti_link = [x for s in spine for x in docs[s].p_solo_link][:20000]
+        tutti_ogg = [x for s in spine for x in docs[s].p_oggetto_prima][:20000]
         n = len(campione) or 1
         numeri = sum(1 for p in campione if re.fullmatch(r"[\-–—\s]*\d{1,4}[\-–—\s]*", p))
         parole_c = sum(len(p.split()) for p in campione) or 1
         sillabe = sum(len(re.findall(r"[a-zà-ù]{2,}- [a-zà-ù]{2,}", p)) for p in campione)
-        spezzati = 0
-        for a, b in zip(campione, campione[1:]):
-            if len(a) > 40 and not a.rstrip().endswith(FINE_FRASE) and b[:1].islower():
-                spezzati += 1
+        # Le coppie segnate dal rilevatore di sempre…
+        segnate = [i for i, (a, b) in enumerate(zip(campione, campione[1:]))
+                   if len(a) > 40 and not a.rstrip().endswith(FINE_FRASE) and b[:1].islower()]
+        # …e, della v2.2, quelle che sono prosa spezzata per davvero: fuori i
+        # versi e le forme che non sono prosa continua. Vedi `_coppie_di_prosa`.
+        prosa = _coppie_di_prosa(campione, tutti_link, tutti_ogg, segnate)
+        segnate_n = len(segnate)
+        spezzati = len(prosa)
         # Testatine: la stessa riga breve (titolo, autore, nome del file) ripetuta
         # molte volte. Non contano dialoghi, numeri di verso, numeri romani, separatori.
         brevi = {}
@@ -680,15 +1053,31 @@ def qualita_epub(percorso):
         q_sill = 10000 * sillabe / parole_c
         q_spez = spezzati / n
         q_test = testate / n
-        pulizia = (0.3 * _lineare(q_num, 0.02, 0.0) + 0.25 * _lineare(q_sill, 5, 0.5)
-                   + 0.3 * _lineare(q_spez, 0.08, 0.01) + 0.15 * _lineare(q_test, 0.03, 0.0))
+        # **Pochi casi non si giudicano**: vedi COPPIE_MINIME_PER_GIUDICARE.
+        # Il residuo resta scritto nei numeri (`paragrafi_spezzati` qui sotto
+        # tace, come tace il punteggio), ma due casi in un opuscolo non
+        # svuotano una dimensione.
+        spez_giudicabile = spezzati >= COPPIE_MINIME_PER_GIUDICARE
+        sotto = {
+            "num": _lineare(q_num, 0.02, 0.0),
+            "sill": _lineare(q_sill, 5, 0.5),
+            "spez": _lineare(q_spez, 0.08, 0.01) if spez_giudicabile else 1.0,
+            "test": _lineare(q_test, 0.03, 0.0),
+        }
+        # **Per prodotto, non per media** (v2.2): ogni residuo toglie la sua
+        # quota, e uno al suo peggio svuota la dimensione. Vedi PULIZIA_PESI.
+        pulizia = 1.0
+        for chiave, peso in PULIZIA_PESI.items():
+            pulizia *= 1 - peso * (1 - sotto[chiave])
         if numeri > 3 and q_num > 0.005:
             difetto("numeri_pagina", f"{numeri} paragrafi sono solo un numero: numeri di pagina")
         if q_sill > 2:
             difetto("sillabazione", f"{sillabe} parole spezzate dal trattino di fine riga")
-        if q_spez > 0.03:
+        if q_spez > 0.03 and spez_giudicabile:
             difetto("paragrafi_spezzati",
-                    f"{spezzati} paragrafi finiscono a metà frase e continuano nel successivo")
+                    f"{spezzati} paragrafi finiscono a metà frase e continuano nel successivo"
+                    + (f" (su {segnate_n} coppie segnate, le altre sono versi o non sono prosa)"
+                       if segnate_n > spezzati else ""))
         if testate:
             difetto("testatine", f"{testate} righe brevi ripetute: testatine o piè di pagina")
 
@@ -772,6 +1161,15 @@ def qualita_epub(percorso):
                 "quota_testo_in_p": round(quota_p, 2), "br_ogni_mille": round(br_ogni_mille, 1),
                 "numeri_pagina": numeri, "sillabe_ogni_10k": round(q_sill, 1),
                 "paragrafi_spezzati": spezzati, "testatine": testate,
+                # v2.2: le coppie che il rilevatore ha segnato e quelle che
+                # sono rimaste dopo aver tolto versi e forme che non sono
+                # prosa. Le due insieme dicono quanto ha lavorato la regola
+                # nuova — con «segnate» molto sopra «spezzati» quel libro è
+                # poesia o ha oggetti in mezzo.
+                "coppie_segnate": segnate_n,
+                "note_incollate": note_incollate,
+                "note_ogni_mille": round(note_1k, 2),
+                "quota_max_evitabile": None if quota_giudicata is None else round(quota_giudicata, 2),
                 "regole_css": regole, "copertina": copertina,
                 "link_interni": n_link, "link_rotti": link_rotti, "immagini": n_img,
                 "immagini_assenti": len(img_assenti), "file_xml_malformati": len(malformati),

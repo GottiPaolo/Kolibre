@@ -320,6 +320,11 @@ local it = {
     ["koreader.ui.quando_ieri"] = "ieri",
     ["koreader.ui.quando_altroieri"] = "l'altro ieri",
     ["koreader.ui.quando_giorni"] = "{count} giorno fa | {count} giorni fa",
+    -- La finestra dei risultati: il nome dice CHE COSA si e' cercato e
+    -- QUANTI se ne sono trovati — senza il numero, un elenco corto e uno
+    -- vuoto si distinguono solo contando le righe.
+    ["koreader.ui.ricerca_titolo"] = "«{testo}» — {count} libro | «{testo}» — {count} libri",
+    ["koreader.ui.ricerca_vuota"] = "Nessun libro per «{testo}».\n\nSi cerca nel titolo e nell'autore dei libri che Kolibre ha portato qui.",
     -- Il menu che si apre tenendo premuto un libro (vedi kolibre_ui_azioni).
     ["koreader.ui.azione_manda_posizione"] = "Manda al server dove sei arrivato",
     ["koreader.ui.azione_scarica_posizione"] = "Scarica dal server dove sei arrivato",
@@ -693,6 +698,8 @@ local en = {
     ["koreader.ui.quando_ieri"] = "yesterday",
     ["koreader.ui.quando_altroieri"] = "the day before yesterday",
     ["koreader.ui.quando_giorni"] = "{count} day ago | {count} days ago",
+    ["koreader.ui.ricerca_titolo"] = "\"{testo}\" — {count} book | \"{testo}\" — {count} books",
+    ["koreader.ui.ricerca_vuota"] = "No book for \"{testo}\".\n\nThe search looks at the title and the author of the books Kolibre has brought here.",
     ["koreader.ui.azione_manda_posizione"] = "Send your place to the server",
     ["koreader.ui.azione_scarica_posizione"] = "Get your place from the server",
     ["koreader.ui.azione_elimina"] = "Delete from this device",

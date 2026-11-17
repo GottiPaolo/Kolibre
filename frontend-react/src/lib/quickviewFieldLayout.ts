@@ -23,6 +23,7 @@ import { leggiLocale, scriviLocale } from './memoriaLocale'
 export type QuickviewFixedFieldId =
   | 'series' | 'publisher' | 'language' | 'tags' | 'identifiers'
   | 'formats' | 'size' | 'date_added' | 'pubdate' | 'last_modified' | 'uuid' | 'rating'
+  | 'qualita'
 
 // Stesse etichette delle colonne della tabella (lib/libraryColumns.ts) tranne
 // "size", qui più corta ("Dimensione" invece di "Dimensione (Mb)"): funzione
@@ -42,12 +43,30 @@ export function quickviewFieldDefs(t: (chiave: string, valori?: Valori) => strin
     last_modified: { label: t('library.field.lastModified') },
     uuid: { label: t('library.field.uuid') },
     rating: { label: t('library.field.rating') },
+    qualita: { label: t('library.detail.qualita') },
   }
+}
+
+// I campi che nascono SPENTI. Oggi uno solo: la qualità dell'EPUB, chiesta da
+// Paolo il 17/11/2026 come campo «facoltativo, non fisso».
+//
+// **Perché serve un elenco e non basta il valore di `visible`.** I campi
+// mancanti si accodano a quelli salvati (vedi `loadQuickviewFieldLayout`), e
+// lì fino a oggi si accodavano tutti **accesi** — giusto per i dodici campi
+// che c'erano, che vengono tutti dai metadati del libro e che chi ha un
+// ordine salvato si aspetta di vedere. Un campo nuovo che compare da sé nel
+// pannello di tutti è invece la cosa contro cui «non fisso» spinge: si
+// accende una volta, dal costruttore, e resta acceso.
+const CAMPI_SPENTI_PER_DIFETTO = new Set<QuickviewFixedFieldId>(['qualita'])
+
+function nasceAcceso(id: QuickviewFixedFieldId): boolean {
+  return !CAMPI_SPENTI_PER_DIFETTO.has(id)
 }
 
 const ALL_FIXED_FIELD_IDS: QuickviewFixedFieldId[] = [
   'series', 'publisher', 'language', 'tags', 'identifiers',
   'formats', 'size', 'date_added', 'pubdate', 'last_modified', 'uuid', 'rating',
+  'qualita',
 ]
 
 // Sottoinsieme minimo di Device che serve qui (id + name per etichetta e
@@ -79,7 +98,7 @@ function defaultQuickviewFieldLayout(
   devices: QuickviewDeviceInfo[]
 ): QuickviewFieldEntry[] {
   return [
-    ...ALL_FIXED_FIELD_IDS.map((id): QuickviewFieldEntry => ({ kind: 'fixed', id, visible: true })),
+    ...ALL_FIXED_FIELD_IDS.map((id): QuickviewFieldEntry => ({ kind: 'fixed', id, visible: nasceAcceso(id) })),
     ...customColumns.map((c): QuickviewFieldEntry => ({ kind: 'custom', id: c.label, visible: true })),
     ...devices.map((d): QuickviewFieldEntry => ({ kind: 'device', id: String(d.id), visible: true })),
   ]
@@ -117,7 +136,7 @@ export function loadQuickviewFieldLayout(
     // sopra (customLabels/deviceIds).
     const seenFixed = new Set(cleaned.filter((e) => e.kind === 'fixed').map((e) => e.id))
     for (const id of ALL_FIXED_FIELD_IDS) {
-      if (!seenFixed.has(id)) cleaned.push({ kind: 'fixed', id, visible: true })
+      if (!seenFixed.has(id)) cleaned.push({ kind: 'fixed', id, visible: nasceAcceso(id) })
     }
     const seenCustom = new Set(cleaned.filter((e) => e.kind === 'custom').map((e) => e.id))
     for (const c of customColumns) {

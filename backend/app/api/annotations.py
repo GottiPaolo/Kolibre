@@ -357,6 +357,32 @@ def export_annotations(
     return righe_esportate(db, current_user, base=_indirizzo_base(richiesta))
 
 
+# ── Perche' in queste righe non c'e' il TESTO di una nota ──────────────────
+#
+# Un'annotazione e' la cosa piu' personale che questo server conserva: il
+# brano che una persona ha scelto, e quello che ci ha scritto accanto. Un
+# registro che li citasse sarebbe una seconda copia dei suoi appunti, in un
+# file di testo che nessuno pensa come «dove stanno le mie note» — e che si
+# manda a qualcuno quando si chiede aiuto per un guasto.
+#
+# Quindi qui si scrive **cosa e' cambiato e su quale riga**, mai cosa dice:
+# l'id della nota, il libro, la biblioteca, lo stato dell'ancora. Sono le cose
+# che servono a rispondere alle domande vere («da quando quella nota apre il
+# punto sbagliato?», «chi l'ha cancellata?»), e nessuna di loro e' il
+# contenuto di un appunto. La regola e' di Paolo, 17/11/2026: niente dati
+# personali oltre l'id.
+#
+# L'unica eccezione e' il **colore**, che e' una scelta di aspetto e non un
+# contenuto: serve perche' «mi sono cambiati i colori delle note» e' una
+# segnalazione plausibile, e senza il colore nel registro non si distingue da
+# «non li ho cambiati io».
+
+
+def _chi(utente) -> str:
+    """Il nome dell'account che ha fatto la richiesta, o un segnaposto."""
+    return getattr(utente, "username", None) or "?"
+
+
 @router.post("", responses={200: {"model": Evidenziazione}})
 def create_annotation(
     payload: schemas.HighlightCreate,
@@ -389,6 +415,10 @@ def create_annotation(
     )
     db.add(highlight)
     db.commit()
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' created annotation {highlight.id} by "
+                f"hand on book {payload.calibre_book_id} of library "
+                f"'{biblioteca}'.")
     return _serialize(highlight)
 
 
@@ -403,11 +433,17 @@ def update_orphan_annotation(
     (notes/color), so the frontend's edit UI works identically before and
     after a highlight gets paired to a real book."""
     o = _get_owned_orphan(db, id, current_user)
+    cambiati = [c for c in ("notes", "color") if c in payload]
     if "notes" in payload:
         o.comment = payload["notes"]
     if "color" in payload:
         o.color = payload["color"]
     db.commit()
+    if cambiati:
+        log_message("info", "annotations",
+                    f"'{_chi(current_user)}' changed {', '.join(cambiati)} of "
+                    f"orphan annotation {id}"
+                    f"{f' (colour {o.color})' if 'color' in payload else ''}.")
     return _serialize_orphan(o, _build_device_names([o.device_id], db))
 
 
@@ -424,6 +460,14 @@ def delete_orphan_annotation(
     else:
         o.deleted_at = datetime.utcnow()
     db.commit()
+    # **Le due cancellazioni non sono la stessa cosa**, e il registro le
+    # separa: una mette una data e si disfa, l'altra porta via la riga. Una
+    # cancellazione che non torna e' il genere di cosa su cui, sei mesi dopo,
+    # ci si chiede se e' stata davvero chiesta.
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' "
+                f"{'permanently deleted' if permanent else 'moved to the bin'} "
+                f"orphan annotation {id}.")
     return {"status": "ok"}
 
 
@@ -436,6 +480,8 @@ def restore_orphan_annotation(
     o = _get_owned_orphan(db, id, current_user)
     o.deleted_at = None
     db.commit()
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' restored orphan annotation {id}.")
     return _serialize_orphan(o, _build_device_names([o.device_id], db))
 
 
@@ -463,6 +509,14 @@ def retry_failed_positions(
         query = query.filter(models.Highlight.library == library)
     count = query.update({"position_status": None}, synchronize_session=False)
     db.commit()
+    # Il conto e' il punto: questo comando rimette in coda un lavoro che era
+    # stato messo da parte di proposito (una posizione «fallita» non si
+    # ritenta da se', per non rifare per sempre la stessa fatica su un EPUB
+    # rotto). Quante righe sono ripartite spiega il carico che segue.
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' put {count} failed position(s) back "
+                f"in the queue"
+                f"{f' for library {library!r}' if library else ' across every library'}.")
     return {"status": "ok", "reset": count}
 
 
@@ -560,6 +614,15 @@ def update_annotation(
         h.comment = payload["notes"]
     if "color" in payload:
         h.color = payload["color"]
+    # Si scrive qui e non in fondo: il ramo del riposizionamento a mano, qui
+    # sotto, esce con un `return` suo, e una modifica al commento fatta nella
+    # stessa richiesta sarebbe stata salvata senza comparire da nessuna parte.
+    cambiati = [c for c in ("notes", "color") if c in payload]
+    if cambiati:
+        log_message("info", "annotations",
+                    f"'{_chi(current_user)}' changed {', '.join(cambiati)} of "
+                    f"annotation {id}"
+                    f"{f' (colour {h.color})' if 'color' in payload else ''}.")
     # L'ancora ritrovata dal lettore, da non ricercare mai piu'.
     #
     # Quando il lettore apre una nota il cui punto non serve piu', la
@@ -610,9 +673,19 @@ def update_annotation(
     # attenzione, e una posizione messa a mano non ne ha. Per la stessa
     # ragione il ripasso periodico non la riesaminera' mai.
     if payload.get("cfi_start") and payload.get("riposizionamento_manuale"):
+        prima = h.position_status
         h.cfi_start = payload["cfi_start"]
         h.cfi_end = payload.get("cfi_end") or payload["cfi_start"]
         h.position_status = "manuale"
+        # **La posizione messa a mano vince su tutto**, conversione compresa.
+        # E' la scrittura piu' autorevole che una nota possa ricevere, e
+        # l'unica che nessun automatismo riesaminera' mai: se un giorno quel
+        # punto risultasse sbagliato, questa riga e' la sola che dice che non
+        # e' stato il server a metterlo li'.
+        log_message("info", "annotations",
+                    f"'{_chi(current_user)}' repositioned annotation {id} by "
+                    f"hand (was {prima or 'without an anchor'}, now manuale)"
+                    f"{', and its text changed with it' if payload.get('text') else ''}.")
         # Estendere o restringere cambia anche IL TESTO della nota: senza
         # questo resterebbe quello di prima, e il ripiego «ritrova dal testo»
         # cercherebbe per sempre un brano diverso da quello evidenziato.
@@ -623,9 +696,27 @@ def update_annotation(
 
     ANCORE_DA_CONVERSIONE = ("exact", "repaired")
     if payload.get("cfi_start") and h.position_status not in ANCORE_DA_CONVERSIONE:
+        prima = h.position_status
         h.cfi_start = payload["cfi_start"]
         h.cfi_end = payload.get("cfi_end") or payload["cfi_start"]
         h.position_status = "ritrovata_dal_testo"
+        log_message("info", "annotations",
+                    f"Annotation {id} of '{_chi(current_user)}' got an anchor "
+                    f"found from its text (was {prima or 'without one'}).")
+    elif payload.get("cfi_start"):
+        # **Il rifiuto piu' importante di questo file, e fino a oggi era
+        # muto.** Il lettore ha trovato il brano e manda un'ancora, e il
+        # server la butta via perche' quella nota ha gia' un'ancora venuta
+        # dalla conversione dell'xpointer — che e' da dove la nota e' stata
+        # presa davvero, quindi vale di piu' di una somiglianza di testo.
+        # E' una regola giusta, ma vista da fuori e' «il lettore riancora
+        # quella nota a ogni apertura e non se lo ricorda mai»: senza questa
+        # riga non c'e' modo di distinguerla da un guasto.
+        log_message("warning", "annotations",
+                    f"An anchor found from the text was refused for annotation "
+                    f"{id} of '{_chi(current_user)}': it already has a "
+                    f"{h.position_status} anchor from the conversion, which "
+                    f"wins.")
     db.commit()
     return _serialize(h, device_names=_build_device_names([h.device_id], db))
 
@@ -642,11 +733,16 @@ def delete_annotation(
     ).first()
     if not h:
         raise HTTPException(status_code=404, detail="Annotation not found")
+    libro, biblioteca = h.calibre_book_id, h.library
     if permanent:
         db.delete(h)
     else:
         h.deleted_at = datetime.utcnow()
     db.commit()
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' "
+                f"{'permanently deleted' if permanent else 'moved to the bin'} "
+                f"annotation {id} of book {libro} in library '{biblioteca}'.")
     return {"status": "ok"}
 
 
@@ -663,4 +759,6 @@ def restore_annotation(
         raise HTTPException(status_code=404, detail="Annotation not found")
     h.deleted_at = None
     db.commit()
+    log_message("info", "annotations",
+                f"'{_chi(current_user)}' restored annotation {id}.")
     return _serialize(h, device_names=_build_device_names([h.device_id], db))

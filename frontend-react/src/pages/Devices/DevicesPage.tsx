@@ -1,19 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useQueries } from '@tanstack/react-query'
 import { AlertTriangle, BookOpen, Link2, Plus, RefreshCw, Save, Smartphone } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { useDevices } from '@/lib/deviceQueries'
-import { eIndietro } from '@/lib/versioni'
 import { api } from '@/lib/api'
 import { relativeTimeFrom } from '@/lib/deviceFormat'
 import { useSetPageHeader } from '@/lib/pageHeaderContext'
 import { cn } from '@/lib/utils'
 import { useLingua } from '@/lib/i18n'
 import { AddDeviceDialog } from './AddDeviceDialog'
-import { CollegaUnClientDialog, RichiesteInAttesa } from './CollegaUnClient'
+import { CollegaUnClientDialog } from './CollegaUnClient'
 import { PatchRiepilogo } from './PatchInfo'
+import { VersioneSullaScheda } from './VersionePlugin'
 import { ListError } from '@/components/ListError'
 
 // Porting di activePage === 'devices' nel Vue esistente (frontend/src/
@@ -35,31 +34,6 @@ export function DevicesPage() {
   // qui /flagged-books per ciascun dispositivo così il conteggio è sempre
   // corretto fin dal primo caricamento — un miglioramento deliberato, non
   // solo un porting 1:1 (vedi il report finale).
-  // Qual è l'ultima versione del plugin, cioè quella che il server
-  // distribuisce. Il confronto con quella installata su ciascun dispositivo è
-  // l'unico modo per sapere chi è indietro senza andarlo a guardare a mano
-  // (29/09/2026). L'endpoint esisteva già: lo usa il plugin stesso per
-  // chiedersi se aggiornarsi.
-  const { data: ultimaVersione } = useQuery({
-    queryKey: ['versione-plugin-koreader'],
-    queryFn: async (): Promise<string | null> => {
-      const { data, error } = await api.GET('/api/tools/plugins/koreader/version')
-      if (error) throw error
-      return data.version ?? null
-    },
-  })
-  // **«Più vecchio», non «diverso».** Qui c'era `d.plugin_version !==
-  // ultimaVersione`: un dispositivo con una versione più NUOVA del server —
-  // cioè Paolo mentre prova la prossima — veniva annunciato come indietro,
-  // con l'invito ad aggiornarsi a una versione precedente. E il confronto
-  // come testo sbaglia da solo appena un plugin passa la nona versione
-  // minore («0.9.0» viene dopo «0.10.0» per le stringhe). Vedi `lib/versioni`
-  // e la prova `versioni_dei_plugin`.
-  const indietro = ultimaVersione
-    ? devices.filter((d) => eIndietro(d.plugin_version, ultimaVersione))
-    : []
-  const senzaVersione = devices.filter((d) => !d.plugin_version)
-
   const flaggedQueries = useQueries({
     queries: devices.map((d) => ({
       queryKey: ['device-flagged-books', d.id],
@@ -76,11 +50,11 @@ export function DevicesPage() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex justify-end gap-2">
-        {/* Un programma non e' un lettore: non si «registra» con un modello e
-            un nome, si fa entrare confermando il codice che mostra. Il
-            pulsante c'e' anche quando nessuno sta chiedendo, perche' e' la
-            risposta alla domanda «e il client come lo collego?» — la
-            richiesta vera compare da se' qui sotto. */}
+        {/* Un programma non e' un lettore: non si «registra» con un
+            modello e un nome, si fa entrare con un invito — un codice usa e
+            getta che nasce qui dentro. Dal 17/11/2026 e' la sola strada: non
+            esiste piu' nessuna rotta con cui un programma possa chiedere di
+            entrare da se'. Vedi `CollegaUnClient.tsx`. */}
         <Button variant="outline" onClick={() => setShowCollega(true)}>
           <Link2 className="size-3.5" /> {t('devices.pairing.button')}
         </Button>
@@ -88,42 +62,6 @@ export function DevicesPage() {
           <Plus className="size-3.5" /> {t('devices.list.addButton')}
         </Button>
       </div>
-
-      {/* In cima, e con il colore dell'avviso: un programma che chiede di
-          entrare e' la cosa piu' urgente che questa pagina possa avere da
-          dire. Non c'e' quando non c'e' niente. */}
-      <RichiesteInAttesa />
-
-      {/* Compare SOLO quando c'è qualcosa da dire: un dispositivo indietro, o
-          uno di cui non si conosce la versione. Prima c'era anche quando andava
-          tutto bene, e diceva «tutti i dispositivi sono aggiornati» — una riga
-          che si impara a non leggere, e che occupa esattamente il posto in cui
-          deve saltare all'occhio l'avviso vero. Scelta del 02/10/2026. */}
-      {!isLoading && devices.length > 0 && ultimaVersione &&
-        (indietro.length > 0 || senzaVersione.length > 0) && (
-        <div
-          className={cn(
-            'flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-3 py-2 text-[12.5px]',
-            indietro.length > 0
-              ? 'border-[var(--warning)]/40 bg-[var(--warning-soft)]'
-              // Versione sconosciuta: è un'incertezza, non un guasto.
-              : 'border-border text-muted-foreground'
-          )}
-        >
-          <span>
-            {t('devices.list.pluginLatestVersionPrefix')} <b>v{ultimaVersione}</b>
-          </span>
-          {indietro.length > 0 && (
-            <span>
-              {t('devices.list.outdatedPrefix')}{' '}
-              <b>{indietro.map((d) => `${d.name} (v${d.plugin_version})`).join(', ')}</b> {t('devices.list.outdatedSuffix')}
-            </span>
-          )}
-          {senzaVersione.length > 0 && (
-            <span>{t('devices.list.versionUnknownNotice', { count: senzaVersione.length, n: senzaVersione.length })}</span>
-          )}
-        </div>
-      )}
 
       {isLoading && <p className="text-muted-foreground">{t('common.loading')}</p>}
 
@@ -154,11 +92,6 @@ export function DevicesPage() {
                 <div className="flex items-center gap-2.5">
                   <Smartphone className={cn('size-4 shrink-0', d.is_default ? 'text-[var(--positive)]' : 'text-primary')} />
                   <span className="font-semibold">{d.name}</span>
-                  {d.plugin_version && (
-                    <Badge variant="outline" title={t('devices.pluginVersionTitle')}>
-                      v{d.plugin_version}
-                    </Badge>
-                  )}
                   {d.is_default && (
                     <span className="ml-auto shrink-0 text-[10px] font-bold tracking-wide text-[var(--positive)]">
                       {t('devices.badge.default')}
@@ -185,6 +118,12 @@ export function DevicesPage() {
                       <AlertTriangle className="size-3" /> {t('devices.flaggedCount', { n: flaggedCount })}
                     </span>
                   )}
+                  {/* La versione del plugin e le patch, una accanto
+                      all'altra: sono la stessa domanda — «che cosa sa fare
+                      questo lettore?» — e dal 17/11/2026 stanno tutt'e due
+                      qui dentro invece che in un riquadro in cima alla
+                      pagina. Vedi `VersionePlugin.tsx`. */}
+                  <VersioneSullaScheda device={d} />
                   <PatchRiepilogo device={d} />
                 </div>
               </button>

@@ -83,7 +83,7 @@ local Menu = require("ui/widget/menu")
 -- **Resta spenta per difetto**: finche' non si accende l'impostazione,
 -- KOReader e' quello di sempre. Il Kindle non la vede e non la vedra'
 -- finche' Paolo non lo decide.
-local UI_VERSION = "0.6.0"
+local UI_VERSION = "0.7.1"
 
 --- Il «gestore di file» che `FileChooser` si aspetta di avere sopra di se'.
 --
@@ -209,19 +209,32 @@ function KolibreUI:_indicizzaManifesto()
     self.cartella_copertine = KolibreCopertine.cartella(DataStorage)
     self.gestiti = {}           -- percorso -> voce del manifesto
     self.cartelle = {}          -- cartella -> quanti libri di Kolibre dentro
-    local n = 0
+    -- **Si contano i FILE, non le righe del manifesto** (corretto il
+    -- 17/11/2026). Lo stesso libro puo' avere due righe — la voce
+    -- `hash:<impronta>` che la vecchia migrazione ha adottato, e quella con
+    -- l'identita' vera che `_linkHashMatch` ha scritto dopo senza togliere
+    -- la prima. Contandole tutte e due, una cartella d'autore diceva «17
+    -- libri» avendone quindici, e il totale della libreria era gonfio.
+    --
+    -- E fra due righe per lo stesso file vince sempre la stessa
+    -- (`Comune.miglioreFra`): prima vinceva l'ultima che capitava, e `pairs`
+    -- non ha un ordine — cioe' il titolo, l'autore e la copertina di quel
+    -- libro potevano cambiare da un'apertura all'altra.
     for _chiave, voce in pairs(self.manifest:all()) do
         if voce.path then
-            self.gestiti[voce.path] = voce
-            n = n + 1
-            -- Si contano anche le cartelle NONNE, non solo quella diretta:
-            -- se un giorno i libri stessero in <Autore>/<Titolo>/libro.epub,
-            -- il livello autore deve sapere di avere dei libri sotto.
-            local dir = voce.path:match("^(.*)/[^/]*$")
-            while dir and dir ~= "" do
-                self.cartelle[dir] = (self.cartelle[dir] or 0) + 1
-                dir = dir:match("^(.*)/[^/]*$")
-            end
+            self.gestiti[voce.path] = Comune.miglioreFra(self.gestiti[voce.path], voce)
+        end
+    end
+    local n = 0
+    for percorso in pairs(self.gestiti) do
+        n = n + 1
+        -- Si contano anche le cartelle NONNE, non solo quella diretta:
+        -- se un giorno i libri stessero in <Autore>/<Titolo>/libro.epub,
+        -- il livello autore deve sapere di avere dei libri sotto.
+        local dir = percorso:match("^(.*)/[^/]*$")
+        while dir and dir ~= "" do
+            self.cartelle[dir] = (self.cartelle[dir] or 0) + 1
+            dir = dir:match("^(.*)/[^/]*$")
         end
     end
     self.quanti_gestiti = n
@@ -358,6 +371,12 @@ function KolibreUI:init()
     -- quella del primo avvio per sempre, e cambiarla non si vedrebbe mai.
     self.righe_per_schermata = self.righe_per_schermata or righeScelte()
     self.items_per_page = self.righe_per_schermata
+    -- **Il riquadro di ricerca di KOReader diventa il nostro** (Paolo,
+    -- 17/11/2026): vedi il commento gemello in `kolibre_ui_elenco.lua`. Qui
+    -- serve piu' che altrove — la libreria e' divisa in cartelle per autore,
+    -- e cercare «quello che si vede adesso» dalla radice vorrebbe dire
+    -- cercare fra i nomi delle cartelle. I libri stanno dentro.
+    self.search_callback = function(testo) Comune.cerca(self, testo) end
     -- La radice della libreria: sopra di lei non si sale, perche' sopra non
     -- c'e' la libreria di Kolibre, c'e' il disco.
     self.radice = self.path
@@ -698,7 +717,22 @@ end
 -- `refreshPath` e' di `FileChooser` e rilegge la cartella in cui siamo: e' la
 -- cosa giusta qui, perche' un libro cancellato non c'e' piu' sul disco e
 -- `genItemTable` riparte da quello che il disco dice.
+--
+-- **Ma la cartella stessa puo' non esserci piu'**, e questo non e' un caso di
+-- scuola: la libreria e' divisa in cartelle per autore, e l'ultimo libro di
+-- un autore che si cancella — o che il server toglie da questo lettore —
+-- porta via la cartella in cui si sta guardando. `refreshPath` su una
+-- cartella che non esiste piu' non da' errore: disegna una cartella **vuota**,
+-- cioe' lascia la vista in un posto che non c'e', con l'elenco vuoto e il
+-- titolo di un autore che non ha piu' libri. Allora si torna in cima alla
+-- libreria, che e' il solo posto che c'e' sempre.
 function KolibreUI:rileggi()
+    if self.radice and self.path and self.path ~= self.radice
+            and lfs.attributes(self.path, "mode") ~= "directory" then
+        self.dentro_autore = false
+        pcall(function() self:changeToPath(self.radice) end)
+        return
+    end
     pcall(function() self:refreshPath() end)
 end
 

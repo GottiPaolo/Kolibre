@@ -13,7 +13,7 @@
 // la guarda più nessuno.
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Loader2, RefreshCw } from 'lucide-react'
+import { ArrowDown, ArrowUp, Loader2, RefreshCw } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
 import { DettaglioQualita, PunteggioQualita, nomeDimensione } from '@/components/Qualita'
@@ -24,6 +24,55 @@ import {
   useQualitaStato,
 } from '@/lib/qualitaActions'
 import { useLingua } from '@/lib/i18n'
+
+// Il prefisso con cui si chiede al server di ordinare per una dimensione.
+// Le dimensioni NON si elencano qui: si ricavano dai dati (la misura può
+// aggiungerne, e porta la sua versione), quindi la chiave si compone col nome
+// che arriva. Il server la risolve allo stesso modo — vedi
+// `api/qualita.py::_valore_da_ordinare`.
+const PREFISSO_DIMENSIONE = 'dimensioni.'
+
+/**
+ * Un'intestazione che ordina, con la freccia del verso.
+ *
+ * **La freccia non è un ornamento.** Fino al 17/11/2026 ordinavano tre
+ * colonne su otto e nessuna diceva di essere quella attiva: con tre si
+ * indovinava, con otto no — si clicca e non si sa che cosa si è cliccato.
+ *
+ * Non si riusa `SortableTableHead` perché quello disegna il `<TableHead>` del
+ * componente `Table`, e questa tabella è un `<table>` suo: infilarcelo
+ * vorrebbe dire rifare il markup della tabella per una freccia.
+ */
+function Intestazione({
+  etichetta,
+  chiave,
+  ordina,
+  verso,
+  onClick,
+  className,
+}: {
+  etichetta: string
+  chiave: string
+  ordina: string
+  verso: string
+  onClick: (chiave: string) => void
+  className?: string
+}) {
+  const attiva = ordina === chiave
+  return (
+    <th className={`py-1 ${className ?? 'text-left'}`}>
+      <button
+        type="button"
+        onClick={() => onClick(chiave)}
+        className="inline-flex items-center gap-1 hover:underline"
+      >
+        {etichetta}
+        {attiva &&
+          (verso === 'asc' ? <ArrowUp className="size-3" /> : <ArrowDown className="size-3" />)}
+      </button>
+    </th>
+  )
+}
 
 /** Quanti libri chiedono qualcosa. `null` finché non si sa. */
 export function useQuantiLibriDaGuardare(libraryFolder: string | undefined): number | null {
@@ -63,11 +112,19 @@ export function QualitaPanel({ libraryFolder }: { libraryFolder: string | undefi
   )
 
   function cambiaOrdine(chiave: string) {
-    if (ordina === chiave) setVerso((v) => (v === 'asc' ? 'desc' : 'asc'))
-    else {
-      setOrdina(chiave)
-      setVerso(chiave === 'punteggio' ? 'asc' : 'asc')
+    if (ordina === chiave) {
+      setVerso((v) => (v === 'asc' ? 'desc' : 'asc'))
+      return
     }
+    setOrdina(chiave)
+    // **Il verso di partenza dice che cosa si sta cercando.** Su un
+    // punteggio o una dimensione si cercano i libri che chiedono qualcosa,
+    // quindi il più basso per primo; sui difetti si cerca chi ne ha di più,
+    // quindi il contrario; su un testo, l'ordine alfabetico. Partire sempre
+    // da «crescente» vorrebbe dire che la colonna dei difetti si apre su
+    // mille libri con zero difetti — un clic che sembra non aver fatto
+    // niente.
+    setVerso(chiave === 'difetti' ? 'desc' : 'asc')
   }
 
   return (
@@ -123,27 +180,33 @@ export function QualitaPanel({ libraryFolder }: { libraryFolder: string | undefi
           <table className="w-full text-[12.5px]">
             <thead className="text-[11px] uppercase tracking-wide text-muted-foreground">
               <tr className="border-b border-border">
-                <th className="py-1 text-left">
-                  <button type="button" onClick={() => cambiaOrdine('titolo')} className="hover:underline">
-                    {t('interventions.qualita.columnTitle')}
-                  </button>
-                </th>
-                <th className="py-1 text-left">
-                  <button type="button" onClick={() => cambiaOrdine('autore')} className="hover:underline">
-                    {t('interventions.qualita.columnAuthor')}
-                  </button>
-                </th>
-                <th className="py-1 text-right">
-                  <button type="button" onClick={() => cambiaOrdine('punteggio')} className="hover:underline">
-                    {t('interventions.qualita.columnScore')}
-                  </button>
-                </th>
+                <Intestazione
+                  etichetta={t('interventions.qualita.columnTitle')}
+                  chiave="titolo" ordina={ordina} verso={verso} onClick={cambiaOrdine}
+                />
+                <Intestazione
+                  etichetta={t('interventions.qualita.columnAuthor')}
+                  chiave="autore" ordina={ordina} verso={verso} onClick={cambiaOrdine}
+                />
+                <Intestazione
+                  etichetta={t('interventions.qualita.columnScore')}
+                  chiave="punteggio" ordina={ordina} verso={verso} onClick={cambiaOrdine}
+                  className="text-right"
+                />
                 {dimensioni.map((d) => (
-                  <th key={d} className="py-1 text-right font-normal normal-case">
-                    {nomeDimensione(t, d)}
-                  </th>
+                  <Intestazione
+                    key={d}
+                    etichetta={nomeDimensione(t, d)}
+                    chiave={`${PREFISSO_DIMENSIONE}${d}`}
+                    ordina={ordina} verso={verso} onClick={cambiaOrdine}
+                    className="text-right font-normal normal-case"
+                  />
                 ))}
-                <th className="py-1 text-right">{t('interventions.qualita.columnDefects')}</th>
+                <Intestazione
+                  etichetta={t('interventions.qualita.columnDefects')}
+                  chiave="difetti" ordina={ordina} verso={verso} onClick={cambiaOrdine}
+                  className="text-right"
+                />
               </tr>
             </thead>
             <tbody>

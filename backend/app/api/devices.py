@@ -514,6 +514,48 @@ def _stime_per_il_manifesto(db: Session, device: models.Device) -> dict:
     return fuori
 
 
+def _consegne_per_il_manifesto(db: Session, device: models.Device) -> dict:
+    """{"<biblioteca>:<id>:<FORMATO>": secondi}, **quando il server ha
+    consegnato quel libro a QUESTO lettore**. Stessa chiave del manifesto del
+    plugin, come `_stime_per_il_manifesto`.
+
+    **Perche' il server deve dirlo, misurato il 17/11/2026.** Il plugin
+    scriveva una sua data (`downloaded_at`) e il pannello «ultimi invii» la
+    usava per ordinare. Solo che quella data non e' la consegna: e' **il
+    momento in cui la riga del manifesto e' stata scritta**, e il manifesto si
+    scrive anche quando il libro sul dispositivo c'era gia' e Kolibre lo
+    riconosce (`_linkHashMatch`), o quando una vecchia migrazione adotta in
+    blocco quello che trova. In quei due casi la data e' quella dell'adozione,
+    e decine di libri finiscono nello stesso secondo: il pannello li mostra in
+    un ordine che non significa niente. Misurato sul Mac di Paolo: 25 libri su
+    29 in due soli istanti.
+
+    Il server invece lo sa per davvero: `DeviceBook.synced_at` e' scritto in
+    `/sync/ack` quando il download riesce. Sul Kindle di Paolo quelle date
+    sono sparse su diciannove giorni fra luglio e novembre — cioe' la storia
+    vera, che il manifesto del lettore non ha.
+
+    **In secondi e non in ISO**, al contrario di tutto il resto dell'API: il
+    plugin non ha un lettore di date e questo numero gli serve per fare
+    conti e per `os.date`. Un intero non ha fusi da sbagliare — che e' il
+    problema che la regola ISO risolve altrove (vedi `istanti.py`).
+
+    Si manda a ogni giro come le stime, e per la stessa ragione: i libri
+    arrivati prima che questo campo esistesse non hanno altro modo di
+    saperlo.
+    """
+    righe = db.query(models.DeviceBook).filter(
+        models.DeviceBook.device_id == device.id,
+        models.DeviceBook.status.notin_(_SENDABLE_STATUSES),
+        models.DeviceBook.synced_at.isnot(None),
+    ).all()
+    fuori = {}
+    for r in righe:
+        chiave = "%s:%s:%s" % (r.library, r.calibre_book_id, (r.format or "").upper())
+        fuori[chiave] = int(r.synced_at.replace(tzinfo=timezone.utc).timestamp())
+    return fuori
+
+
 def _build_removes(db: Session, device: models.Device) -> list:
     """removes[] for the handshake response — empty when the per-device policy
     is 'never': the server doesn't even mention deletions to such a device."""
@@ -2366,6 +2408,11 @@ def koreader_sync_handshake(
         # partenza, questa quelli gia' arrivati. Vedi
         # `_stime_per_il_manifesto` per il perche' di entrambe.
         "server_pages": _stime_per_il_manifesto(db, current_device),
+        # **Quando ciascun libro e' stato consegnato a QUESTO lettore.** Il
+        # plugin da solo non lo sa: la sua data e' quella in cui ha scritto
+        # la riga del manifesto, che per un libro adottato invece che
+        # consegnato e' tutt'altro momento. Vedi `_consegne_per_il_manifesto`.
+        "delivered_at": _consegne_per_il_manifesto(db, current_device),
         "file_actions": file_actions,
         "restore_request": restore_request,
         # I dizionari chiesti dal portale. Restano nella risposta di ogni

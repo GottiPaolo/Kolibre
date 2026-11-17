@@ -27,12 +27,18 @@ from sqlalchemy.orm import Session
 
 from .. import auth, database, models
 from ..istanti import quando
+from ..logging_utils import log_message
 from ..schemas_risposte import (Esito, InventarioDegliAppunti, StatoDegliAppunti,
                                 ClienteSeCeNe, DettaglioDiUnLibro)
 from ..services import appunti_nel_vault as V
 from .annotations import righe_esportate, _indirizzo_base
 
 router = APIRouter(prefix="/api/kolibre/appunti", tags=["appunti"])
+
+
+def _chi(utente) -> str:
+    """Il nome dell'account che ha fatto la richiesta, o un segnaposto."""
+    return getattr(utente, "username", None) or "?"
 
 
 def _cliente(db: Session, utente: models.User, crea: bool = False):
@@ -348,6 +354,27 @@ def ricevi_inventario(
     # ha appena raccontato: vedi models.NotaConsegnata per il perche'.
     consegnate_adesso = _registra_le_consegne(db, cliente, sorted(nomi_visti))
     db.commit()
+    # **Questa richiesta cancella e riscrive la fotografia intera del vault**
+    # (le righe `BloccoDiAppunti` di quel client), quindi e' una scrittura
+    # grossa che arriva da fuori e che fino a oggi passava muta. I numeri
+    # sono quelli che poi spiegano la pagina: quanti blocchi sono entrati e
+    # **quanti sono stati scartati**, che e' il conto da cui ci si accorge di
+    # un plugin che manda roba senza nome durevole.
+    #
+    # Dei blocchi non si scrive niente: ne' il testo (e' quello che Paolo ha
+    # scritto nelle sue note) ne' il percorso dei file. Solo i conti.
+    log_message("info", "appunti",
+                f"The vault of '{_chi(current_user)}' reported "
+                f"{cliente.file_visti} file(s) and {visti} block(s); "
+                f"{scartati} discarded, {consegnate_adesso} newly delivered.")
+    if scartati and not visti:
+        # Tutto scartato: non e' un guasto del server, ma e' un giro andato a
+        # vuoto, e chi guarda il registro deve poterlo distinguere da un
+        # vault vuoto.
+        log_message("warning", "appunti",
+                    f"Every block reported by the vault of "
+                    f"'{_chi(current_user)}' was discarded ({scartati}): "
+                    f"a missing path, or blocks with no durable name.")
 
     libri = V.stato_dei_libri(righe_esportate(db, current_user), _blocchi(db, cliente),
                               _bloccati(db, current_user), _da_rifare(db, current_user),
@@ -511,10 +538,18 @@ def cambia_il_blocco(
         riga = models.DecisioneDiAppunti(
             user_id=current_user.id, library=library, calibre_book_id=libro)
         db.add(riga)
+    prima = bool(riga.bloccato)
     riga.bloccato = bool(payload.get("bloccato", True))
     riga.titolo = payload.get("titolo") or riga.titolo
     riga.deciso_il = datetime.utcnow()
     db.commit()
+    # Il libro si identifica con la terna, non col titolo: il titolo e' testo,
+    # l'id ritrova la riga. Si scrive solo se la decisione e' cambiata.
+    if prima != riga.bloccato:
+        log_message("info", "appunti",
+                    f"'{_chi(current_user)}' "
+                    f"{'blocked' if riga.bloccato else 'unblocked'} the vault "
+                    f"notes of book {libro} in library '{library}'.")
     return {"status": "ok"}
 
 
@@ -562,6 +597,17 @@ def rimanda_da_zero(
     riga.titolo = payload.get("titolo") or riga.titolo
     riga.deciso_il = datetime.utcnow()
     db.commit()
+    # **La riga piu' importante di questo file.** Questa istruzione fa
+    # riscrivere da zero il file di un libro nel vault, e quello che Paolo
+    # aveva scritto DENTRO i blocchi di quel file va perduto: e' il senso del
+    # comando, non un effetto collaterale. Una perdita voluta va registrata
+    # come tale, perche' e' la prima cosa da cercare se un giorno «quel file
+    # era pieno di appunti miei».
+    log_message("info", "appunti",
+                f"'{_chi(current_user)}' "
+                f"{'cancelled the rebuild instruction for' if annulla else 'asked to rebuild from scratch'} "
+                f"the vault file of book {libro} in library '{library}'"
+                f"{'' if annulla else ' — what was written inside its blocks will be lost'}.")
     return {"status": "ok"}
 
 
@@ -593,16 +639,27 @@ def risolvi_un_conflitto(
         raise HTTPException(status_code=400, detail="The highlight's durable name is required.")
 
     if bool(payload.get("annulla", False)):
-        db.query(models.DecisioneDiNota).filter(
+        quante = db.query(models.DecisioneDiNota).filter(
             models.DecisioneDiNota.user_id == current_user.id,
             models.DecisioneDiNota.id_durevole == nome,
         ).delete(synchronize_session=False)
         db.commit()
+        if quante:
+            log_message("info", "appunti",
+                        f"'{_chi(current_user)}' withdrew the conflict decision "
+                        f"on highlight {nome}.")
         return {"status": "ok"}
 
     # Insieme chiuso: una scelta che non vuol dire niente non entra nel
     # database, dove poi nessuno saprebbe cosa farne.
     if scelta not in models.SCELTE_DI_CONFLITTO:
+        # WARNING e non ERROR: il server non si e' rotto, ha rifiutato. La
+        # scelta arriva da un plugin, e un plugin che manda una parola che
+        # non esiste e' una cosa che si vuole vedere scritta — altrimenti si
+        # vede solo come «la decisione non si salva, e non si capisce».
+        log_message("warning", "appunti",
+                    f"'{_chi(current_user)}' sent an unknown conflict choice "
+                    f"{scelta!r} for highlight {nome}: refused.")
         raise HTTPException(
             status_code=400,
             detail="The choice can only be «%s»." % "» or «".join(models.SCELTE_DI_CONFLITTO))
@@ -618,4 +675,11 @@ def risolvi_un_conflitto(
         riga.scelta = scelta
     riga.deciso_il = datetime.utcnow()
     db.commit()
+    # **Si scrive quale delle due versioni vince, non le due versioni.** Il
+    # testo di un brano — nel vault o sul server — e' il contenuto di un
+    # appunto di Paolo, e in un registro non ci va: ci va il nome durevole
+    # della nota, che e' quello con cui la si ritrova.
+    log_message("info", "appunti",
+                f"'{_chi(current_user)}' resolved the conflict on highlight "
+                f"{nome} in favour of {scelta!r}.")
     return {"status": "ok"}

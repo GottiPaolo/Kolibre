@@ -5740,7 +5740,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/pairing/requests": {
+    "/api/pairing/invites": {
         parameters: {
             query?: never;
             header?: never;
@@ -5748,63 +5748,43 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Richieste In Attesa
-         * @description Le richieste che aspettano, per il pannello in cui si confermano.
+         * Elenco Degli Inviti
+         * @description Gli inviti di **chi guarda**, dal piu' recente.
          *
-         *     **Le vede chiunque sia entrato, non solo chi le ha chieste**, e non e' una
-         *     svista: prima della conferma una richiesta non e' di nessuno — e' un
-         *     programma che ha bussato, e il server non puo' sapere a nome di chi. Chi
-         *     conferma la fa diventare sua. Fra due account dello stesso server questo
-         *     vuol dire vedere il nome e l'indirizzo del programma di un altro: e'
-         *     scritto, ed e' il prezzo di non aver niente da chiedere prima di bussare.
+         *     **Solo i propri**, al contrario della versione del 16/11: la' una
+         *     richiesta arrivata da fuori non era di nessuno finche' qualcuno non la
+         *     confermava, e la conseguenza era che chiunque fosse entrato vedeva il nome
+         *     e l'indirizzo del programma di un altro account. Un invito invece ha un
+         *     padrone dal primo istante.
+         *
+         *     **Il codice non c'e'**, in nessuna di queste righe: in database c'e'
+         *     soltanto la sua impronta. Quello che c'e' basta a rispondere alle due
+         *     domande di chi guarda — «quale di questi aspetta ancora?» e «quello di
+         *     stamattina e' stato usato, e da dove?».
          */
-        get: operations["richieste_in_attesa_api_pairing_requests_get"];
+        get: operations["elenco_degli_inviti_api_pairing_invites_get"];
         put?: never;
         /**
-         * Avvia Accoppiamento
-         * @description «Voglio collegarmi»: torna il codice da mostrare e il biglietto con cui
-         *     poi si ritira il token.
-         *
-         *     Risponde **senza autenticazione**, perche' chi chiede non ha ancora
-         *     nessuna credenziale — e' il punto di tutto. I limiti che la tengono
-         *     stretta sono in testa al file.
-         */
-        post: operations["avvia_accoppiamento_api_pairing_requests_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/pairing/requests/{request_id}/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Conferma Accoppiamento
-         * @description «Si', quel programma sono io»: nasce il token, e lo ritirera' il programma.
+         * Crea Un Invito
+         * @description «Collega un client»: nasce il codice da portare nel programma.
          *
          *     **Vuole una sessione vera, non un token.** E' la stessa regola di
          *     `POST /api/users/me/tokens` e per la stessa ragione: se un token potesse
-         *     benedire un programma nuovo, chi ne rubasse uno se ne farebbe altri a
-         *     volonta', e spegnere quello rubato non chiuderebbe niente.
+         *     fabbricarne un altro, chi ne rubasse uno se ne farebbe dieci, e spegnere
+         *     quello rubato non chiuderebbe niente.
          *
-         *     Il token nasce **a nome di chi conferma**: da quel momento il programma
-         *     puo' fare quello che quell'account puo' fare, e niente di piu'.
+         *     **Il codice torna una volta sola.** Da qui in avanti il server ne ha solo
+         *     l'impronta, e non e' in grado di ridirlo nemmeno volendo: vedi
+         *     `models.InvitoDiAccoppiamento`. Chi lo perde ne fa un altro.
          */
-        post: operations["conferma_accoppiamento_api_pairing_requests__request_id__confirm_post"];
+        post: operations["crea_un_invito_api_pairing_invites_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/pairing/requests/{request_id}/refuse": {
+    "/api/pairing/invites/{invite_id}/revoke": {
         parameters: {
             query?: never;
             header?: never;
@@ -5814,13 +5794,14 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Rifiuta Accoppiamento
-         * @description «No»: la richiesta si spegne subito e nessun token nasce.
+         * Revoca Un Invito
+         * @description «Quel codice non lo uso piu'»: si spegne subito, anche prima di scadere.
          *
-         *     Il rifiuto **resta** anche dopo i cinque minuti (vedi `_stato`): il
-         *     programma riceve un no e non si rimette in coda da solo.
+         *     **Solo i propri inviti.** Un invito di un altro account risponde 404 e non
+         *     403: dire «c'e' ma non e' tuo» direbbe a chi prova numeri quanti inviti
+         *     esistono.
          */
-        post: operations["rifiuta_accoppiamento_api_pairing_requests__request_id__refuse_post"];
+        post: operations["revoca_un_invito_api_pairing_invites__invite_id__revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6320,27 +6301,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/pairing/requests/{ticket}": {
+    "/api/pairing/redeem": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * Stato Dell Accoppiamento
-         * @description «Com'e' andata?», chiesto dal programma col suo biglietto.
-         *
-         *     **Il token arriva una volta sola.** Alla prima risposta che lo porta la
-         *     riga si segna come ritirata e il token in chiaro si cancella: se quella
-         *     risposta si perde per strada, non c'e' modo di riaverla e si rifa'
-         *     l'accoppiamento. E' la scelta piu' stretta fra le due possibili, e il
-         *     prezzo e' dichiarato — un token rimasto senza padrone si spegne
-         *     dall'elenco dei token, dove compare col nome del programma.
-         */
-        get: operations["stato_dell_accoppiamento_api_pairing_requests__ticket__get"];
+        get?: never;
         put?: never;
-        post?: never;
+        /**
+         * Riscatta Invito
+         * @description «Ecco il codice»: torna il token, una volta sola.
+         *
+         *     Risponde **senza autenticazione**, perche' chi scambia il codice non ha
+         *     ancora nessuna credenziale — e' il punto di tutto. Tutto quello che la
+         *     tiene stretta e' in testa al file.
+         *
+         *     **Un codice che non apre e' sempre 404, con la stessa frase.** Che non sia
+         *     mai esistito, che sia scaduto, che Paolo l'abbia revocato o che sia gia'
+         *     stato usato: distinguere direbbe a chi prova codici che ne ha trovato uno
+         *     vero, e la differenza non serve a nessuno che abbia il codice giusto.
+         */
+        post: operations["riscatta_invito_api_pairing_redeem_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6352,41 +6335,20 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * AccoppiamentoAvviato
-         * @description La risposta a «voglio collegarmi»: il codice da mostrare alla persona, e
-         *     il biglietto con cui ritirare il token quando sara' confermato.
+         * AccoppiamentoRiscattato
+         * @description Il codice e' stato scambiato: questo e' il token del programma.
          *
-         *     **`code` si mostra, `ticket` non si mostra.** Sono due cose diverse: il
-         *     codice e' per gli occhi di chi conferma, il biglietto e' il segreto del
-         *     programma — se finisse a schermo, o in un log, chiunque l'abbia visto
-         *     potrebbe ritirare il token al posto suo.
+         *     **Arriva una volta sola**, nella risposta alla richiesta che il programma
+         *     ha fatto lui — non c'e' nessun secondo giro in cui riprenderlo. Se questa
+         *     risposta si perde per strada, il codice e' bruciato e il token e' nato
+         *     senza padrone: si rifa' l'accoppiamento con un codice nuovo, e il token
+         *     orfano si spegne dall'elenco dei token, dove compare col suo nome.
          */
-        AccoppiamentoAvviato: {
-            /** Code */
-            code: string;
-            /** Ticket */
-            ticket: string;
-            /** Expires At */
-            expires_at: string;
-            /** Poll Every Seconds */
-            poll_every_seconds: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * AccoppiamentoConfermato
-         * @description La conferma e' fatta: il token e' nato e lo ritirera' il programma.
-         *
-         *     **Il token non c'e' nemmeno qui.** Chi conferma dal sito non deve
-         *     copiarlo, trascriverlo o custodirlo: lo ritira il programma con il suo
-         *     biglietto, e questa risposta serve solo a dire quale token e' nato — per
-         *     poterlo spegnere.
-         */
-        AccoppiamentoConfermato: {
-            /** Status */
-            status: string;
-            /** Token Id */
-            token_id: number;
+        AccoppiamentoRiscattato: {
+            /** Token */
+            token: string;
+            /** User */
+            user: string;
             /** Token Name */
             token_name: string;
         } & {
@@ -8175,6 +8137,10 @@ export interface components {
             server_pages: {
                 [key: string]: number;
             };
+            /** Delivered At */
+            delivered_at: {
+                [key: string]: number;
+            };
             /** File Actions */
             file_actions: (components["schemas"]["AzioneDiEliminazione"] | components["schemas"]["AzioneDiSovrascrittura"])[];
             restore_request: components["schemas"]["RichiestaDiRipristino"] | null;
@@ -8626,6 +8592,78 @@ export interface components {
             /** Status */
             status: string;
             riassunto: components["schemas"]["RiassuntoInventario"];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * InvitiDiAccoppiamento
+         * @description Gli ultimi inviti di chi guarda, dal piu' recente. Solo i suoi.
+         */
+        InvitiDiAccoppiamento: {
+            /** Items */
+            items: components["schemas"]["InvitoDiAccoppiamento"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * InvitoCreato
+         * @description Il codice appena nato. **Si vede una volta sola.**
+         *
+         *     Non e' una precauzione di stile: in database c'e' solo l'impronta del
+         *     codice (vedi `models.InvitoDiAccoppiamento`), quindi da adesso il server
+         *     non e' in grado di ridirlo nemmeno volendo. Chi lo perde ne fa un altro.
+         */
+        InvitoCreato: {
+            /** Id */
+            id: number;
+            /** Code */
+            code: string;
+            /** Name */
+            name: string | null;
+            /** Expires At */
+            expires_at: string;
+            /** Expires In Seconds */
+            expires_in_seconds: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * InvitoDiAccoppiamento
+         * @description Un invito nell'elenco di chi l'ha creato.
+         *
+         *     **Il codice non c'e'**, in nessuno stato: non e' tenuto nascosto, non
+         *     esiste piu' — in database c'e' la sua impronta. Quello che c'e' risponde
+         *     alle due domande di chi guarda: quale aspetta ancora, e quello di
+         *     stamattina chi l'ha usato.
+         *
+         *     **`status`**:
+         *       * `pending` — vivo, aspetta di essere usato;
+         *       * `redeemed` — usato: `redeemed_at`, `client_name` e `ip` dicono da chi
+         *         e da dove;
+         *       * `revoked` — spento a mano prima di scadere;
+         *       * `expired` — e' passato il suo quarto d'ora.
+         */
+        InvitoDiAccoppiamento: {
+            /** Id */
+            id: number;
+            /** Name */
+            name: string | null;
+            /** Origin */
+            origin: string;
+            /** Status */
+            status: string;
+            /** Created At */
+            created_at: string | null;
+            /** Expires At */
+            expires_at: string | null;
+            /** Redeemed At */
+            redeemed_at: string | null;
+            /** Client Name */
+            client_name: string | null;
+            /** Platform */
+            platform: string | null;
+            /** Ip */
+            ip: string | null;
         } & {
             [key: string]: unknown;
         };
@@ -10512,33 +10550,6 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * RichiestaDiAccoppiamentoInAttesa
-         * @description Una richiesta che aspetta, come la vede chi deve confermarla.
-         *
-         *     Porta il **codice** perche' e' con quello che si riconosce la propria: il
-         *     nome lo scrive il programma e si puo' scrivere qualunque cosa, l'indirizzo
-         *     dice solo da quale macchina arriva. Il codice invece e' sullo schermo di
-         *     chi sta aspettando, e due richieste insieme si distinguono solo cosi'.
-         */
-        RichiestaDiAccoppiamentoInAttesa: {
-            /** Id */
-            id: number;
-            /** Code */
-            code: string;
-            /** Client Name */
-            client_name: string;
-            /** Platform */
-            platform: string | null;
-            /** Ip */
-            ip: string | null;
-            /** Created At */
-            created_at: string | null;
-            /** Expires At */
-            expires_at: string | null;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
          * RichiestaDiRipristino
          * @description «Rimetti su questo lettore il backup di quell'altro».
          *
@@ -10576,16 +10587,6 @@ export interface components {
             status: string;
             /** Id */
             id: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * RichiesteDiAccoppiamento
-         * @description Le richieste vive: le scadute, le confermate e le rifiutate non ci sono.
-         */
-        RichiesteDiAccoppiamento: {
-            /** Items */
-            items: components["schemas"]["RichiestaDiAccoppiamentoInAttesa"][];
         } & {
             [key: string]: unknown;
         };
@@ -11403,38 +11404,6 @@ export interface components {
             blocked_until: string | null;
             /** Skipped */
             skipped: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * StatoDellAccoppiamento
-         * @description Com'e' andata, chiesto dal programma con il suo biglietto.
-         *
-         *     **`status`**:
-         *       * `pending` — nessuno ha ancora confermato ne' rifiutato;
-         *       * `confirmed` — confermato: questa risposta, **e solo questa**, porta
-         *         il token;
-         *       * `collected` — il token era gia' stato ritirato. Se il programma vede
-         *         questo e non ha un token, la risposta con il token e' andata perduta:
-         *         non c'e' modo di riaverla, e si rifa' l'accoppiamento da capo (il
-         *         token rimasto senza padrone si spegne dal sito);
-         *       * `refused` — la persona ha detto no;
-         *       * `expired` — sono passati i cinque minuti.
-         *
-         *     **Prima della conferma `token` e `user` sono nulli**, e non per prudenza:
-         *     questa rotta risponde **senza autenticazione**, e tutto quello che
-         *     dicesse in piu' sarebbe un modo di sapere cose su un server altrui
-         *     presentando un biglietto inventato.
-         */
-        StatoDellAccoppiamento: {
-            /** Status */
-            status: string;
-            /** Expires At */
-            expires_at: string | null;
-            /** Token */
-            token: string | null;
-            /** User */
-            user: string | null;
         } & {
             [key: string]: unknown;
         };
@@ -20456,7 +20425,7 @@ export interface operations {
             };
         };
     };
-    richieste_in_attesa_api_pairing_requests_get: {
+    elenco_degli_inviti_api_pairing_invites_get: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -20473,7 +20442,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RichiesteDiAccoppiamento"];
+                    "application/json": components["schemas"]["InvitiDiAccoppiamento"];
                 };
             };
             /** @description Validation Error */
@@ -20487,18 +20456,20 @@ export interface operations {
             };
         };
     };
-    avvia_accoppiamento_api_pairing_requests_post: {
+    crea_un_invito_api_pairing_invites_post: {
         parameters: {
-            query?: never;
+            query?: {
+                token?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
+        requestBody?: {
             content: {
                 "application/json": {
                     [key: string]: unknown;
-                };
+                } | null;
             };
         };
         responses: {
@@ -20508,7 +20479,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccoppiamentoAvviato"];
+                    "application/json": components["schemas"]["InvitoCreato"];
                 };
             };
             /** @description Validation Error */
@@ -20522,47 +20493,14 @@ export interface operations {
             };
         };
     };
-    conferma_accoppiamento_api_pairing_requests__request_id__confirm_post: {
+    revoca_un_invito_api_pairing_invites__invite_id__revoke_post: {
         parameters: {
             query?: {
                 token?: string | null;
             };
             header?: never;
             path: {
-                request_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccoppiamentoConfermato"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    rifiuta_accoppiamento_api_pairing_requests__request_id__refuse_post: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                request_id: number;
+                invite_id: number;
             };
             cookie?: never;
         };
@@ -21263,16 +21201,20 @@ export interface operations {
             };
         };
     };
-    stato_dell_accoppiamento_api_pairing_requests__ticket__get: {
+    riscatta_invito_api_pairing_redeem_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                ticket: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -21280,7 +21222,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["StatoDellAccoppiamento"];
+                    "application/json": components["schemas"]["AccoppiamentoRiscattato"];
                 };
             };
             /** @description Validation Error */
