@@ -59,11 +59,11 @@ Nasce un `kolibre_app_…` (`models.TokenApplicazione`) e non un
      di un file e le immagini. Il client non potrebbe nemmeno elencare i
      libri: `GET /api/kolibre/books` risponderebbe 401.
   2. **Allargare i token di dispositivo a tutta l'API sarebbe un
-     peggioramento vero.** Quei token stanno **in chiaro** nella colonna
-     `devices.device_token` e **dentro un file del plugin** su ogni Kindle:
-     oggi valgono per la sincronizzazione, e un lettore perso costa quella.
-     Se valessero per tutta l'API, un lettore perso costerebbe l'intero
-     account.
+     peggioramento vero.** Quei token stanno **in chiaro dentro un file del
+     plugin** su ogni Kindle (dal 20/11/2026 il server, per parte sua, ne
+     conserva solo l'impronta in `devices.device_token_hash`): oggi valgono
+     per la sincronizzazione, e un lettore perso costa quella. Se valessero
+     per tutta l'API, un lettore perso costerebbe l'intero account.
   3. **Il mattone giusto esiste e dice di se' questa cosa**: la docstring di
      `models.TokenApplicazione`, scritta il 05/11, elenca chi lo usera' —
      «il plugin Obsidian, uno script, **un domani un client nativo**». Si

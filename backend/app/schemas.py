@@ -48,7 +48,12 @@ class DeviceResponse(BaseModel):
     model: str
     hardware_id: Optional[str] = None
     is_default: bool
-    device_token: str
+    # Il token in chiaro, presente SOLO nella risposta di POST /register:
+    # dal 20/11/2026 il server ne conserva l'impronta
+    # (`devices.device_token_hash`) e non puo' ridirlo — le altre rotte che
+    # rispondono questa forma (PUT /{id}, set-default, GET /me) lo lasciano
+    # nullo.
+    device_token: Optional[str] = None
     last_sync_at: Optional[datetime] = None
     last_backup_at: Optional[datetime] = None
     storage_used: Optional[int] = None

@@ -8,6 +8,7 @@ import { withBackendUrl } from '@/lib/api'
 import { formatBytes, formatDate, ratingStars } from '@/lib/format'
 import { openBookFormatInReader } from '@/lib/readerActions'
 import { TagFiltrabili, ValoreFiltrabile } from '@/components/ValoreFiltrabile'
+import { BookDescriptionHtml } from '@/components/BookDescriptionHtml'
 import { useIsDesktop } from '@/lib/useMediaQuery'
 import type { DeviceBookColumnState } from '@/lib/deviceFormat'
 import {
@@ -343,7 +344,9 @@ export function QuickviewPanel({
         {descriptionVisible && book.description && (
           <div>
             <h3 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{t('library.field.description')}</h3>
-            <p className="whitespace-pre-wrap text-[13px] leading-relaxed">{book.description}</p>
+            {/* HTML, non più testo piatto (20/11/2026): il server consegna
+                `description` già sanificata — vedi BookDescriptionHtml. */}
+            <BookDescriptionHtml html={book.description} className="text-[13px]" />
           </div>
         )}
 

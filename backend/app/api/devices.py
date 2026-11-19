@@ -76,9 +76,13 @@ def register_device(
     # erano gia' nel codice prima che i permessi esistessero.
     current_user: models.User = Depends(permessi.richiede_registrare_dispositivi),
 ):
-    token = f"kolibre_tok_{os.urandom(8).hex()}"
+    # Del token si salva **l'impronta** (20/11/2026, come i token
+    # d'applicazione): il chiaro esiste solo in questa risposta, una volta —
+    # chi lo riceve lo copia nel plugin o lo perde, e il server non e' piu'
+    # in grado di ridirlo.
+    token = auth.new_device_token()
     new_dev = models.Device(
-        device_token=token,
+        device_token_hash=auth.impronta_del_token(token),
         name=payload.name,
         model=payload.model,
         hardware_id=payload.hardware_id,
@@ -88,7 +92,9 @@ def register_device(
     db.commit()
     db.refresh(new_dev)
     log_message("info", "devices", f"Registered new device '{payload.name}' for user '{current_user.username}'")
-    return new_dev
+    risposta = schemas.DeviceResponse.model_validate(new_dev)
+    risposta.device_token = token
+    return risposta
 
 
 def _book_progress_percent(db: Session, library: str, calibre_book_id: int, user_id: int):

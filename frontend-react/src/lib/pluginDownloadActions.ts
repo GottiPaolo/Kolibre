@@ -64,7 +64,11 @@ async function downloadBlob(url: string, filename: string, withAuth: boolean): P
 }
 
 // device_id + server_url pre-configurano gconfig.lua col device_token —
-// niente altro da scaricare/impostare a mano su KOReader. L'endpoint
+// niente altro da scaricare/impostare a mano su KOReader. Dal 20/11/2026 il
+// server conserva solo l'impronta del token, quindi questo download ne
+// FABBRICA uno nuovo (rotazione): il token vecchio del dispositivo smette di
+// valere, e torna tutto a posto installando lo zip appena scaricato.
+// L'endpoint
 // richiede un utente autenticato (proprietario del dispositivo): a
 // differenza del Vue esistente (che non poteva allegare un header e passava
 // ?token= in query), qui il download passa per fetch(), quindi l'header

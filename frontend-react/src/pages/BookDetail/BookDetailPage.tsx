@@ -19,6 +19,7 @@ import { HighlightsPanel } from './HighlightsPanel'
 import { StatsPanel } from './StatsPanel'
 import { QualitaDelLibro } from './QualitaDelLibro'
 import { BookContextMenu } from '@/components/BookContextMenu'
+import { BookDescriptionHtml } from '@/components/BookDescriptionHtml'
 import { identifierUrl } from '@/lib/identifiers'
 import { TagFiltrabili, ValoreFiltrabile } from '@/components/ValoreFiltrabile'
 
@@ -315,7 +316,9 @@ export function BookDetailPage() {
       {book.description && (
         <div>
           <h3 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{t('library.field.description')}</h3>
-          <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed">{book.description}</p>
+          {/* HTML, non più testo piatto (20/11/2026): il server consegna
+              `description` già sanificata — vedi BookDescriptionHtml. */}
+          <BookDescriptionHtml html={book.description} className="text-[13.5px]" />
         </div>
       )}
 

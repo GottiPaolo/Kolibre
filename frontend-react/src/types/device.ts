@@ -40,7 +40,9 @@ export type DeviceRestoreRequest = components['schemas']['RichiestaDiRipristino'
  * La rispondono `POST /register`, `PUT /{id}` e `POST /{id}/set-default`
  * (`schemas.DeviceResponse`), e **non** è la riga arricchita dell'elenco —
  * niente libri, niente patch, niente coda, niente spazio sul disco. In
- * compenso porta `device_token`, che in nessun'altra risposta si vede.
+ * compenso porta `device_token` — ma solo in `POST /register`: dal
+ * 20/11/2026 il server conserva l'impronta del token, non il token, quindi
+ * le altre risposte lo lasciano nullo. Lo si vede una volta, appena nato.
  *
  * Fino al 05/11/2026 il frontend credeva che la modifica di un dispositivo
  * rispondesse la riga arricchita: lo diceva un tipo scritto a mano, e

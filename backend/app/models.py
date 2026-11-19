@@ -65,7 +65,18 @@ class Device(Base):
     __tablename__ = "devices"
 
     id = Column(Integer, primary_key=True, index=True)
-    device_token = Column(String, unique=True, index=True, nullable=False)
+    # **L'impronta SHA-256 del token, non il token** (20/11/2026, revisione
+    # critica del 19/11, punto C2/D1). Fino a ieri qui stava il
+    # `kolibre_tok_…` in chiaro: chiunque leggesse app.db — o un suo backup —
+    # aveva i token funzionanti di tutti i lettori. Adesso vale la stessa
+    # regola della gemella `TokenApplicazione.token_hash`: il valore in
+    # chiaro esiste UNA volta, quando nasce (registrazione, o rotazione per
+    # lo zip preconfigurato), viene consegnato al dispositivo e mai piu'
+    # riletto dal server. Chi si presenta col token lo fa passare per la
+    # stessa SHA-256 (`auth.impronta_del_token`) e si cerca l'impronta.
+    # La colonna si chiama col nome vero: la rinomina dal vecchio
+    # `device_token` e' la voce 4 del registro (migrations.py).
+    device_token_hash = Column(String, unique=True, index=True, nullable=False)
     name = Column(String, nullable=False)
     model = Column(String, nullable=False)
     hardware_id = Column(String, nullable=True)  # physical device id reported by KOReader, distinct from our own PK
@@ -1514,14 +1525,15 @@ class TokenApplicazione(Base):
     accesso a niente di piu' di quello che l'account puo' fare.
 
     E' lo stesso disegno che i dispositivi KOReader hanno da sempre
-    (`Device.device_token`), portato alle applicazioni — con una differenza.
+    (`Device.device_token_hash`), portato alle applicazioni — con una
+    differenza che non c'e' piu'.
 
-    **Qui si conserva l'impronta, non il token.** I dispositivi il loro lo
-    tengono in chiaro; un token d'applicazione nasce per vivere sul computer
-    di qualcun altro, e se un giorno il database del server finisse in mano a
-    qualcuno le righe dei dispositivi gliene regalerebbero i token, queste no.
-    L'incoerenza fra i due resta, ed e' scritta nel backlog: si sistema
-    cambiando i dispositivi, non rinunciando qui.
+    **Qui si conserva l'impronta, non il token.** Un token nasce per vivere
+    sul computer (o sull'e-reader) di qualcun altro, e se un giorno il
+    database del server finisse in mano a qualcuno non deve regalargli degli
+    accessi funzionanti. I dispositivi il loro lo tenevano in chiaro —
+    l'incoerenza era scritta nel backlog — e dal 20/11/2026 (voce 4 del
+    registro delle migrazioni) seguono questa stessa strada.
 
     **Revocare non cancella la riga.** Si scrive `revocato_il` e la riga
     resta: «questo token e' stato spento il giorno tale» e' un'informazione,

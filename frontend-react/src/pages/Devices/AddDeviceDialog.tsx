@@ -63,7 +63,10 @@ export function AddDeviceDialog({ onClose }: AddDeviceDialogProps) {
     try {
       const created = await registerDevice(name.trim(), effectiveModel)
       queryClient.invalidateQueries({ queryKey: ['devices'] })
-      setToken(created.device_token)
+      // Dal 20/11/2026 lo schema dichiara device_token nullable (nelle
+      // risposte di PUT/set-default/me non c'è più), ma qui siamo a POST
+      // /register: l'unica risposta che lo porta, e lo porta sempre.
+      setToken(created.device_token ?? null)
     } catch (err) {
       setError(messaggioErrore(err, t('devices.add.registerError')))
     } finally {

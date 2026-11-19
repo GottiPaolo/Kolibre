@@ -7187,8 +7187,11 @@ export interface components {
             hardware_id?: string | null;
             /** Is Default */
             is_default: boolean;
-            /** Device Token */
-            device_token: string;
+            /**
+             * Device Token
+             * @description Presente SOLO nella risposta di POST /register: dal 20/11/2026 il server conserva l'impronta e non puo' ridire il token.
+             */
+            device_token?: string | null;
             /** Last Sync At */
             last_sync_at?: string | null;
             /** Last Backup At */

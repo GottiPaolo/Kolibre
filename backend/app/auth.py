@@ -33,8 +33,9 @@ from . import config, models, database
 #
 # Cosa si rompe cambiandola: le sessioni aperte nei browser, che devono
 # rifare l'accesso. I dispositivi NO — KOReader e il plugin Calibre usano un
-# token loro (`kolibre_tok_…`, colonna `devices.device_token`), non un JWT,
-# quindi le sincronizzazioni continuano come prima.
+# token loro (`kolibre_tok_…`, cercato per impronta nella colonna
+# `devices.device_token_hash`), non un JWT, quindi le sincronizzazioni
+# continuano come prima.
 
 _SEGNAPOSTO = {
     "your-secret-key-for-kolibre-CHANGE-IN-PRODUCTION",
@@ -127,11 +128,14 @@ APP_TOKEN_PREFIX = "kolibre_app_"
 
 def impronta_del_token(token: str) -> str:
     """
-    L'impronta con cui un token d'applicazione si cerca nel database.
+    L'impronta con cui un token al portatore si cerca nel database — quelli
+    d'applicazione (`token_applicazione.token_hash`) e, dal 20/11/2026,
+    quelli di dispositivo (`devices.device_token_hash`).
 
-    Si conserva questa e **non il token**: un token d'applicazione nasce per
-    vivere sul computer di qualcun altro, e se un giorno il database finisse
-    in mano a qualcuno non dovrebbe regalargli degli accessi funzionanti.
+    Si conserva questa e **non il token**: un token nasce per vivere sul
+    computer (o sull'e-reader) di qualcun altro, e se un giorno il database
+    finisse in mano a qualcuno non dovrebbe regalargli degli accessi
+    funzionanti.
     """
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -245,6 +249,36 @@ def get_current_active_admin(current_user: models.User = Depends(get_current_use
 
 DEVICE_TOKEN_PREFIX = "kolibre_tok_"
 
+
+def new_device_token() -> str:
+    """
+    Fabbrica il token di un dispositivo: prefisso riconoscibile + 16 cifre
+    esadecimali casuali (la forma di sempre, nata in POST /register).
+
+    Chi lo chiama ne salva **l'impronta** (`impronta_del_token`) in
+    `devices.device_token_hash` e consegna il chiaro una volta sola — alla
+    registrazione, o dentro il gconfig.lua dello zip preconfigurato. Da quel
+    momento il server non e' piu' in grado di ridirlo, ed e' il punto:
+    chi legge app.db o un suo backup non trova token funzionanti
+    (20/11/2026, revisione critica del 19/11, punto C2/D1).
+    """
+    return DEVICE_TOKEN_PREFIX + secrets.token_hex(8)
+
+
+def find_device_by_token(db: Session, raw_token: str) -> Optional["models.Device"]:
+    """
+    Il dispositivo che possiede questo token in chiaro, o None.
+
+    E' l'unico punto che traduce «token presentato» in «riga del database»:
+    il dispositivo manda il chiaro nell'header, come ha sempre fatto, e qui
+    lo si fa passare per la stessa SHA-256 con cui e' stato salvato — il
+    confronto in chiaro non e' piu' possibile, perche' il chiaro non c'e'.
+    """
+    return db.query(models.Device).filter(
+        models.Device.device_token_hash == impronta_del_token(raw_token)
+    ).first()
+
+
 _device_token_header = OAuth2PasswordBearer(tokenUrl="token", auto_error=False)
 
 
@@ -258,10 +292,14 @@ def get_current_device(
     /token). Devices never log in with a username/password; the token is
     generated once by POST /api/devices/register and embedded in the
     downloadable, pre-configured plugin package.
+
+    Dal 20/11/2026 il server conserva solo l'impronta del token
+    (`devices.device_token_hash`): il dispositivo continua a mandare il
+    chiaro, qui lo si cerca per impronta (`find_device_by_token`).
     """
     if not token or not token.startswith(DEVICE_TOKEN_PREFIX):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid device token")
-    device = db.query(models.Device).filter(models.Device.device_token == token).first()
+    device = find_device_by_token(db, token)
     if not device:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device is not registered")
     # Single choke point for "device was heard from": every device-token
@@ -303,7 +341,7 @@ def get_user_or_device(
     if resolved.startswith("Bearer "):
         resolved = resolved.replace("Bearer ", "", 1)
     if resolved.startswith(DEVICE_TOKEN_PREFIX):
-        device = db.query(models.Device).filter(models.Device.device_token == resolved).first()
+        device = find_device_by_token(db, resolved)
         if not device:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Device is not registered")
         device.last_seen_at = datetime.utcnow()
@@ -338,7 +376,7 @@ def utente_effettivo_opzionale(
     if resolved.startswith("Bearer "):
         resolved = resolved.replace("Bearer ", "", 1)
     if resolved.startswith(DEVICE_TOKEN_PREFIX):
-        device = db.query(models.Device).filter(models.Device.device_token == resolved).first()
+        device = find_device_by_token(db, resolved)
         return device.user if device else None
     try:
         return _decode_token(resolved, db)
@@ -360,7 +398,7 @@ def utente_effettivo_opzionale(
 # aperti con window.open. Mancava l'altra meta': i DISPOSITIVI. KOReader e il
 # plugin Calibre scaricano le copertine, e mandano gia' il loro
 # `Authorization: Bearer …` su ogni richiesta — solo che il loro e' un
-# `kolibre_tok_…` (colonna `devices.device_token`), non un JWT, e il decoder
+# `kolibre_tok_…` (cercato per impronta in `devices.device_token_hash`), non un JWT, e il decoder
 # dei JWT lo rifiuterebbe.
 #
 # Quindi: si accetta l'uno o l'altro. Il dispositivo non diventa un utente —
@@ -386,7 +424,7 @@ def utente_o_dispositivo(
     # alla registrazione: non e' una scorciatoia, e' il solo modo di sapere
     # quale dei due decoder provare senza far fallire l'altro per finta.
     if grezzo.startswith(DEVICE_TOKEN_PREFIX):
-        dispositivo = db.query(models.Device).filter(models.Device.device_token == grezzo).first()
+        dispositivo = find_device_by_token(db, grezzo)
         if dispositivo is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
         proprietario = db.query(models.User).filter(models.User.id == dispositivo.user_id).first()

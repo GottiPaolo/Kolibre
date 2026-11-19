@@ -352,8 +352,10 @@ class LibroInElenco(Permissivo):
     esistono chiede `/api/kolibre/custom-columns`.
 
     Tre campi sono **tagliati o derivati**, non il valore grezzo di Calibre:
-    `description` e' troncata a 400 caratteri (il testo intero si chiede a
-    `GET /{id}/description`), e `pubdate`/`last_modified`/`date_added`
+    `description` e' troncata a 400 caratteri e **sanificata** — HTML
+    ridotto a una lista bianca di tag, sicuro per `dangerouslySetInnerHTML`
+    (vedi `services/html_sanitizer.py`; il testo intero e grezzo si chiede
+    a `GET /{id}/description`) — e `pubdate`/`last_modified`/`date_added`
     portano solo il giorno.
     """
     id: int
@@ -366,7 +368,8 @@ class LibroInElenco(Permissivo):
     identifiers: dict[str, str]
     publisher: Optional[str]
     language: Optional[str]
-    #: Troncata a 400 caratteri con «…» in coda.
+    #: Troncata a 400 caratteri con «…» in coda, e sanificata: HTML della
+    #: sola lista bianca, da rendere cosi' com'e'.
     description: Optional[str]
     # Tutti e tre **obbligatori**, e non per ottimismo: `sort` e `uuid` li
     # riempie un trigger dello schema di Calibre (`books_insert_trg`), e
@@ -523,7 +526,9 @@ class StatisticheLibro(Permissivo):
 
 
 class DescrizioneLibro(Permissivo):
-    """Il testo **intero**, non troncato come nell'elenco."""
+    """Il testo **intero** e **grezzo**: ne' troncato ne' sanificato come
+    nell'elenco, perche' e' la sorgente dell'editor dei metadati — NON va
+    messo in `dangerouslySetInnerHTML` (20/11/2026)."""
     description: Optional[str]
 
 

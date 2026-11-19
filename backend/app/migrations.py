@@ -52,6 +52,8 @@ girano tutte, nessun danno. E' il primo avvio di ogni impianto esistente
 dopo questo aggiornamento.
 """
 
+import hashlib
+
 from . import database
 from .logging_utils import log_message
 
@@ -564,6 +566,69 @@ def add_missing_columns_and_hot_indexes() -> None:
         conn.commit()
 
 
+def hash_device_tokens() -> None:
+    """
+    I token dei dispositivi diventano impronte SHA-256 (20/11/2026,
+    revisione critica del 19/11, punto C2/D1).
+
+    **Il problema.** La colonna `devices.device_token` teneva il token in
+    chiaro: chi leggeva app.db — o un suo backup — aveva i token funzionanti
+    di tutti i lettori. I token d'applicazione la strada giusta ce l'hanno
+    dal 05/11 (`token_applicazione.token_hash`); questa voce porta i
+    dispositivi sulla stessa.
+
+    **Cosa fa, in due passi idempotenti.**
+
+    1. Rinomina la colonna in `device_token_hash` — il nome che dice il
+       vero — e rifa' l'indice unico col nome che create_all darebbe oggi
+       (SQLite fa seguire l'indice alla colonna ma non lo rinomina, e il
+       vincolo fresh == migrated vale anche per i nomi degli indici). Su un
+       database nuovo la colonna nasce gia' col nome giusto e il passo e'
+       un no-op.
+
+    2. Trasforma in impronta (`sha256(token).hexdigest()`) ogni valore
+       ancora in chiaro. **Il criterio di riconoscimento**: un token in
+       chiaro comincia per `kolibre_tok_` (e' cosi' che nasce in
+       /register, ed e' il primo controllo di auth.get_current_device: un
+       valore senza prefisso non ha mai potuto autenticare); un'impronta
+       sono 64 cifre esadecimali e non puo' cominciare cosi' ('k' non e'
+       una cifra hex). Quindi rifare girare la voce non doppia-hasha, e i
+       valori gia' migrati non si toccano.
+
+    **Nessun riaccoppiamento**: il dispositivo possiede il chiaro e continua
+    a mandarlo; sha256(chiaro) ritrova esattamente la riga di prima.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(devices)")}
+        if not colonne:
+            return
+        if "device_token" in colonne and "device_token_hash" not in colonne:
+            conn.exec_driver_sql(
+                "ALTER TABLE devices RENAME COLUMN device_token TO device_token_hash"
+            )
+            conn.exec_driver_sql("DROP INDEX IF EXISTS ix_devices_device_token")
+            conn.exec_driver_sql(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_devices_device_token_hash "
+                "ON devices (device_token_hash)"
+            )
+            log_message("info", "system",
+                        "devices: renamed device_token to device_token_hash.")
+        if "device_token_hash" in colonne or "device_token" in colonne:
+            in_chiaro = conn.exec_driver_sql(
+                "SELECT id, device_token_hash FROM devices "
+                "WHERE device_token_hash LIKE 'kolibre_tok_%'"
+            ).fetchall()
+            for device_id, token in in_chiaro:
+                conn.exec_driver_sql(
+                    "UPDATE devices SET device_token_hash = ? WHERE id = ?",
+                    (hashlib.sha256(token.encode("utf-8")).hexdigest(), device_id),
+                )
+            if in_chiaro:
+                log_message("info", "system",
+                            f"devices: hashed {len(in_chiaro)} clear-text device token(s).")
+        conn.commit()
+
+
 # ── Come si aggiunge la prossima migrazione ──────────────────────────────
 # 1. Scrivi qui sopra una funzione idempotente (controlla prima di alterare;
 #    su un database nuovo deve essere un no-op o produrre lo stesso schema
@@ -573,14 +638,15 @@ def add_missing_columns_and_hot_indexes() -> None:
 # 3. Mai riordinare, mai togliere, mai modificare una voce gia' spedita: i
 #    database in giro ricordano solo un numero, e quel numero promette che
 #    tutto cio' che viene prima e' gia' stato fatto cosi' com'era.
-# Prossimi cantieri gia' noti che aggiungeranno voci: le impronte dei token
-# dei dispositivi; la rimozione di folder_layout.
+# Prossimi cantieri gia' noti che aggiungeranno voci: la rimozione di
+# folder_layout.
 MIGRATIONS = [
     # Le prime tre voci sono il trasloco (20/11/2026) delle tre funzioni che
     # main.py chiamava a ogni avvio, nello stesso ordine di allora.
     (1, "additive columns and hot indexes (2025-2026 history)", add_missing_columns_and_hot_indexes),
     (2, "fraction_read on both reading-session tables", add_fraction_read_to_sessions),
     (3, "per-user reading positions, coverage and stats cache", rebuild_positions_per_user),
+    (4, "device tokens become SHA-256 fingerprints", hash_device_tokens),
 ]
 
 

@@ -25,6 +25,7 @@ from ..schemas_risposte import (
     ValoriDeiCampi,
 )
 from ..services.immagini_remote import scarica_immagine
+from ..services.html_sanitizer import sanitize_description_excerpt
 from ..services import cover_builder, converter, metadata_scraper, page_counter, toc_editor, stats_service, author_ingest_hook, app_settings, author_stats_service, book_records, book_hash_service
 from ..calibre.library import CalibreLibrary
 from ..calibre.functions import string_to_authors
@@ -264,9 +265,14 @@ def list_books(
         # "#<label>" key per column that actually exists in this library, not
         # just the two seeded demo columns), so pass all of them through as-is.
         custom_values = {k: v for k, v in b.items() if k.startswith("#")}
-        description = b["description"]
-        if description and len(description) > _LIST_DESCRIPTION_EXCERPT_CHARS:
-            description = description[:_LIST_DESCRIPTION_EXCERPT_CHARS].rstrip() + "…"
+        # Troncata E sanificata (20/11/2026, punto G9): la webapp la mette
+        # in `dangerouslySetInnerHTML` per mostrare l'HTML di Calibre
+        # formattato, quindi QUI è il confine dove tutto quello che non sta
+        # nella lista bianca deve cadere. Solo questa rotta: l'OPDS si
+        # spoglia i tag per conto suo, il catalogo del plugin KOReader non
+        # porta descrizioni, e GET /{id}/description resta grezzo perché è
+        # la sorgente dell'editor dei metadati (vedi html_sanitizer.py).
+        description = sanitize_description_excerpt(b["description"], _LIST_DESCRIPTION_EXCERPT_CHARS)
         result.append({
             "id": b["id"],
             "title": b["title"],
@@ -375,10 +381,16 @@ def get_pagination_mode(
 @router.get("/{id}/description", responses={200: {"model": DescrizioneLibro}})
 def get_book_description(id: int, library: str = Depends(default_library_param)):
     """Untruncated companion to the excerpt list_books() above sends in bulk
-    — fetched on demand only by the book-detail page, which is the one place
+    — fetched on demand only by the metadata editor, which is the one place
     that needs the full text. A single targeted query (CalibreLibrary
     .get_description), not the whole list_books() machinery, for one field
-    of one book."""
+    of one book.
+
+    GREZZO apposta, NON sanificato (20/11/2026): questo testo finisce nella
+    textarea dell'editor dei metadati e torna indietro con la PUT — se
+    partisse sanificato, ogni salvataggio riscriverebbe in Calibre una
+    versione impoverita della descrizione. La versione sanificata per la
+    visualizzazione è quella dell'elenco (vedi list_books)."""
     lib = CalibreLibrary(config.library_path(library))
     return {"description": lib.get_description(id)}
 

@@ -541,13 +541,31 @@ def download_koreader_plugin(
             raise HTTPException(status_code=404, detail="Device not found")
         if not server_url:
             raise HTTPException(status_code=400, detail="server_url is required for a pre-configured download")
+        # **Il token si RIGENERA a ogni download preconfigurato** (20/11/2026).
+        # Il server non conserva piu' il token in chiaro ma la sua impronta
+        # (`devices.device_token_hash`, voce 4 del registro delle migrazioni),
+        # quindi "rileggere il valore e scriverlo nel gconfig" non e' piu'
+        # possibile: l'unico modo di consegnare un token e' fabbricarne uno
+        # nuovo. E' una rotazione: il token precedente smette di valere nel
+        # momento in cui questo zip viene generato, e torna a valere tutto
+        # quando lo zip viene installato sul lettore. Per un dispositivo
+        # appena registrato (il flusso normale: registra → scarica → installa)
+        # non cambia niente; per un dispositivo gia' accoppiato, scaricare lo
+        # zip SENZA poi installarlo lascia il lettore con il token vecchio,
+        # cioe' scollegato fino alla reinstallazione.
+        # `fingerprint` resta uguale al token: e' il marcatore con cui il
+        # plugin riconosce un gconfig gia' applicato, e un token nuovo DEVE
+        # cambiarlo, altrimenti la riconfigurazione verrebbe saltata.
+        nuovo_token = auth.new_device_token()
+        device.device_token_hash = auth.impronta_del_token(nuovo_token)
+        db.commit()
         gconfig_lua = (
             "-- Generated automatically at download time — do not edit by hand,\n"
             "-- it will be overwritten if the plugin is downloaded again for this device.\n"
             "return {\n"
-            f"    fingerprint = {_lua_string_literal(device.device_token)},\n"
+            f"    fingerprint = {_lua_string_literal(nuovo_token)},\n"
             f"    server_url = {_lua_string_literal(server_url.rstrip('/'))},\n"
-            f"    device_token = {_lua_string_literal(device.device_token)},\n"
+            f"    device_token = {_lua_string_literal(nuovo_token)},\n"
             "}\n"
         )
 
