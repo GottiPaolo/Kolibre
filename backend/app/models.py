@@ -1,3 +1,22 @@
+"""
+I modelli del database, e LA politica delle lingue del progetto (A5, 20/11/2026).
+
+Nel codice convivono due lingue: 29 tabelle con nomi inglesi, 17 italiane,
+e lo stesso misto in servizi, schemi e frontend. E' la traccia di un cambio
+di rotta a meta' progetto, e rinominare l'esistente sarebbe solo
+rimescolamento: non si fa.
+
+**La regola, decisa da Paolo il 20/11/2026 ed enunciata qui e solo qui:
+il codice NUOVO nasce in INGLESE.** Vale per gli identificatori — tabelle,
+colonne, classi, funzioni, file, variabili — in tutto il progetto: backend,
+frontend e plugin. I commenti e i docstring restano nella lingua in cui
+ragiona chi li scrive (qui quasi sempre l'italiano): sono prosa, non API.
+Un'estensione di codice esistente segue il file che estende — una colonna
+nuova di una tabella italiana puo' nascere italiana, perche' la coerenza
+locale conta piu' della regola — ma tutto cio' che nasce da zero, nasce
+inglese.
+"""
+
 import secrets
 from datetime import datetime
 
@@ -484,8 +503,8 @@ class OrphanHighlight(Base):
     A device-pushed annotation whose file_hash didn't resolve via BookHash at
     push time — see push_device_annotations. Deliberately a SEPARATE table
     from Highlight rather than making Highlight.calibre_book_id nullable:
-    this project has no real migration system (see main.py's
-    _ensure_schema_migrations — additive ALTER TABLE ADD COLUMN only), and
+    this project's migration registry (see app/migrations.py) is
+    additive — ALTER TABLE ADD COLUMN only — and
     SQLite can't drop a NOT NULL constraint already baked into an existing
     production table without rebuilding it. A new table sidesteps that
     entirely (create_all() makes it automatically) and keeps every existing
@@ -539,7 +558,7 @@ class OrphanReadingSession(Base):
     highlights already work. Deliberately NOT merged into ReadingSession (which
     requires a real library+calibre_book_id) for the same reason
     OrphanHighlight is a separate table from Highlight: no real migration
-    system here, additive-only (see main.py's _ensure_schema_migrations),
+    system here, additive-only (see app/migrations.py),
     so a brand new table is far simpler than trying to make
     ReadingSession.calibre_book_id nullable on an existing production table.
 
@@ -786,7 +805,7 @@ class WebVocabularyEntry(Base):
 
     Deliberately a SEPARATE table from VocabularyEntry rather than making
     that table's device_id nullable: this project has no real migration
-    system (see main.py's _ensure_schema_migrations — additive ALTER TABLE
+    system (see app/migrations.py — additive ALTER TABLE
     ADD COLUMN only), and SQLite can't relax an existing NOT NULL column on
     a live production table without a full rebuild. Same reasoning, same
     fix, as OrphanHighlight being a separate table from Highlight instead of
@@ -1112,14 +1131,14 @@ class SavedChart(Base):
     Typed columns rather than a JSON config blob — this v1's shape is small
     and fixed, so a JSON blob would only cost greppability/indexability for
     no real flexibility gained yet. Additive new table, no
-    _ensure_schema_migrations entry needed (see OrphanReadingSession's own
-    docstring: create_all() alone is enough for a brand new table, that
-    function only matters for ALTER TABLE on an EXISTING one).
+    migrations.py entry needed (see OrphanReadingSession's own
+    docstring: create_all() alone is enough for a brand new table, the
+    registry only matters for ALTER TABLE on an EXISTING one).
 
     v2 (chart builder deepening — independent X/Y, optional secondary
     grouping/series with a bar mode, client-side filters): three columns
-    added on an EXISTING table, so THOSE do need an _ensure_schema_migrations
-    entry (see that function's own docstring) — group_by_secondary/
+    added on an EXISTING table, so THOSE do need a migrations.py
+    entry (see that module's own docstring) — group_by_secondary/
     chart_mode/filters_json below. filters_json breaks from the "typed
     columns" reasoning above on purpose: filters are a small, genuinely
     open-ended bag (date range + N multi-selects, more may be added later)

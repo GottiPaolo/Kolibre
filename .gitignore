@@ -18,7 +18,12 @@ var/
 # without customizing it first.
 kolibre-data/
 
-# SQLite databases
+# SQLite databases. «app.db» qui copre anche quello alla RADICE del repo:
+# fino al 20/11/2026 il default di backend/app/database.py era relativo alla
+# cartella di lancio, e un avvio locale lo faceva nascere li' invece che in
+# data/ — adesso il default sta dentro DATA_DIR, ma la voce resta perche' un
+# checkout vecchio o un DATABASE_URL scritto a mano non lo riportino
+# tracciabile.
 app.db
 app.db-shm
 app.db-wal

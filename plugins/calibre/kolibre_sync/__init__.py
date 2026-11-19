@@ -38,7 +38,12 @@ class KolibreSyncPlugin(InterfaceActionBase):
     # per questo: il server legge la versione da questo file per rispondere
     # «c'e' qualcosa di nuovo?», quindi senza un numero diverso chi ha gia' il
     # plugin installato non saprebbe mai che c'e'.
-    version = (2, 1, 0)
+    #
+    # 2.1.1 (20/11/2026): descrizione e tooltip non parlano piu' di
+    # «sincronizzare» — la sync con Calibre e' deprecata dal 14/11, il plugin
+    # manda. Solo testo, ma e' il testo con cui il plugin si presenta: senza
+    # il numero nuovo, chi ce l'ha installato resterebbe con quello vecchio.
+    version = (2, 1, 1)
     minimum_calibre_version = (5, 0, 0)
 
     # module:ClassName resolved lazily by load_actual_plugin(gui) — see

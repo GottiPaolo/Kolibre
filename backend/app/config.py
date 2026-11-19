@@ -17,7 +17,6 @@ INGEST_COVERS_DIR = os.path.join(DATA_DIR, "ingest_covers")
 AUTHORS_DIR = os.path.join(DATA_DIR, "authors")
 BACKUPS_DIR = os.path.join(DATA_DIR, "backups")
 USERS_DIR = os.path.join(DATA_DIR, "users")
-# Font caricati dall'utente per il builder di temi avanzati (Impostazioni →
 # Dizionari StarDict installati (Impostazioni → Integrazioni) — vedi
 # services/stardict_service.py. Un dizionario è una sottocartella per lingua
 # (es. "it/") con i file .ifo/.idx/.dict(.dz)/.syn dentro.

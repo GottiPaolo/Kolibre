@@ -3,8 +3,6 @@ import os
 import sqlite3
 
 from .functions import register_calibre_functions
-from ..logging_utils import log_message
-
 SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 
 # Label of the always-present, Kolibre-managed "estimated page count" custom
@@ -20,56 +18,25 @@ SCHEMA_PATH = os.path.join(os.path.dirname(__file__), "schema.sql")
 # lavoro da fare una volta sola.
 PAGE_COUNT_COLUMN_LABEL = "pages"
 
-# La colonna DOPPIONE, ritirata il 07/11/2026. Non si crea piu': questa
-# costante resta solo perche' _togli_la_colonna_specchio sappia cosa
-# cancellare dalle biblioteche che ce l'hanno gia'.
+# Le due colonne delle pagine RITIRATE, e di cui qui non resta piu' codice
+# dal 20/11/2026 (revisione del 19/11, punto B4): nessuna biblioteca le ha
+# piu', verificato sul server prima di togliere la pulizia automatica.
+# La STORIA pero' va saputa, perche' spiega la convenzione di `pages`:
 #
-# **Com'era nata.** Portava lo stesso identico numero di `pages`, e la si
-# era creata il 12/09 credendo che Calibre Desktop non riconoscesse `pages`
-# come colonna personalizzata — il pannello «Aggiungi colonne personalizzate»
-# rispondeva «La colonna selezionata non e' una colonna personalizzata».
+#   * `#pagine_stimate`, la GEMELLA (12/09 → 07/11/2026): portava lo stesso
+#     identico numero di `pages`, creata credendo che Calibre Desktop non
+#     riconoscesse `pages` come colonna personalizzata. Interrogando Calibre
+#     con la sua API si e' visto il contrario — e che il `#` nell'etichetta
+#     era contro la convenzione di Calibre (le etichette vere sono nude:
+#     `pages`, `letto`).
+#   * `pagine_stimate`, l'ANTENATA (prima versione di Kolibre): stessa stima
+#     ma con la formula vecchia, rimasta piena dove una `pages` esisteva
+#     gia' quando la migrazione di rinominamento girava.
 #
-# **Perche' era sbagliata.** Il 07/11 l'ho chiesto a Calibre stessa, con la
-# sua API, su una copia della biblioteca dimostrativa:
-#
-#   * `pages` risulta `is_custom: True`, `is_editable: True`, nome di
-#     ricerca `#pages` — identica in forma a `letto`, su cui non abbiamo
-#     mai avuto dubbi;
-#   * questa invece aveva nome di ricerca `##pagine_stimate`, con DUE
-#     cancelletti, perche' Calibre antepone sempre un `#` all'etichetta e
-#     qui l'etichetta un `#` ce l'aveva gia';
-#   * e facendo creare una colonna a Calibre con la sua stessa API,
-#     l'etichetta che scrive e' **nuda**: `prova_di_calibre`, senza
-#     cancelletto. La convenzione vera di Calibre e' quella di `pages` e
-#     `letto`; questa era l'unica delle tre a non rispettarla.
-#
-# Quel messaggio del 12/09 resta non spiegato — l'ipotesi piu' probabile e'
-# che Calibre tenesse in memoria l'elenco delle colonne caricato PRIMA che
-# Kolibre aggiungesse la sua, e che un riavvio l'avrebbe sistemato — ma non
-# giustificava un doppione. Che un doppione fosse un peso lo diceva gia' il
-# codice: Kolibre doveva nasconderlo in due punti di `library.py` per non
-# mostrare due volte lo stesso numero.
-CALIBRE_PAGE_COUNT_COLUMN_LABEL = "#pagine_stimate"
-
-# E l'etichetta che la colonna delle pagine aveva nella PRIMISSIMA versione
-# di Kolibre, prima che si scoprisse che ProjectTitle cerca esattamente
-# "pages". La migrazione di allora rinominava l'etichetta sul posto, cosi'
-# i valori non restavano orfani — ma solo se una `pages` non esisteva gia'.
-# Dove esisteva, la vecchia e' rimasta: piena, e senza piu' nessuno che la
-# leggesse o la scrivesse. Il codice della migrazione e' stato tolto dopo,
-# "perche' aveva gia' fatto il suo lavoro". Trovata il 07/11/2026 in una
-# biblioteca vera, con 1165 valori che non servivano piu' a niente.
-#
-# **Non e' una gemella: e' una versione VECCHIA della stessa stima.** I suoi
-# numeri stanno sistematicamente SOTTO quelli di `pages` — misurato su
-# quella biblioteca: 1066 valori diversi su 1165, con un rapporto fra 0,54
-# e 0,75, perche' la formula di allora contava un numero diverso di
-# caratteri per pagina. Per questo si ritira con una regola diversa da
-# quella della gemella: non si pretende che i valori COMBACINO (non
-# combaciano, ed e' giusto), si pretende che `pages` abbia un valore per
-# ogni libro che ne ha uno qui — cioe' che non si perda niente che non sia
-# gia' coperto da una stima migliore.
-LEGACY_PAGE_COUNT_COLUMN_LABEL = "pagine_stimate"
+# Entrambe venivano cancellate all'apertura di ogni biblioteca, ma solo dopo
+# aver dimostrato che `pages` copriva ogni loro valore (cancellare e'
+# irreversibile). Fatto su tutte le biblioteche reali, quel codice e' stato
+# tolto: un controllo a ogni apertura per un lavoro ormai finito.
 
 # "Letto": l'unico giudice attendibile di un libro finito e' una persona.
 # Vedi _ensure_read_flag_column per il perche' sia binaria e perche' venga
@@ -141,7 +108,7 @@ def bootstrap_library(db_path: str, crea: bool = False) -> None:
     esiste, deve fallire e dirlo.
 
     La RIPARAZIONE di una biblioteca che esiste (colonne mancanti, come
-    `letto` o `pagine_stimate`) continua a girare sempre: e' l'altra meta'
+    `letto` o `pages`) continua a girare sempre: e' l'altra meta'
     del lavoro di questa funzione, e non ha niente a che vedere con la
     creazione.
     """
@@ -219,123 +186,7 @@ def _rinomina_se_e_ancora_quello_di_prima(conn, label, nome_nuovo, display_nuovo
 
 def _ensure_page_count_column(conn: sqlite3.Connection) -> None:
     _ensure_project_title_pages_column(conn)
-    _togli_i_doppioni_delle_pagine(conn)
     _rinomina_se_e_ancora_quello_di_prima(conn, PAGE_COUNT_COLUMN_LABEL, "Pages (estimated)")
-
-
-#: Le colonne delle pagine RITIRATE, e la regola che autorizza a cancellare
-#: ognuna. Cancellare e' irreversibile, quindi la regola non e' un dettaglio:
-#:
-#:   "identica" — la gemella (`#pagine_stimate`). Si scriveva nella stessa
-#:   transazione di `pages`, con lo stesso valore, quindi NON PUO' che
-#:   combaciare: ogni suo valore deve essere presente e identico la'. Se un
-#:   solo libro discorda, qualcosa che non capiamo e' successo, e non si
-#:   cancella niente.
-#:
-#:   "coperta" — l'antenata (`pagine_stimate`). Porta stime vecchie, fatte
-#:   con una formula diversa, quindi pretendere valori identici vorrebbe dire
-#:   non cancellarla mai. Si pretende invece che `pages` abbia un valore per
-#:   OGNI libro che ne ha uno qui: cosi' non si perde nessun libro, si perde
-#:   solo una stima peggiore di quella che resta.
-_COLONNE_RITIRATE_DELLE_PAGINE = (
-    (CALIBRE_PAGE_COUNT_COLUMN_LABEL, "identica"),
-    (LEGACY_PAGE_COUNT_COLUMN_LABEL, "coperta"),
-)
-
-
-def _togli_i_doppioni_delle_pagine(conn: sqlite3.Connection) -> None:
-    """
-    Toglie le colonne delle pagine che Kolibre ha creato e poi abbandonato.
-
-    Gira all'apertura di ogni biblioteca, come gli altri controlli qui
-    intorno, e nella quasi totalita' dei casi non trova niente e costa una
-    SELECT su una riga per etichetta.
-    """
-    for etichetta, regola in _COLONNE_RITIRATE_DELLE_PAGINE:
-        _togli_una_colonna_ritirata(conn, etichetta, regola)
-
-
-def _togli_una_colonna_ritirata(conn: sqlite3.Connection, etichetta: str, regola: str) -> None:
-    """
-    Cancella UNA colonna ritirata, ma solo dopo averlo dimostrato.
-
-    Tre controlli, e ognuno ha un motivo diverso per esistere:
-
-    1. **la forma.** Kolibre queste colonne le ha create intere (`int`, non
-       normalizzate, non multiple). Una colonna con la stessa etichetta ma
-       un'altra forma non e' la nostra: e' di qualcuno, e una colonna
-       normalizzata ha anche le sue tabelle di collegamento, che questa
-       cancellazione non saprebbe ripulire. Si lascia stare.
-    2. **la copertura.** Nessun libro deve avere un valore qui e non in
-       `pages`, altrimenti quel numero sparirebbe e nient'altro lo
-       riporterebbe.
-    3. **l'uguaglianza**, per la sola gemella: vedi
-       _COLONNE_RITIRATE_DELLE_PAGINE.
-
-    Quando non si cancella, il motivo finisce nel registro con i numeri che
-    l'hanno deciso: meglio un doppione in piu' che un numero perso, ma non in
-    silenzio.
-    """
-    vecchia = conn.execute(
-        "SELECT id, datatype, normalized, is_multiple FROM custom_columns WHERE label = ?",
-        (etichetta,),
-    ).fetchone()
-    if vecchia is None:
-        return
-    if (vecchia["datatype"], vecchia["normalized"], vecchia["is_multiple"]) != ("int", 0, 0):
-        log_message(
-            "warning", "calibre",
-            f"The retired page column '{etichetta}' is not the one Kolibre used to create "
-            f"(datatype {vecchia['datatype']}, normalized {vecchia['normalized']}, "
-            f"multiple {vecchia['is_multiple']}): left alone, it belongs to this library.",
-        )
-        return
-
-    pagine = conn.execute(
-        "SELECT id FROM custom_columns WHERE label = ?", (PAGE_COUNT_COLUMN_LABEL,)
-    ).fetchone()
-    if pagine is None:
-        log_message(
-            "warning", "calibre",
-            f"The retired page column '{etichetta}' was found without the "
-            f"'{PAGE_COUNT_COLUMN_LABEL}' column: left alone.",
-        )
-        return
-
-    scoperti = conn.execute(
-        f"SELECT COUNT(*) FROM custom_column_{vecchia['id']} AS v "
-        f"LEFT JOIN custom_column_{pagine['id']} AS p ON p.book = v.book "
-        "WHERE p.value IS NULL"
-    ).fetchone()[0]
-    diversi = conn.execute(
-        f"SELECT COUNT(*) FROM custom_column_{vecchia['id']} AS v "
-        f"JOIN custom_column_{pagine['id']} AS p ON p.book = v.book "
-        "WHERE p.value != v.value"
-    ).fetchone()[0]
-
-    if scoperti:
-        log_message(
-            "warning", "calibre",
-            f"The '{etichetta}' column has a value on {scoperti} book(s) where "
-            f"'{PAGE_COUNT_COLUMN_LABEL}' has none: left alone instead of being removed.",
-        )
-        return
-    if regola == "identica" and diversi:
-        log_message(
-            "warning", "calibre",
-            f"The '{etichetta}' column disagrees with '{PAGE_COUNT_COLUMN_LABEL}' on "
-            f"{diversi} book(s): left alone instead of being removed.",
-        )
-        return
-
-    conn.execute(f"DROP TABLE IF EXISTS custom_column_{vecchia['id']}")
-    conn.execute("DELETE FROM custom_columns WHERE id = ?", (vecchia["id"],))
-    log_message(
-        "info", "calibre",
-        f"Removed the retired page column '{etichetta}' "
-        f"({diversi} superseded value(s), every book already covered by "
-        f"'{PAGE_COUNT_COLUMN_LABEL}').",
-    )
 
 
 def _ensure_project_title_pages_column(conn: sqlite3.Connection) -> int:
@@ -412,8 +263,9 @@ def page_count_fields(pages) -> dict:
     """
     update_book()-ready {field_key: value} per la colonna delle pagine.
 
-    Una sola colonna dal 07/11/2026: la gemella e' stata ritirata (vedi
-    CALIBRE_PAGE_COUNT_COLUMN_LABEL). Resta una funzione invece di un
+    Una sola colonna dal 07/11/2026: la gemella `#pagine_stimate` e' stata
+    ritirata (la storia sta nel commento in testa a questo file, sotto
+    PAGE_COUNT_COLUMN_LABEL). Resta una funzione invece di un
     dizionario scritto a mano in ognuno dei cinque punti che la chiamano,
     perche' il nome del campo lo deve sapere un posto solo.
 

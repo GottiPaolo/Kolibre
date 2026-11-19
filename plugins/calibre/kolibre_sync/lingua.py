@@ -47,13 +47,20 @@ _ACTIVE_LANG = 'en'
 
 _it = {
     # __init__.py (metadata letta dal loader dei plugin Calibre)
+    #
+    # «Manda», non «sincronizza» (20/11/2026): la sincronizzazione con
+    # Calibre e' deprecata dal 14/11 — l'accoppiamento non esiste piu' dal
+    # 28/09 (vedi la nota in cima a main_dialog.py) — e questi due testi
+    # erano gli ultimi a presentare il plugin come un sincronizzatore.
+    # Descrivono quello che il plugin fa oggi: manda, e scarica una copia.
     'calibre.plugin.description': (
-        'Sincronizza intere librerie (libri, colonne personalizzate, indice '
-        'di ricerca full-text) tra Calibre Desktop e un server Kolibre.'
+        'Manda libri e intere librerie (colonne personalizzate e indice di '
+        'ricerca full-text compresi) da Calibre Desktop a un server Kolibre, '
+        'e scarica una copia delle biblioteche del server.'
     ),
 
     # action.py
-    'calibre.action.tooltip': 'Sincronizza librerie con il server Kolibre',
+    'calibre.action.tooltip': 'Manda libri e librerie al server Kolibre',
     'calibre.action.menu_send_to_library': 'Invia a libreria Kolibre…',
     'calibre.action.menu_send_and_delete': 'Invia a Kolibre ed elimina da qui…',
     'calibre.send_and_delete.confirm_title': 'Invia ed elimina',
@@ -231,14 +238,16 @@ _it = {
 }
 
 _en = {
-    # __init__.py
+    # __init__.py — "sends", not "syncs": see the dated note on the Italian
+    # catalog's twin entry above.
     'calibre.plugin.description': (
-        'Syncs whole libraries (books, custom columns, full-text search '
-        'index) between Calibre Desktop and a Kolibre server.'
+        'Sends books and whole libraries (custom columns and full-text '
+        'search index included) from Calibre Desktop to a Kolibre server, '
+        "and downloads a copy of the server's libraries."
     ),
 
     # action.py
-    'calibre.action.tooltip': 'Sync libraries with the Kolibre server',
+    'calibre.action.tooltip': 'Send books and libraries to the Kolibre server',
     'calibre.action.menu_send_to_library': 'Send to Kolibre library…',
     'calibre.action.menu_send_and_delete': 'Send to Kolibre and delete from here…',
     'calibre.send_and_delete.confirm_title': 'Send and delete',
