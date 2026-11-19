@@ -108,3 +108,27 @@ export async function setAuthorsPagination(value: Partial<LibraryPagination>): P
   if (error) throw error
   return data
 }
+
+// ── Il conteggio pagine dentro il file EPUB ──────────────────────────────
+//
+// SPENTO di default dal 19/11/2026, e destinato a sparire. Scrivere la stima
+// dentro l'EPUB ricostruisce lo zip: il file diventa un altro file, con
+// un'altra impronta — ed e' da li' che veniva il difetto delle 107 consegne
+// che portavano l'impronta di un file che non esisteva piu'. Serve soltanto
+// a Project Title, il cover browser di terze parti che quel numero lo legge
+// da dentro il libro; la UI di Kolibre su KOReader lo riceve nel manifesto.
+// Vedi INCORPORA_PAGINE_KEY in backend/app/services/app_settings.py.
+
+export async function getIncorporaPagine(): Promise<boolean> {
+  const { data, error } = await api.GET('/api/kolibre/settings/incorpora-pagine')
+  if (error) throw error
+  return data.enabled
+}
+
+export async function setIncorporaPagine(enabled: boolean): Promise<boolean> {
+  const { data, error } = await api.PUT('/api/kolibre/settings/incorpora-pagine', {
+    body: { enabled },
+  })
+  if (error) throw error
+  return data.enabled
+}

@@ -85,6 +85,57 @@ def _xpointer_anchor(doc: ChapterDocument, pos: str, exclusive_end: bool):
     return _StructuralAnchor(doc.index.collapsed_for_run_offset(run, parsed.offset), within_range)
 
 
+def xpointer_al_carattere(doc: ChapterDocument, pos: str, fine: bool = False):
+    """
+    A quale CARATTERE del capitolo punta un xpointer di crengine.
+
+    Torna la posizione nella vista collassata del capitolo (`ChapterTextIndex`,
+    che collassa gli spazi come fa crengine e salta i marcatori del numero di
+    pagina del cartaceo), oppure None se l'indirizzo non si risolve.
+
+    **Esiste come funzione pubblica** perche' serve fuori da qui: la misura
+    delle letture in caratteri (`services/letture_service.py`) ha bisogno
+    esattamente di questo, e prima l'unico modo di averlo era chiamare
+    `_xpointer_anchor`, che e' privata. Una funzione privata usata da un altro
+    modulo e' una dipendenza che nessuno vede quando cambia.
+
+    `fine=True` chiede il confine DESTRO di un intervallo: un xpointer senza
+    offset che delimita la fine indica tutto il nodo, non il suo inizio.
+    """
+    ancora = _xpointer_anchor(doc, pos, fine)
+    if ancora is None or ancora.cp is None:
+        return None
+    return ancora.cp
+
+
+def xpointer_punta_al_testo(doc: ChapterDocument, pos: str) -> bool:
+    """
+    L'indirizzo esiste nel capitolo ma non c'e' testo dove punta?
+
+    Torna True se l'elemento si trova **e** ha del testo, False altrimenti.
+    Serve a distinguere due cose che `xpointer_al_carattere` confonde in un
+    None solo, e che hanno rimedi opposti:
+
+      * l'indirizzo non si risolve (capitolo sbagliato, struttura cambiata):
+        qualcosa non torna, e riprovare un giorno puo' avere senso;
+      * l'indirizzo si risolve ma **li' non c'e' testo**. E' il caso della
+        prima pagina di quasi ogni EPUB, dove la pagina e' la copertina:
+        `/body/DocFragment[1]/body/div/img.0` o `.../svg.0`. Misurato sui
+        primi dati veri del 19/11/2026: 7 righe su 25 erano cosi', e
+        chiamarle «fallite» voleva dire sia una parola falsa, sia far
+        riprovare in eterno a chi ritenta le fallite.
+    """
+    parsed = parse_xpointer(pos)
+    if not parsed:
+        return False
+    element = resolve_xpointer_element(doc.root, parsed.steps)
+    if element is None:
+        return False
+    if doc.index.runs_of_parent(element):
+        return True
+    return doc.index.first_run_within(element) is not None
+
+
 def xpointer_range_to_cfi(doc: ChapterDocument, chapter_index: int, pos0: str, pos1, text) -> ConversionResult:
     """
     Converts a KOReader xpointer range to a CFI range. Mirrors BookOrbit's

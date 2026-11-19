@@ -131,7 +131,14 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
   const [periodo, setPeriodo] = useState<Periodo>('sempre')
   // Una misura sola per i due istogrammi: sono due tagli della stessa domanda,
   // e cambiarne una sola darebbe due unità nella stessa schermata.
-  const [misura, setMisura] = useState<Misura>('minuti')
+  // **I caratteri per difetto, non i minuti** (Paolo, 19/11/2026). Un'ora
+  // passata su un saggio rileggendo lo stesso capitolo e un'ora passata su un
+  // romanzo sono lo stesso numero di minuti e una quantità di libro molto
+  // diversa: il tempo misura quanto ci hai messo, i caratteri misurano quanto
+  // hai letto, e la seconda è la domanda che si fa più spesso. Il tempo resta
+  // a un clic, perché per «quando leggo» e «per quanto alla volta» è lui la
+  // risposta giusta.
+  const [misura, setMisura] = useState<Misura>('caratteri')
 
   // Un periodo solo per tutta la pagina.
   //
@@ -194,8 +201,8 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
   const monthKeys = useMemo(() => Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')), [])
   const monthDatasets = useMemo(() => {
     const sessionsInYear = raw.filter((s) => s.date.startsWith(String(monthYear)))
-    return buildStackedByBookDatasets(monthKeys, sessionsInYear, (s) => s.date.slice(5, 7), t)
-  }, [raw, monthYear, monthKeys, t])
+    return buildStackedByBookDatasets(monthKeys, sessionsInYear, (s) => s.date.slice(5, 7), t, misura)
+  }, [raw, monthYear, monthKeys, t, misura])
 
   const peakHours = useMemo(() => peakHoursBuckets(rawPeriodo, t), [rawPeriodo, t])
   const streak = useMemo(() => currentStreakDays(raw), [raw])
@@ -376,9 +383,16 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
 
       {isVisible('monthlyHours') && (
         <ChartCard
-          title={t('stats.reading.monthlyHoursTitle')}
+          title={t('stats.reading.monthlyTitle', {
+            unit: misura === 'caratteri' ? t('stats.reading.unit.chars') : t('stats.reading.unit.minutes'),
+          })}
           action={
+            // Lo stesso interruttore degli altri due, e la stessa `misura`:
+            // questo grafico era l'unico fermo sul tempo, col titolo che
+            // diceva «Ore» e l'unità scritta a mano. Tre tagli della stessa
+            // domanda che rispondono in due misure diverse erano una trappola.
             <div className="flex items-center gap-2">
+              <ScambiaMisura misura={misura} onChange={setMisura} />
               <Button variant="outline" size="xs" onClick={() => setYearOffset((o) => o - 1)}>
                 {t('stats.calendar.prev')}
               </Button>
@@ -389,7 +403,7 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
             </div>
           }
         >
-          <BarChart labels={monthLabels(t)} datasets={monthDatasets} stacked yUnit="min" height={260} />
+          <BarChart labels={monthLabels(t)} datasets={monthDatasets} stacked yUnit={unitaMisura(misura)} height={260} />
         </ChartCard>
       )}
 

@@ -185,28 +185,81 @@ function KolibreCopertine.daScaricare(cartella, voci, quante, falliti)
     return coda
 end
 
---- Butta le copertine piu' vecchie quando sono troppe.
+--- I percorsi delle copertine che la potatura non deve toccare.
+--
+-- Prende le voci del manifesto — cioe' i libri che stanno DAVVERO sul
+-- dispositivo — e torna `{[percorso] = true}`.
+--
+-- Non guarda se il file c'e' davvero: un percorso di troppo in questa
+-- tabella non costa niente (la potatura lo cerca, non lo trova e tira
+-- avanti), mentre chiedere al disco per ogni voce del manifesto sarebbe una
+-- camminata in piu' per nulla.
+--
+-- Le voci senza `calibre_book_id` — quelle nate da un accoppiamento per
+-- impronta, che il server non ha ancora riconosciuto — non hanno una
+-- copertina in cache, perche' la chiave della copertina e' `biblioteca:id`:
+-- per loro non c'e' niente da proteggere.
+function KolibreCopertine.daProteggere(cartella, voci)
+    local protetti = {}
+    if type(cartella) ~= "string" or cartella == "" then return protetti end
+    for _chiave, voce in pairs(voci or {}) do
+        if type(voce) == "table" and voce.calibre_book_id then
+            local percorso = KolibreCopertine.percorso(cartella, voce.library, voce.calibre_book_id)
+            if percorso then protetti[percorso] = true end
+        end
+    end
+    return protetti
+end
+
+--- Butta le copertine piu' vecchie quando sono troppe, saltando le protette.
 --
 -- Una passata sola, dalla piu' vecchia: non e' un sistema di scadenze ed e'
 -- voluto. Le copertine sono roba che si riscarica in un secondo, e il
 -- lavoro di tenere conti precisi costerebbe piu' di quello che fa risparmiare.
-function KolibreCopertine.pota(cartella)
+--
+-- **`protetti`: i file che non si buttano mai**, nella forma che torna
+-- `daProteggere`. Senza di lei la potatura guarda solo l'orologio, e
+-- l'orologio non sa la differenza fra la copertina di un libro che Paolo ha
+-- in mano e quella di un libro guardato di sfuggita nel catalogo: una
+-- passeggiata in una biblioteca grossa buttava le prime, e la vista libreria
+-- le riscaricava alla sincronizzazione dopo — all'infinito, a giro di rete
+-- ogni volta. Alzare il tetto da 300 a 600 (il 15/11/2026) era la toppa che
+-- fermava il giro; **questa e' la regola**, ed e' quella che era "in lista"
+-- nel commento in testa a `kolibre_catalog.lua`.
+--
+-- `protetti` e' facoltativa, e chi non la passa ha la potatura di prima: un
+-- chiamante che non sa niente del manifesto non deve rompersi. Ma i due
+-- chiamanti veri la passano tutti e due, ed e' il punto.
+--
+-- **Il tetto si conta su TUTTI i file, protetti compresi**, perche' quel
+-- numero misura lo spazio occupato e non quello liberabile. Quindi se i
+-- protetti da soli superano il tetto non si butta niente — e va bene cosi':
+-- una cache piu' grande del previsto e' un prezzo in spazio, pagato una
+-- volta, mentre buttare la copertina di un libro che e' sul dispositivo e'
+-- un giro di rete a ogni sincronizzazione, per sempre.
+function KolibreCopertine.pota(cartella, protetti)
     if type(cartella) ~= "string" or cartella == "" then return 0 end
+    protetti = type(protetti) == "table" and protetti or {}
     local ok, iteratore, oggetto = pcall(lfs.dir, cartella)
     if not ok or not iteratore then return 0 end
-    local file = {}
+    local quanti, potabili = 0, {}
     for voce in iteratore, oggetto do
         if voce ~= "." and voce ~= ".." then
             local pieno = cartella .. "/" .. voce
             local quando = lfs.attributes(pieno, "modification")
-            if quando then table.insert(file, { percorso = pieno, quando = quando }) end
+            if quando then
+                quanti = quanti + 1
+                if not protetti[pieno] then
+                    table.insert(potabili, { percorso = pieno, quando = quando })
+                end
+            end
         end
     end
-    if #file <= KolibreCopertine.MAX_IN_CACHE then return 0 end
-    table.sort(file, function(a, b) return a.quando < b.quando end)
+    if quanti <= KolibreCopertine.MAX_IN_CACHE then return 0 end
+    table.sort(potabili, function(a, b) return a.quando < b.quando end)
     local buttati = 0
-    for i = 1, (#file - KolibreCopertine.DOPO_LA_POTATURA) do
-        if os.remove(file[i].percorso) then buttati = buttati + 1 end
+    for i = 1, math.min(#potabili, quanti - KolibreCopertine.DOPO_LA_POTATURA) do
+        if os.remove(potabili[i].percorso) then buttati = buttati + 1 end
     end
     return buttati
 end

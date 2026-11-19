@@ -72,8 +72,9 @@ in tutte e quattro le biblioteche.
 Non e' un difetto nuovo, e' quel comportamento applicato a righe che prima non
 lo avevano. **E si chiude da se' nel momento in cui Paolo riaccoppia o scarta
 quelle sessioni dal sito**, che e' esattamente il motivo per cui le si sposta
-la'. C'e' una prova che misura tutte e due le cose
-(`backend/prove/le_sessioni_senza_libro.py`).
+la'. C'e' una prova che misura tutte e due le cose — il totale globale che non
+si muove, e il riassunto dell'altra biblioteca che cresce dei minuti
+spostati.
 
 ────────────────────────────────────────────────────────────────────────────
 LE DUE REGOLE DI SICUREZZA

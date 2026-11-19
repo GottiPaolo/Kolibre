@@ -155,9 +155,9 @@ export function BookDetailPage() {
           copiare un brano — prendersi anche quello sarebbe togliere un gesto
           invece di darne uno.
 
-          **E questo non diventerà un pulsante «Azioni»**: Paolo ha detto che
-          a breve sarà un pannello più dettagliato. Vedi la sua voce nel
-          ROADMAP. */}
+          **E questo non diventerà un pulsante «Azioni»**: Paolo ha deciso il
+          17/11/2026 che a breve diventerà un pannello più dettagliato, quindi
+          non si rifà la barra per una cosa che verrà sostituita. */}
       <BookContextMenu book={book}>
       <div className="flex gap-5">
         {/* self-start: senza, questo box (cross-axis di un flex row) viene

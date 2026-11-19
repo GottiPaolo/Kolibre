@@ -81,6 +81,13 @@ export type ChartBuilderAgg = 'sum' | 'avg' | 'min' | 'max'
 export type ChartBuilderMetric =
   | 'duration_sum' | 'session_count' | 'pages_sum' // legacy
   | `duration:${ChartBuilderAgg}` | `pages_read:${ChartBuilderAgg}`
+  // `chars_read` mancava, e il tipo diceva una cosa falsa: l'elenco delle
+  // variabili dell'asse Y la offre da sempre (vedi `yVarOptions`), quindi
+  // scegliendo «caratteri letti» il costruttore produceva una stringa che
+  // questo tipo non ammetteva. Funzionava, perche' a tempo d'esecuzione e'
+  // solo una stringa — ma era il controllo dei tipi a non poter piu' aiutare
+  // nessuno proprio su una misura che diventa quella principale (19/11/2026).
+  | `chars_read:${ChartBuilderAgg}`
   | 'distinct_books' | 'distinct_authors'
 
 // v3: filtri = albero di regole AND/OR annidato (vedi filterTree.ts) invece

@@ -2004,3 +2004,137 @@ class InvitoDiAccoppiamento(Base):
     #: che ha prodotto (e viceversa, quando si guarda un token e si vuole
     #: sapere da dove e' venuto).
     token_applicazione_id = Column(Integer, nullable=True)
+
+
+class LetturaDiPagina(Base):
+    """
+    Una pagina letta, o un popup di nota tenuto aperto, misurato in CARATTERI.
+
+    **Perche' questa tabella esiste** (decisione del 19/11/2026, con Paolo).
+    Le pagine di KOReader non sono un'unita' di misura: dipendono dal corpo
+    del carattere, e su dati veri un'opera in piu' volumi ha dodici
+    impaginazioni in cronologia, da 2.687 a 7.342 pagine. Fino a oggi i
+    caratteri letti erano una MEDIA — `ReadingSession.fraction_read` somma
+    `1/total_pages`, cioe' presume che ogni pagina contenga lo stesso testo —
+    e quella presunzione sbaglia su ogni apertura di capitolo, ogni pagina di
+    versi, ogni immagine. Misurato sul libro vero: la pagina 12 su 248 de «La
+    linea d'ombra» e' il 4,8% del libro contando le pagine e l'1,8% contandone
+    i caratteri.
+
+    **Qui ci sono le righe GREZZE, una per pagina visitata**, e le sessioni
+    (`ReadingSession`) continuano a essere derivate dal raggruppamento a 15
+    minuti. La scelta e' deliberata: una regola di raggruppamento diversa, o
+    un indice del testo migliore, si riapplicano a tutto lo storico solo se le
+    righe ci sono ancora. Tenere soltanto il risultato sulla sessione
+    renderebbe ogni misura definitiva nel momento in cui viene scritta.
+
+    **Il dispositivo manda le POSIZIONI, il server conta i caratteri.**
+    `xp_inizio` e `xp_fine` sono gli xpointer di crengine, cioe' indirizzi nel
+    testo del libro, indipendenti dall'impaginazione. Il carattere assoluto
+    (`carattere_inizio`/`carattere_fine`) lo calcola il server con l'indice
+    che usa gia' per le note (`services/position_converter/`). Cosi' la PROVA
+    resta: se l'indice migliora, lo storico si ricalcola. Vedi la testa di
+    `plugins/koreader/kolibre.koplugin/kolibre_letture.lua` per il resto del
+    ragionamento, compreso perche' non si fa scandire il libro al lettore.
+
+    **`caratteri_dal_dispositivo` e il doppio conteggio.** Il lettore manda
+    anche quanti caratteri crengine dice che ci sono fra i due xpointer, e
+    costa una chiamata sola. Non e' un di piu': le due misure dello stesso
+    tratto di testo devono tornare, e se un giorno divergono lo si sa da dati
+    veri invece che da un ragionamento. I due totali NON sono la stessa cosa e
+    non si mescolano — misurato: 314.361 caratteri nella vista collassata del
+    nostro indice contro i 327.577 di `BookTextStats`, che toglie i tag con
+    un'espressione regolare e lascia dentro spazi non collassati, marcatori di
+    pagina del cartaceo e apparato. Una percentuale fatta con l'intervallo di
+    una misura e il totale dell'altra e' sbagliata del 4% e niente lo segnala.
+
+    **`caratteri_del_libro` sta su ogni riga** e non in una tabella a parte:
+    un intero per riga in cambio di una riga che si spiega da sola, cioe' «di
+    questo libro, lungo tanto, ho letto da qui a qui». Senza, una riga vecchia
+    non sarebbe piu' interpretabile dopo che il libro e' stato sostituito.
+    """
+    __tablename__ = "letture_di_pagina"
+    #: **L'idempotenza, e il suo limite dichiarato.** Il lettore rimanda le
+    #: righe da una filigrana arretrata di un giorno, quindi i doppioni sono
+    #: la norma e vanno buttati: due invii non devono raddoppiare il tempo di
+    #: lettura. La chiave e' la stessa che usa KOReader per le sue
+    #: (`UNIQUE (id_book, page, start_time)`), con il genere in piu'. Il
+    #: limite che si accetta: due popup di nota aperti nello STESSO secondo
+    #: sulla stessa pagina — possibile solo annidando una nota dentro
+    #: l'altra — diventano una riga sola. Perdere qualche secondo su una nota
+    #: annidata e' meno grave che contare due volte una lettura.
+    __table_args__ = (
+        UniqueConstraint("device_id", "genere", "istante", "pagina"),
+    )
+
+    PAGINA = "p"
+    NOTA = "n"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"),
+                     nullable=False, index=True)
+    device_id = Column(Integer, ForeignKey("devices.id", ondelete="CASCADE"),
+                       nullable=False, index=True)
+
+    #: 'p' una pagina letta, 'n' un popup di nota tenuto aperto. Leggere una
+    #: nota in popup NON gira pagina: KOReader quel tempo lo somma alla pagina
+    #: dove sei fermo, e su un libro con l'apparato di note questo fa sembrare
+    #: la lettura piu' lenta di com'e'. Separarlo lo rende un dato suo.
+    genere = Column(String, nullable=False, default=PAGINA)
+
+    #: Quando la pagina e' stata APERTA (o il popup), in UTC — convertito con
+    #: `datetime.utcfromtimestamp` dall'istante epoch del lettore, come fa
+    #: gia' `stats_service` per le sessioni. Lo stesso orologio di
+    #: `ReadingSession`, quindi le due cose si mettono sulla stessa linea del
+    #: tempo senza correzioni.
+    istante = Column(DateTime, nullable=False, index=True)
+    #: Secondi. E' la durata VERA: tagliare qui una pagina lasciata aperta la
+    #: notte vorrebbe dire perdere il dato grezzo per sempre. La soglia la
+    #: decide chi deriva le sessioni, dove si puo' cambiare idea.
+    durata = Column(Integer, nullable=False, default=0)
+
+    pagina = Column(Integer, nullable=True)
+    #: Quante pagine aveva il libro in QUEL momento, con quelle impostazioni:
+    #: serve a riconoscere un cambio di impaginazione, non a misurare.
+    totale_pagine = Column(Integer, nullable=True)
+
+    xp_inizio = Column(String, nullable=True)
+    #: Vuoto sull'ULTIMA pagina di un libro, dove non esiste «l'inizio della
+    #: pagina dopo». Non e' un difetto: il tempo passato sull'ultima pagina —
+    #: cioe' sul finale di ogni libro finito — e' un dato che vale, e si tiene
+    #: con la sola posizione di inizio.
+    xp_fine = Column(String, nullable=True)
+    caratteri_dal_dispositivo = Column(Integer, nullable=True)
+
+    #: L'impronta del file sul lettore (partial-MD5, la stessa con cui si
+    #: risolvono le annotazioni). Serve quando biblioteca e id non si sanno:
+    #: un libro che il manifesto del dispositivo non conosce si misura
+    #: comunque, e si risolve dopo.
+    impronta = Column(String, nullable=True, index=True)
+    library = Column(String, nullable=True, index=True)
+    calibre_book_id = Column(Integer, nullable=True, index=True)
+
+    #: Il carattere assoluto nel libro, calcolato dal server dagli xpointer.
+    carattere_inizio = Column(Integer, nullable=True)
+    carattere_fine = Column(Integer, nullable=True)
+    #: Il totale del libro NELLA STESSA misura dei due numeri qui sopra: il
+    #: denominatore con cui si fanno le percentuali di questa riga, e l'unico
+    #: con cui e' lecito farle.
+    caratteri_del_libro = Column(Integer, nullable=True)
+
+    #: None = conversione mai tentata; 'exact' = i caratteri sono usabili;
+    #: 'senza_testo' = l'indirizzo si risolve ma dove punta non c'e' testo —
+    #: la pagina e' la copertina (`.../div/img.0`, `.../div/svg.0`) o un
+    #: divisorio vuoto, ed e' il caso della prima pagina di quasi ogni EPUB:
+    #: sui primi 25 dati veri erano 7 righe. Il tempo resta registrato perche'
+    #: e' vero, i caratteri restano vuoti perche' sono zero;
+    #: 'libro_assente' = il libro non e' piu' in biblioteca, o non e' un EPUB;
+    #: 'failed' = tentata e non riuscita. Stessa trafila di
+    #: `Highlight.position_status`, e per la stessa ragione: un EPUB mancante
+    #: o un xpointer che non si risolve non deve far rifare lo stesso lavoro
+    #: inutile a ogni giro, ma la riga resta con le sue posizioni e si potra'
+    #: riprovare quando l'indice migliora.
+    stato_conversione = Column(String, nullable=True, index=True)
+    convertita_il = Column(DateTime, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)

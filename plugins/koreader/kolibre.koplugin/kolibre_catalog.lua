@@ -58,9 +58,10 @@ local THUMBNAIL_BATCH_SIZE = 2
 -- costa poco da guardare e ordinare, e questo gira una volta per apertura
 -- del catalogo, non a ogni disegno.
 --
--- La regola migliore sarebbe «non buttare mai la copertina di un libro che
--- e' nel manifesto», ed e' in lista; alzare il tetto perche' ci stiano tutti
--- e due i casi costa una riga, e intanto il giro infinito non c'e' piu'.
+-- **La regola «non buttare mai la copertina di un libro che e' nel
+-- manifesto» c'e' dal 19/11/2026**, e sta in `KolibreCopertine.daProteggere`.
+-- Il tetto alto resta: era la toppa che fermava il giro infinito, ed e'
+-- comunque la misura giusta ora che una cache sola serve a due viste.
 
 local KolibreCatalog = Menu:extend{
     is_borderless = true,
@@ -181,8 +182,20 @@ end
 -- `kolibre_copertine.lua`, che e' la stessa potatura che usa la vista
 -- libreria. Vedi il commento ai tetti, in testa a questo file, per il
 -- perche' non e' l'eviction incrementale di BookOrbit.
+-- `manifest` arriva da `main.lua` (i tre punti che aprono un catalogo), e se
+-- manca la potatura e' quella di prima: il catalogo deve poter funzionare
+-- anche senza, perche' non e' lui a tenere il manifesto. Ma quando c'e' —
+-- cioe' sempre, in opera — le copertine dei libri sul dispositivo sono
+-- protette, ed e' il punto che conta: questa potatura gira a OGNI pagina
+-- della griglia che si guarda, quindi era lei a buttare le copertine della
+-- vista libreria.
 function KolibreCatalog:pruneThumbnailCache()
-    return KolibreCopertine.pota(self.thumbnail_cache_dir)
+    local protetti
+    if self.manifest and type(self.manifest.all) == "function" then
+        protetti = KolibreCopertine.daProteggere(
+            self.thumbnail_cache_dir, self.manifest:all())
+    end
+    return KolibreCopertine.pota(self.thumbnail_cache_dir, protetti)
 end
 
 function KolibreCatalog:scheduleThumbnailDownloads(items)

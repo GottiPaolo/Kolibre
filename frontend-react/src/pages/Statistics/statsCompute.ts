@@ -116,7 +116,11 @@ export function buildStackedByBookDatasets(
   sessions: ReadingSessionRaw[],
   keyFn: (s: ReadingSessionRaw) => string,
   t: Traduci,
-  misura: Misura = 'minuti'
+  // I caratteri per difetto (19/11/2026): la misura principale delle
+  // statistiche sono loro, e un valore di partenza diverso da quello che le
+  // viste scelgono sarebbe una trappola per il prossimo che chiama questa
+  // funzione senza passare la misura.
+  misura: Misura = 'caratteri'
 ): StackedDataset[] {
   const other = t('stats.other')
   const inPeriod = sessions.filter((s) => dayKeys.includes(keyFn(s)))

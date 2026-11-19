@@ -376,9 +376,17 @@ def chiudi_i_formati(
     spezzerebbe.
     """
     from . import opf_metadata  # locale: opf_metadata carica CalibreLibrary
+    from . import app_settings
 
+    # **Il conteggio si scrive dentro il file solo se l'impostazione e'
+    # accesa, e di default e' SPENTA** (19/11/2026). Il perche' sta per
+    # intero accanto a `INCORPORA_PAGINE_KEY` in `app_settings.py`; qui
+    # basta la conseguenza: a interruttore spento questa funzione **non
+    # tocca nessun file**, e le impronte che registra sotto descrivono i
+    # file come sono arrivati. Resta l'unico posto da cui si passa, quindi
+    # resta l'unico posto che deve saperlo.
     incorporato = False
-    if pagine is not None and formato_preferito:
+    if pagine is not None and formato_preferito and app_settings.is_incorpora_pagine_enabled(db):
         percorso = percorsi_per_formato.get(formato_preferito)
         if percorso:
             # Best-effort per scelta, come alla sua chiamata precedente: un

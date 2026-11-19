@@ -62,7 +62,13 @@ export const DEFAULT_CHART_BUILDER_CONFIG: ChartBuilderConfig = {
   chartType: 'bar',
   dataSource: 'raw',
   groupBy: 'week',
-  metric: 'duration:sum',
+  // **I caratteri, non la durata** (Paolo, 19/11/2026): la misura principale
+  // delle statistiche sono i caratteri letti, e un grafico nuovo deve nascere
+  // con quella. Vale per i grafici NUOVI: quelli già salvati portano la
+  // propria misura e non vengono toccati, e la sorgente «timeline» offre solo
+  // la durata — se la si scegliesse, `ChartBuilderPage` ripara da sé la
+  // misura a una valida (vedi il suo useEffect sulle yVar valide).
+  metric: 'chars_read:sum',
   groupBySecondary: null,
   chartMode: 'grouped',
   filters: emptyFilterGroup(),

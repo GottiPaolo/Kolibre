@@ -4369,6 +4369,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/settings/incorpora-pagine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Incorpora Pagine Setting */
+        get: operations["get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get"];
+        /** Update Incorpora Pagine Setting */
+        put: operations["update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/settings/opds-feed": {
         parameters: {
             query?: never;
@@ -18075,6 +18093,74 @@ export interface operations {
         };
     };
     update_auto_wiki_scrape_setting_api_kolibre_settings_auto_wiki_scrape_put: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Interruttore"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Interruttore"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put: {
         parameters: {
             query?: {
                 token?: string | null;

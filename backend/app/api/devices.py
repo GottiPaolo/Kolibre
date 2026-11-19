@@ -29,8 +29,8 @@ from ..calibre.connection import PAGE_COUNT_COLUMN_LABEL
 from ..services import identita_durevole
 from ..services.position_converter.chapter_resolver import resolve_epub_chapter_path, resolve_pdf_chapter_path
 from ..services import (book_hash_service, highlight_position, inventario_dispositivo,
-                        patch_koreader, permessi, stardict_service, stats_service,
-                        text_fingerprint, vocabulary_service)
+                        letture_service, patch_koreader, permessi, stardict_service,
+                        stats_service, text_fingerprint, vocabulary_service)
 from ..schemas_risposte import (
     AnnotazioniRicevute, AnnotazioniRiconciliate, AzioneAccodata, AzioniAccodate,
     AzioniSuFileConfermate, BackupRicevuto, BibliotecaPerIlDispositivo,
@@ -43,6 +43,7 @@ from ..schemas_risposte import (
     InventarioDelDispositivo, InventarioRicevuto,
     ScansioneDeiNonAccoppiati, SegnalazioneAccoppiataDaSola, SessioneChiusa,
     SezioneDelCatalogo, SincronizzazioneConfermata, SincronizzazioneNelloStorico,
+    LettureCucite, StatoDelleLetture,
     StatisticheCucite, StatisticheDaRifare, StatoDeiBackup, StatoDelleStatistiche,
     VocabolarioDimenticato,
 )
@@ -3296,6 +3297,89 @@ def upload_stats_incremental(
             log_message("warning", "backup", f"Incremental processing failed: {e}")
 
     return {"status": "ok", "righe_aggiunte": esito["righe_aggiunte"], "stats": riassunto}
+
+
+@sync_router.get(
+    "/caratteri/state",
+    responses={200: {"model": StatoDelleLetture}},
+)
+def device_letture_state(
+    db: Session = Depends(database.get_db),
+    current_device: models.Device = Depends(auth.get_current_device),
+):
+    """
+    Da quale istante il dispositivo deve mandare le letture misurate in
+    caratteri.
+
+    Vedi `letture_service.stato_letture`: "da" e' l'ultimo istante noto meno
+    una finestra di sovrapposizione di un giorno, non l'ultimo istante secco —
+    una riga viene scritta quando la pagina viene LASCIATA, e un lettore puo'
+    restare spento in mezzo.
+
+    **Questa rotta esiste anche per dire al plugin che il server sa riceverle:**
+    un plugin piu' nuovo del server trova un 404 e tiene le sue righe invece
+    di buttarle.
+    """
+    return letture_service.stato_letture(db, current_device.id)
+
+
+@sync_router.post(
+    "/caratteri/incremental",
+    responses={200: {"model": LettureCucite}},
+)
+def upload_letture_incremental(
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    current_device: models.Device = Depends(auth.get_current_device),
+):
+    """
+    Le letture misurate in caratteri che il dispositivo ha e il server no.
+
+    Una riga per pagina visitata — quando, per quanto, da quale carattere a
+    quale — piu' una per ogni popup di nota tenuto aperto. Le posizioni sono
+    xpointer di crengine; il carattere assoluto lo calcola il server
+    (`letture_service.converti_le_letture`), e questo e' il punto dell'intero
+    disegno: la PROVA resta nel database, quindi se l'indice del testo
+    migliora lo storico si ricalcola. Vedi la testa di `letture_service.py`.
+
+    La conversione si fa **subito dopo**, sul lotto appena arrivato, e non e'
+    bloccante per la risposta nel senso che conta: se fallisce, le righe
+    restano con `stato_conversione` vuoto e il giro successivo le riprende.
+    Una conversione che fallisce non deve far fallire una consegna riuscita.
+    """
+    esito = letture_service.cuci_letture(db, current_device, payload)
+    if esito["motivo"]:
+        log_message("info", "backup",
+                    f"Reading rows from '{current_device.name}' refused: {esito['motivo']}")
+        db.rollback()
+        return {"status": "ok", "righe_aggiunte": 0, "doppioni": 0,
+                "rifiutate": esito["rifiutate"], "filigrana": esito["filigrana"],
+                "motivo": esito["motivo"]}
+
+    db.commit()
+    if esito["righe_aggiunte"]:
+        current_device.last_backup_at = datetime.utcnow()
+        db.commit()
+        try:
+            conversione = letture_service.converti_le_letture(db)
+            log_message(
+                "info", "backup",
+                f"Reading rows from '{current_device.name}': "
+                f"{esito['righe_aggiunte']} new, {esito['doppioni']} already had, "
+                f"{conversione['convertite']} resolved into characters "
+                f"over {conversione['libri']} book(s)",
+            )
+        except Exception as e:  # noqa: BLE001
+            log_message("warning", "backup", f"Resolving reading rows into characters failed: {e}")
+
+    return {
+        "status": "ok",
+        "righe_aggiunte": esito["righe_aggiunte"],
+        "doppioni": esito["doppioni"],
+        "rifiutate": esito["rifiutate"],
+        "filigrana": esito["filigrana"],
+        "righe_in_tutto": esito.get("righe_in_tutto"),
+    }
 
 
 @sync_router.post(

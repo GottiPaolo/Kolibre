@@ -2239,6 +2239,47 @@ class StatisticheCucite(Permissivo):
     stats: Optional[RiassuntoStatistiche]
 
 
+class StatoDelleLetture(Permissivo):
+    """
+    Da quale istante il lettore deve mandare le letture misurate in caratteri.
+
+    `da` non e' l'ultimo istante noto: e' quello **meno una finestra di
+    sovrapposizione** di un giorno, perche' una riga viene scritta quando la
+    pagina viene LASCIATA e un lettore puo' restare spento in mezzo —
+    chiedere «solo quello che viene dopo» salterebbe una riga scritta in
+    ritardo ma datata prima. Su un deposito vuoto e' 0, cioe' «manda tutto».
+
+    `formato` e' la versione del formato delle righe che questo server sa
+    leggere: serve al lettore per non mandare qualcosa che verrebbe rifiutato.
+    """
+    da: int
+    righe: int
+    formato: int
+
+
+class LettureCucite(Permissivo):
+    """
+    Le righe nuove sono entrate.
+
+    `filigrana` e' l'ultimo istante che il server **ha davvero**, non l'ultimo
+    che il dispositivo ha mandato: il lettore pota solo quello che sta sotto
+    questo numero, quindi una riga rifiutata resta sul lettore invece di
+    sparire. `rifiutate` sono le righe che non si sono potute leggere (un file
+    troncato da una batteria finita), `doppioni` quelle che avevamo gia' — e
+    con la finestra di sovrapposizione i doppioni sono la norma, non un
+    sintomo.
+    """
+    status: Literal["ok"]
+    righe_aggiunte: int
+    doppioni: int
+    rifiutate: int
+    filigrana: int
+    righe_in_tutto: Optional[int] = None
+    #: Valorizzato solo quando l'invio e' stato rifiutato in blocco: formato
+    #: sconosciuto, corpo che non e' una lista.
+    motivo: Optional[str] = None
+
+
 class StatisticheDaRifare(Permissivo):
     """
     Il conto non torna: serve il file intero.

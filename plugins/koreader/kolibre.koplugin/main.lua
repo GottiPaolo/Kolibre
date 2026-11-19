@@ -645,7 +645,13 @@ local KolibrePatch = require("kolibre_patch")
 -- funzione pura (vedi la prova «aggiornamento_al_risveglio»).
 local KolibreRinvii = require("kolibre_rinvii")
 
-local VERSION = "0.22.0"
+-- La misura delle letture in CARATTERI: dove comincia e dove finisce ogni
+-- pagina letta, e quanto tempo i popup delle note restano aperti. Vedi la
+-- testa di `kolibre_letture.lua` per il perche' il carattere assoluto lo
+-- calcoli il server e non noi.
+local KolibreLetture = require("kolibre_letture")
+
+local VERSION = "0.24.0"
 
 local EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, fb2 = true, txt = true }
 
@@ -665,6 +671,80 @@ local _avvio_automation_run_this_session = false
 -- prova senza KOReader. Ci sono finite dentro due correzioni dell'08/11:
 -- vedi la testa di quel file.
 local avvio = KolibreAvvio.condiviso
+
+-- Il registratore delle letture in caratteri, uno per processo.
+--
+-- **Uno solo, e non uno per istanza**, per la stessa ragione del manifesto:
+-- di questo plugin esiste un'istanza nel gestore di file e un'altra dentro
+-- il lettore, e lo stato «quale pagina e' aperta e da quando» e' uno. In
+-- piu' gli agganci dei popup delle note stanno su classi di KOReader, quindi
+-- quando scattano non sanno quale istanza del plugin li ha messi: devono
+-- trovare un registratore solo, sempre lo stesso.
+local _letture = nil
+local _agganci_note_messi = false
+
+local function letture()
+    if not _letture then
+        _letture = KolibreLetture.new({
+            percorso = DataStorage:getDataDir() .. "/kolibre-letture.tsv",
+        })
+    end
+    return _letture
+end
+
+--- Gli agganci dei popup delle note, messi una volta per processo.
+--
+-- KOReader **non emette nessun evento** quando apre o chiude il popup di una
+-- nota (cercato in `readerlink.lua` e `footnotewidget.lua` della release
+-- installata: niente `Event:new` e niente `broadcastEvent`), quindi
+-- l'aggancio diretto e' l'unica strada. I due metodi sono pubblici e
+-- verificati su una release vera (v2025.08-146-g8726233), **non su master**:
+--
+--   * `ReaderLink:showAsFootnotePopup` sa QUALE nota (ha il link) ed e' anche
+--     l'unico che puo' dire no — modalita' a pagine fisse, xpointer
+--     incoerenti, link che non e' una nota. Si conta solo se ha detto si',
+--     altrimenti si misurerebbe un popup che non e' mai apparso.
+--   * `FootnoteWidget:onCloseWidget` lo chiama UIManager per qualunque strada
+--     il popup si chiuda. Vale piu' dei tre callback che il widget si porta
+--     dietro (`close_callback`, `on_tap_close_callback`, `follow_callback`):
+--     quelli coprono tre strade e si dimenticherebbe la quarta.
+--
+-- Se uno dei due metodi non c'e' — una release piu' vecchia, o un nome
+-- cambiato domani — non si aggancia niente e non si misurano le note. La
+-- lettura non deve rompersi per una misura.
+local function mettiGliAgganciDelleNote()
+    if _agganci_note_messi then return end
+    _agganci_note_messi = true
+
+    local ok_link, ReaderLink = pcall(require, "apps/reader/modules/readerlink")
+    if ok_link and type(ReaderLink) == "table" and type(ReaderLink.showAsFootnotePopup) == "function" then
+        local vecchia = ReaderLink.showAsFootnotePopup
+        function ReaderLink:showAsFootnotePopup(link, neglect_current_location)
+            local mostrato = vecchia(self, link, neglect_current_location)
+            if mostrato then
+                pcall(function()
+                    letture():apriNota(
+                        link and (link.from_xpointer or link.a_xpointer) or nil,
+                        link and link.xpointer or nil)
+                end)
+            end
+            return mostrato
+        end
+    else
+        logger.info("Kolibre: niente misura dei popup delle note (showAsFootnotePopup assente)")
+    end
+
+    local ok_widget, FootnoteWidget = pcall(require, "ui/widget/footnotewidget")
+    if ok_widget and type(FootnoteWidget) == "table" then
+        local vecchia_chiusura = FootnoteWidget.onCloseWidget
+        function FootnoteWidget:onCloseWidget()
+            pcall(function() letture():chiudiNota(self.html) end)
+            if vecchia_chiusura then return vecchia_chiusura(self) end
+        end
+    else
+        logger.info("Kolibre: niente misura dei popup delle note (FootnoteWidget assente)")
+    end
+end
 
 -- Single regular files backed up as-is (raw upload, one request per file).
 -- history/bookmarks/clipboard/docsettings (some of which are directories,
@@ -795,6 +875,11 @@ function Kolibre:init()
 
     self.api = KolibreApi.new({ server_url = self.server_url, device_token = self.device_token })
     self.manifest = KolibreManifest.load() -- process-wide singleton, safe across plugin instances
+
+    -- Gli agganci dei popup delle note stanno su classi di KOReader, quindi
+    -- si mettono una volta per processo e non una per istanza del plugin:
+    -- metterli due volte vorrebbe dire contare ogni nota due volte.
+    mettiGliAgganciDelleNote()
 
     self.push_timestamp = 0
     self.pull_timestamp = 0
@@ -1930,6 +2015,9 @@ function Kolibre:_openKolibreCatalog(library, query, sort, drill, exclude_on_dev
         is_borderless = false,
         api = self.api,
         library = library,
+        -- Il manifesto serve alla potatura delle copertine: senza, una
+        -- passeggiata nel catalogo butta quelle dei libri sul dispositivo.
+        manifest = self.manifest,
         title_bar_left_icon = "appbar.search",
         onLeftButtonTap = function()
             UIManager:close(catalog_menu)
@@ -2559,6 +2647,9 @@ function Kolibre:_openCatalogRecent(library)
         is_borderless = false,
         api = self.api,
         library = library,
+        -- Il manifesto serve alla potatura delle copertine: senza, una
+        -- passeggiata nel catalogo butta quelle dei libri sul dispositivo.
+        manifest = self.manifest,
         -- Stessa icona cerca delle altre viste griglia: dentro una griglia di
         -- libri una funzione cerca serve sempre, e qui mancava — apre la
         -- ricerca generale sul catalogo, non una ricerca ristretta
@@ -2597,6 +2688,9 @@ function Kolibre:_openCatalogDiscover(library)
         is_borderless = false,
         api = self.api,
         library = library,
+        -- Il manifesto serve alla potatura delle copertine: senza, una
+        -- passeggiata nel catalogo butta quelle dei libri sul dispositivo.
+        manifest = self.manifest,
         title_bar_left_icon = "appbar.search",
         onLeftButtonTap = function()
             UIManager:close(discover_menu)
@@ -2958,7 +3052,10 @@ function Kolibre:scaricaLeCopertine()
     local cartella = KolibreCopertine.cartella(DataStorage)
     if not cartella then return end
     self._copertine_fallite = self._copertine_fallite or {}
-    KolibreCopertine.pota(cartella)
+    -- Le copertine dei libri che stanno sul dispositivo non si buttano: vedi
+    -- `pota` per il giro infinito che chiude.
+    KolibreCopertine.pota(cartella,
+        KolibreCopertine.daProteggere(cartella, self.manifest:all()))
     local coda = KolibreCopertine.daScaricare(
         cartella, self.manifest:all(),
         KolibreCopertine.PER_SINCRONIZZAZIONE, self._copertine_fallite)
@@ -4072,6 +4169,10 @@ function Kolibre:backupNow(interactive)
     end
     backupFrom(DataStorage:getDataDir(), BACKUP_FILES_ROOT)
     backupFrom(DataStorage:getSettingsDir(), BACKUP_FILES_SETTINGS)
+    -- Le letture misurate in caratteri non sono un file di KOReader: non
+    -- passano dall'elenco qui sopra, hanno un canale loro. Protette perche'
+    -- un invio che fallisce non deve far fallire un backup riuscito.
+    pcall(function() self:_uploadLetture() end)
     if interactive then self:_closeProgress() end
 
     if uploaded > 0 then
@@ -5569,6 +5670,54 @@ function Kolibre:_uploadStatsIncremental()
     -- se l'invio incrementale sta davvero lavorando.
     self._ultime_righe_statistiche = tonumber(res.righe_aggiunte) or 0
     return true
+end
+
+--- Manda al server le letture misurate in caratteri che non ha ancora.
+---
+--- Stessa forma dell'invio incrementale delle statistiche, e per le stesse
+--- ragioni: il server dice da quale istante ripartire (con una finestra di
+--- sovrapposizione), si manda da li' in avanti, e i doppioni li butta lui —
+--- una riga rimandata costa pochi byte, una riga saltata non torna piu'.
+---
+--- **Si pota solo dopo che il server ha confermato**, e solo fino alla
+--- filigrana che risponde LUI: il file sul lettore e' la coda, non il
+--- deposito, ma buttare una riga che il server non ha davvero vorrebbe dire
+--- perdere una lettura per sempre.
+---
+--- Torna quante righe il server ha aggiunto, o 0 — e non solleva mai: una
+--- misura che fa fallire un backup riuscito sarebbe un danno al posto di un
+--- miglioramento.
+function Kolibre:_uploadLetture()
+    local reg = letture()
+    if reg:quante() == 0 then return 0 end
+
+    local stato = self.api:request("GET", "/api/kolibre/devices/caratteri/state")
+    -- Server piu' vecchio di questo plugin: non c'e' niente da fare e non e'
+    -- un guasto. Le righe restano nel file e partiranno quando il server
+    -- saprà riceverle.
+    if not stato or stato.da == nil then return 0 end
+
+    local righe, saltate = reg:righeDa(tonumber(stato.da) or 0)
+    if #righe == 0 then return 0 end
+
+    local vettori = {}
+    for indice, r in ipairs(righe) do vettori[indice] = KolibreLetture.vettore(r) end
+
+    local res = self.api:request("POST", "/api/kolibre/devices/caratteri/incremental", {
+        formato = KolibreLetture.VERSIONE_FORMATO,
+        campi = KolibreLetture.CAMPI,
+        righe = vettori,
+        illeggibili = saltate,
+    })
+    if not res or res.filigrana == nil then return 0 end
+
+    local buttate = reg:pota(tonumber(res.filigrana) or 0)
+    local aggiunte = tonumber(res.righe_aggiunte) or 0
+    if aggiunte > 0 or buttate > 0 then
+        logger.info("Kolibre: letture in caratteri:", aggiunte, "aggiunte,", buttate, "potate")
+    end
+    self._ultime_righe_letture = aggiunte
+    return aggiunte
 end
 
 -- Fase 4. Reports page counts for managed books whose value is new or
@@ -7197,6 +7346,16 @@ end
 function Kolibre:onReaderReady()
     self:onDispatcherRegisterActions()
     self:_checkBackupReminder()
+    -- La misura delle letture: si apre il libro qui, dove `self.ui.document`
+    -- c'e' per certo. La voce del manifesto porta l'impronta del file e, se il
+    -- libro e' in biblioteca, biblioteca e id; un libro che il manifesto non
+    -- conosce si misura comunque, con la sola impronta.
+    if self.ui.document and self.ui.document.file then
+        pcall(function()
+            letture():apriLibro(self.ui.document, self.manifest:findByPath(self.ui.document.file))
+        end)
+        self:_segnaLaPaginaCorrente()
+    end
     self.last_pushed_percent = nil -- new document: nothing pushed yet, so the first push isn't skipped as "unchanged"
     self.last_pushed_stato = nil   -- idem per lo stato: altrimenti quello del libro precedente farebbe da confronto
     UIManager:nextTick(function() self:_reportOpenBookPages() end)
@@ -7211,12 +7370,40 @@ function Kolibre:onCloseDocument()
         self.manifest:markAnnotationsDirty(self.ui.document.file)
         self.manifest:markPositionDirty(self.ui.document.file)
     end
+    -- Niente resta aperto: la pagina su cui si era fermi diventa una riga con
+    -- la sua durata, e le note eventualmente aperte si chiudono prima di lei.
+    pcall(function() letture():chiudiLibro() end)
     self:_runAutomationMoment("chiusura")
+end
+
+--- La pagina su cui si e' fermi adesso, per la misura delle letture.
+--
+-- Serve in due momenti in cui nessun cambio di pagina scatta: all'apertura
+-- del libro, e al risveglio dopo una sospensione. Senza il secondo, il tempo
+-- passato sulla pagina su cui ti risvegli non verrebbe misurato fino alla
+-- girata successiva — e su un Kindle, che si sospende a ogni pausa, sarebbe
+-- la maggior parte del tempo di lettura.
+function Kolibre:_segnaLaPaginaCorrente()
+    local doc = self.ui and self.ui.document
+    if not doc then return end
+    pcall(function()
+        local pagina = self.last_page
+        if type(doc.getCurrentPage) == "function" then
+            local ok, p = pcall(doc.getCurrentPage, doc)
+            if ok and tonumber(p) then pagina = tonumber(p) end
+        end
+        if pagina then letture():segnaPagina(doc, pagina) end
+    end)
 end
 
 function Kolibre:onPageUpdate(page)
     if page == nil or not self.ui.document or page == self.last_page then return end
     self.last_page = page
+    -- La misura delle letture, prima di qualunque altra cosa e fuori da ogni
+    -- interruttore delle automazioni: quelle decidono se e quando PARLARE col
+    -- server, questa e' una misura locale che finisce in un file, e una
+    -- lettura non misurata non si recupera.
+    pcall(function() letture():segnaPagina(self.ui.document, page) end)
     -- Periodic autosave while reading, independent of the close/suspend
     -- moments themselves — gated on the same action id ("push_pos_cur") a
     -- user would enable at chiusura, since that's what this is proactively
@@ -7229,11 +7416,25 @@ function Kolibre:onPageUpdate(page)
     end
 end
 
+--- In modalita' scorrimento le pagine non "cambiano": cambia la posizione.
+--
+-- Senza questo aggancio, chi legge a scorrimento continuo non verrebbe
+-- misurato affatto: `onPageUpdate` non scatta mai. E' l'unica cosa che la
+-- userpatch faceva e che il plugin non faceva gia'.
+function Kolibre:onPosUpdate(_posizione)
+    if not self.ui.document then return end
+    self:_segnaLaPaginaCorrente()
+end
+
 function Kolibre:onSuspend()
     if self.ui.document then
         self.manifest:markAnnotationsDirty(self.ui.document.file)
         self.manifest:markPositionDirty(self.ui.document.file)
     end
+    -- La pagina aperta si chiude QUI e non al risveglio: un libro lasciato
+    -- aperto la notte darebbe altrimenti una pagina da dieci ore. Il libro
+    -- invece resta aperto, perche' al risveglio si sta ancora leggendo quello.
+    pcall(function() letture():chiudiLaPagina() end)
     self:_runAutomationMoment("spegnimento")
     -- **Il prossimo risveglio e' un avvio nuovo.** Era la riga che mancava:
     -- senza, lo stato «avvio concluso» restava vero per tutta la vita del
@@ -7257,6 +7458,10 @@ function Kolibre:onResume()
     self:_dimenticaRaggiungibilita()
     self:_provaAvvioConRitentativi()
     self:_checkPendingRestoreRequest()
+    -- Si riapre la riga della pagina su cui ci si risveglia: la chiusura
+    -- l'ha scritta allo spegnimento, e senza questa il tempo di lettura dopo
+    -- il risveglio non esisterebbe fino alla girata successiva.
+    self:_segnaLaPaginaCorrente()
 end
 
 -- Broadcast by KOReader core (frontend/ui/network/manager.lua) whenever wifi
