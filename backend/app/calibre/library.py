@@ -751,7 +751,7 @@ class CalibreLibrary:
 
         Esiste perche' `get_custom_column_value` apre una connessione a ogni
         chiamata, e chi deve riempire la stima delle pagine di tutti i libri
-        di un dispositivo (api/devices.py) ne chiederebbe trecento di fila a
+        di un dispositivo (api/devices/sync.py) ne chiederebbe trecento di fila a
         ogni sincronizzazione. La forma della query e' la stessa che
         `_build_books` usa gia' per tutte le colonne insieme; qui se ne
         prende una sola, perche' il resto non serve e costerebbe.

@@ -18,8 +18,9 @@ interface DeviceEditDialogProps {
 
 // Modale unica "Modifica dispositivo" — porting di showDeviceEditModal nel
 // Vue esistente (frontend/src/App.vue, righe 3707-3810: nome, predefinito,
-// folder_layout, delete_policy, write_folder_cover, elenco backup,
-// eliminazione). Decisione di scope: "Priorità Formati di Invio"
+// delete_policy, write_folder_cover, elenco backup, eliminazione; il
+// selettore folder_layout è stato rimosso il 20/11/2026 con l'opzione
+// stessa, punto B8 — il layout è sempre "una cartella per autore"). Decisione di scope: "Priorità Formati di Invio"
 // (editingDevice.supported_formats + shiftDeviceFormat) NON è portata — vedi
 // il report finale: DeviceUpdate non ha un campo supported_formats
 // (verificato in backend/app/schemas.py), quindi ogni riordino impostato lì
@@ -52,7 +53,6 @@ export function DeviceEditDialog({ device, onClose, onDeleted }: DeviceEditDialo
   const [model, setModel] = useState(device.model || '')
   const modelloFuoriElenco = !!model && !MODEL_OPTIONS.includes(model)
   const [isDefault, setIsDefault] = useState(device.is_default)
-  const [folderLayout, setFolderLayout] = useState(device.folder_layout || 'author')
   const [deletePolicy, setDeletePolicy] = useState<Device['delete_policy']>(device.delete_policy)
   const [writeFolderCover, setWriteFolderCover] = useState(device.write_folder_cover)
   const [saving, setSaving] = useState(false)
@@ -70,7 +70,6 @@ export function DeviceEditDialog({ device, onClose, onDeleted }: DeviceEditDialo
       await updateDevice(device.id, {
         name,
         model: model.trim() || undefined,
-        folder_layout: folderLayout,
         write_folder_cover: writeFolderCover,
         delete_policy: deletePolicy,
       })
@@ -148,21 +147,6 @@ export function DeviceEditDialog({ device, onClose, onDeleted }: DeviceEditDialo
             <input type="checkbox" checked={isDefault} onChange={(e) => setIsDefault(e.target.checked)} />
             {t('devices.edit.setDefaultLabel')}
           </label>
-
-          <Field
-            label={t('devices.edit.folderLayoutLabel')}
-            hint={t('devices.edit.folderLayoutHint')}
-          >
-            <Select value={folderLayout} onValueChange={setFolderLayout}>
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="author">{t('devices.edit.folderLayoutAuthor')}</SelectItem>
-                <SelectItem value="flat">{t('devices.edit.folderLayoutFlat')}</SelectItem>
-              </SelectContent>
-            </Select>
-          </Field>
 
           <Field
             label={t('devices.edit.deletePolicyLabel')}

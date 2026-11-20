@@ -788,7 +788,7 @@ def get_author_photo(name: str, db: Session = Depends(database.get_db)):
 
 # Deliberately small: this is only ever used as the KOReader plugin's
 # on-device per-author folder icon (.folder.jpg, written once per author dir
-# — see main.lua's write_folder_cover handling and devices.py's
+# — see main.lua's write_folder_cover handling and devices/sync.py's
 # folder_cover_url), never shown at any size in the web UI. The full-size
 # photo (route above) can be an arbitrary upload up to 5MB; multiplied by
 # every author folder on a device with a large library, that adds up fast

@@ -72,6 +72,7 @@ from sqlalchemy.orm import Session
 
 from .. import config, models
 from ..istanti import quando
+from ..logging_utils import log_message
 from ..calibre.library import CalibreLibrary
 
 
@@ -87,7 +88,12 @@ def libri_vivi(nomi_biblioteche) -> dict:
         try:
             lib = CalibreLibrary(config.library_path(nome))
             fuori[nome] = {b["id"] for b in lib.list_books()}
-        except Exception:
+        except Exception as e:
+            # Il None e' la regola «elenco non letto -> non si afferma
+            # niente» (vedi la testa del modulo): giusta, ma muta. Un disco
+            # scollegato qui non si vedrebbe da nessuna parte.
+            log_message("warning", "devices",
+                        f"Library '{nome}' could not be read ({type(e).__name__}): its device rows are left unjudged")
             fuori[nome] = None
     return fuori
 
@@ -212,6 +218,15 @@ def fai_cancellare_dal_lettore(db: Session, utente: models.User, ids) -> dict:
             models.DeviceBook.id.in_(da_togliere)).update(
                 {"status": "pending_delete"}, synchronize_session=False)
         db.commit()
+
+    # Si mettono in coda cancellazioni di file sui lettori: quando fra una
+    # settimana un libro manca da un Kindle, questa riga dice chi l'ha
+    # chiesto e perche' gli altri sono stati risparmiati.
+    if da_togliere or rifiutate or per_politica:
+        log_message("info", "devices",
+                    f"Vanished books: {len(da_togliere)} removals queued, "
+                    f"{len(rifiutate)} refused (file of a living book), "
+                    f"{len(per_politica)} refused by the reader's delete policy")
 
     return {
         "in_coda": len(da_togliere),

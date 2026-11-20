@@ -28,6 +28,8 @@ import json
 import os
 from typing import Optional
 
+from ..logging_utils import log_message
+
 PERCORSO = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "koreader", "novita.json")
 )
@@ -48,7 +50,16 @@ def _leggi() -> dict:
     try:
         with open(PERCORSO, encoding="utf-8") as f:
             dati = json.load(f)
-    except (OSError, ValueError):
+    except OSError:
+        # Il file che non c'e' e' lo stato normale di una versione senza
+        # novita' scritte: nessun rumore.
+        return {}
+    except ValueError as e:
+        # Il file c'e' ma non si legge: e' un file scritto a mano, e un
+        # errore di battitura spegnerebbe le novita' di TUTTI gli
+        # aggiornamenti senza nessun segno. Questo e' il segno.
+        log_message("warning", "tools",
+                    f"novita.json exists but is not readable JSON ({e}): every update prompt will show no release notes")
         return {}
     return dati if isinstance(dati, dict) else {}
 

@@ -33,6 +33,8 @@ from functools import lru_cache
 
 from PIL import Image, ImageDraw, ImageFont
 
+from ..logging_utils import log_message
+
 # Le proporzioni di un libro, non quelle di un'immagine qualunque: 2:3 e'
 # quello che la griglia si aspetta, e una copertina finta con proporzioni
 # diverse si riconosce da lontano proprio per quello.
@@ -111,6 +113,12 @@ def _font(candidati, dimensione: int, corsivo: bool = False):
             return ImageFont.truetype(trovato, dimensione)
         except OSError:
             pass
+    # Una riga nel registro, non solo una copertina brutta: scoprire che nel
+    # container non c'e' nessun TTF solo dall'aspetto sarebbe il modo peggiore
+    # (vedi _cerca_serif). Grazie a lru_cache si scrive una volta, non a ogni
+    # copertina.
+    log_message("warning", "covers",
+                "No serif TTF found on this system: generated covers fall back to PIL's bitmap font")
     return ImageFont.load_default()
 
 

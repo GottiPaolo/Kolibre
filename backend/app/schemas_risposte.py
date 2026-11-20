@@ -1185,7 +1185,17 @@ class SessioneDiLettura(Permissivo):
     source: str
     duration_seconds: int
     pages_read: int
+    #: **La misura vera dove c'e', la stima altrove** (passo 4, 20/11/2026):
+    #: con `exact` vero il numero viene dalle righe in caratteri risolte
+    #: dall'indice del server, altrimenti e' fraction_read x conteggio del
+    #: libro. `exact` dice quale delle due stai guardando.
     chars_read: int
+    #: Inizio e fine della sessione in caratteri assoluti del libro — solo
+    #: sulle sessioni esatte, vuoti su quelle stimate.
+    char_start: Optional[int]
+    char_end: Optional[int]
+    #: Il distintivo binario del passo 4: falso = stimata, vero = esatta.
+    exact: bool
     series: Optional[str]
     tags: list[str]
     language: Optional[str]
@@ -1542,7 +1552,6 @@ class DispositivoInElenco(Permissivo):
     #: **Uguale per tutti i dispositivi**: non c'e' niente che la persista
     #: per lettore. E' un dato da mostrare, non una preferenza.
     supported_formats: list[str]
-    folder_layout: str
     write_folder_cover: bool
     books: list[LibroSulDispositivo]
     sync_queue: list[LibroInCodaPerIlDispositivo]
@@ -1974,8 +1983,13 @@ class ImpostazioniPerIlDispositivo(Permissivo):
     `report_pages` e' **sempre** `true`: il server le pagine le vuole
     sempre, e il campo esiste per poter dire di no un giorno senza
     cambiare la forma della risposta.
+
+    `folder_layout` e' **sempre** `"author"` dal 20/11/2026: l'opzione e'
+    stata rimossa (punto B8), ma il plugin fino alla 0.25.0 questo campo lo
+    legge da qui. Zeppa di compatibilita' fino alla rottura d'API di B1 —
+    quando l'API passera' a 3, questo campo muore.
     """
-    folder_layout: str
+    folder_layout: Literal["author"]
     write_folder_cover: bool
     delete_policy: Literal["ask", "auto", "never"]
     report_pages: bool
@@ -2044,8 +2058,11 @@ class EliminazioneLegacy(Permissivo):
 
 class ImpostazioniLegacy(Permissivo):
     """Due impostazioni su quattro: le altre il plugin di prima non le
-    sapeva leggere."""
-    folder_layout: str
+    sapeva leggere.
+
+    `folder_layout` e' hardcoded `"author"` dal 20/11/2026 — stessa zeppa
+    di `ImpostazioniPerIlDispositivo`, stesso destino: muore con B1."""
+    folder_layout: Literal["author"]
     write_folder_cover: bool
 
 

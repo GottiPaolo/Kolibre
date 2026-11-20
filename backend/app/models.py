@@ -119,13 +119,12 @@ class Device(Base):
     # al contrario di patch_installate: quella e' un'informazione che il
     # dispositivo riporta, e li' "non lo ha detto" conta.
     dizionari_richiesti = Column(String, nullable=True)
-    # On-device layout the KOReader plugin uses when downloading books — a
-    # purely device-local filesystem concern, unrelated to the server-side
-    # Calibre library layout (which always stays one-folder-per-book).
-    # "author": <books_dir>/<Author>/<Title> (id).<ext> — one folder per
-    #   author holding all their books directly (no per-book subfolder).
-    # "flat": <books_dir>/<Title> (id).<ext>, no subfolders at all.
-    folder_layout = Column(String, nullable=False, default="author")
+    # Qui fino al 20/11/2026 c'era `folder_layout` ("author"/"flat"): il
+    # layout delle cartelle sul dispositivo. Paolo non ha mai usato altro
+    # che "author" (verificato sui 4 lettori reali) e l'opzione e' stata
+    # rimossa a tutto tondo (punto B8 della revisione del 19/11) — la voce 5
+    # del registro droppa la colonna. Il plugin pero' il campo lo legge
+    # ancora dalla risposta del sync: la zeppa sta in api/devices/sync.py.
     write_folder_cover = Column(Boolean, nullable=False, default=True)
     # Sync protocol v2 bookkeeping: version string reported by the plugin at
     # each /sync handshake, and the last time ANY device-token request hit the
@@ -520,7 +519,7 @@ class OrphanHighlight(Base):
     production table without rebuilding it. A new table sidesteps that
     entirely (create_all() makes it automatically) and keeps every existing
     Highlight query (annotations.py, highlight_position.py, the per-book
-    counts in devices.py) exactly as it is today — none of them need to
+    counts in api/devices/management.py) exactly as it is today — none of them need to
     learn about a "maybe this book doesn't exist" case.
 
     Identified by (device_id, local_path) instead of (library,
@@ -621,7 +620,7 @@ class DeviceRestoreRequest(Base):
     target la esegue solo dopo un'ulteriore conferma locale dell'utente.
     Una sola richiesta non completata per target alla volta — crearne una
     nuova sostituisce quella precedente (vedi create_device_restore_request
-    in api/devices.py).
+    in api/devices/diagnostics.py).
     """
     __tablename__ = "device_restore_requests"
 
@@ -644,7 +643,7 @@ class StatsHashPairing(Base):
     already rewritten with no history captured, so the device's old md5 has
     nothing left to automatically fall back to. This table is the same idea
     as BookHashHistory but filled by an explicit human decision instead of
-    an automatic archive (mirrors devices.py's pair_device_book/
+    an automatic archive (mirrors the devices package's pair_device_book/
     queue_flagged_book_action "pair" action for OrphanHighlight — same
     problem, same one-time-confirmation shape, applied to reading sessions
     instead of highlights).
@@ -738,6 +737,40 @@ class ReadingSession(Base):
     # device_id alone can't disambiguate a hypothetical future NULL-device
     # KOReader edge case from an intentional web session.
     source = Column(String, nullable=False, default="koreader")
+
+    # ── La misura ESATTA, dove c'e' (passo 4 delle statistiche in caratteri,
+    # 20/11/2026 — decisione del 19/11 con Paolo). ──────────────────────────
+    #
+    # Le tre colonne qui sotto vengono dalle righe grezze `letture_di_pagina`
+    # risolte dal server (stato_conversione = 'exact'), sommate dentro la
+    # finestra temporale della sessione da
+    # `letture_service.derive_reading_sessions`. Sono AMMESSE VUOTE di
+    # proposito: le sessioni nate prima del 19/11/2026, quelle del lettore
+    # web e quelle dei dispositivi senza il plugin 0.24.0 restano stimate da
+    # `fraction_read` x BookTextStats.chars, come sono sempre state.
+    #
+    # **I due contatori non si mescolano** (misurato: 314.361 caratteri nella
+    # vista collassata dell'indice del server contro i 327.577 di
+    # BookTextStats sullo stesso libro, il 4%): `chars_read` qui e' SEMPRE
+    # nella misura dell'indice del server (carattere_inizio/fine delle righe),
+    # mai in quella di BookTextStats. Chi mostra un totale puo' affiancare le
+    # due misure come conteggi assoluti — e' quello che fa compute_raw, con
+    # `exact` a dire quale delle due stai guardando — ma una percentuale si fa
+    # solo col denominatore della propria misura.
+    #: Caratteri davvero letti nella sessione: somma degli intervalli
+    #: (carattere_fine - carattere_inizio) delle righe di PAGINA esatte nella
+    #: finestra. Le righe di NOTA (genere 'n') NON sono sommate: il tempo e i
+    #: caratteri dei popup di nota sono un dato a parte per disegno — vedi
+    #: derive_reading_sessions.
+    chars_read = Column(Integer, nullable=True)
+    #: Dove la sessione comincia e finisce nel libro, in caratteri assoluti
+    #: dell'indice del server (min/max sulle righe esatte della finestra).
+    char_start = Column(Integer, nullable=True)
+    char_end = Column(Integer, nullable=True)
+    #: Il distintivo binario: 0 = i caratteri di questa sessione sono una
+    #: STIMA (fraction_read), 1 = sono la misura ESATTA qui sopra. Una
+    #: colonna 0/1 e non uno stato a parole, per scelta di Paolo (20/11/2026).
+    exact = Column(Integer, nullable=False, default=0)
 
     user = relationship("User", back_populates="reading_sessions")
 

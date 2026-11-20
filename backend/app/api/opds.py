@@ -1,5 +1,5 @@
 """Vero feed OPDS (Atom/XML, HTTP Basic Auth) — canale separato dal protocollo
-JSON del plugin KOReader (devices.py::browse_catalog/catalog_sections), che
+JSON del plugin KOReader (devices/catalog.py::browse_catalog/catalog_sections), che
 resta invariato. Pensato per client OPDS generici (Moon+ Reader, Marvin, il
 browser OPDS nativo di KOReader, ecc.), non per il plugin Kolibre stesso.
 Ogni route qui sotto è dietro require_opds_auth, che risponde 404 se il

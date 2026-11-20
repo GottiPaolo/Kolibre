@@ -91,12 +91,12 @@ def _resolve_book_identities(db: Session, md5: str) -> list:
     Book rows keyed by md5). Returns every (library, calibre_book_id) this hash
     resolves to — usually one, but the exact same file can legitimately
     exist in more than one library (same precedent as push_reading_progress
-    in devices.py, which handles the identical ambiguity for KOSync pushes).
+    in devices/readings.py, which handles the identical ambiguity for KOSync pushes).
     """
     # BookHash vivo, più il ripiego su BookHashHistory quando il server ha
     # riscritto il file dopo che il dispositivo lo aveva hashato: entrambi in
     # book_hash_service.resolve_book_identities, condiviso con le posizioni
-    # di lettura in devices.py (che senza quel ripiego le buttavano via).
+    # di lettura in devices/readings.py (che senza quel ripiego le buttavano via).
     identities = book_hash_service.resolve_book_identities(db, md5)
     if identities:
         return identities
@@ -113,7 +113,7 @@ def _resolve_book_identities(db: Session, md5: str) -> list:
 def process_statistics_db(db_path: str, user_id: int, device_id, db: Session) -> dict:
     """
     Parses a KOReader statistics.sqlite3 file (uploaded wholesale as part of
-    the device backup — see devices.py's upload_device_backup) into real,
+    the device backup — see devices/backups_stats.py's upload_device_backup) into real,
     book-identified reading sessions and updates each resolved book's
     reading-coverage estimate.
 
@@ -469,7 +469,7 @@ def pair_orphan_sessions(db: Session, user_id, md5: str, library: str, calibre_b
     The "Accoppia manualmente" action for orphan reading sessions — see
     StatsHashPairing's own docstring for why this exists (the definitive
     fix for history orphaned before BookHashHistory did, which has nothing
-    left to recover automatically). Mirrors devices.py's
+    left to recover automatically). Mirrors devices/_shared.py's
     _migrate_orphan_highlights: get-or-create the pairing row (idempotent —
     re-pairing the same md5 just repoints it), copy every OrphanReadingSession
     with this md5 into a real ReadingSession (deduped the same way
@@ -539,7 +539,7 @@ def reprocess_all_device_backups(db: Session) -> dict:
     upload — a backup already sitting on disk from BEFORE this stats
     feature existed (or from before the server was last redeployed with it)
     would otherwise never be processed at all, with no way to catch up
-    short of the device re-uploading. devices.py's upload_device_backup
+    short of the device re-uploading. devices/backups_stats.py's upload_device_backup
     always overwrites this same path in place
     ({BACKUPS_DIR}/{device_id}/statistics.sqlite3, no versioning), so only
     the latest snapshot is ever recoverable this way — acceptable since
@@ -602,8 +602,8 @@ def _book_meta_map(library: str) -> dict:
     """
     calibre_book_id -> metadati del libro, per ogni libro della biblioteca,
     con una sola CalibreLibrary.list_books() — same batched-lookup shape as
-    devices.py's own _build_book_titles, kept as a separate copy (not a
-    shared import) so this module stays decoupled from devices.py, same
+    devices/management.py's own _build_book_titles, kept as a separate copy (not a
+    shared import) so this module stays decoupled from the devices package, same
     reasoning that file's own docstring already gives for its twin in
     annotations.py.
 
@@ -1026,7 +1026,13 @@ def compute_summary(db: Session, library: str, user_id: int) -> dict:
     total_chars = 0
     chars_time_seconds = 0
     for s in sessions:
-        c = _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id)))
+        # La misura vera dove c'e' (passo 4, 20/11/2026), la stima altrove:
+        # stessa regola di compute_raw, cosi' il totale «di sempre» e la
+        # somma delle sessioni filtrate per periodo non divergono mai.
+        if s.exact and s.chars_read is not None:
+            c = s.chars_read
+        else:
+            c = _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id)))
         if c:
             total_chars += c
             chars_time_seconds += s.duration
@@ -1113,12 +1119,23 @@ def compute_raw(db: Session, library: str, user_id: int) -> list:
             "source": s.source,
             "duration_seconds": s.duration,
             "pages_read": s.pages_read or 0,
-            # Caratteri letti in questa sessione: frazione di libro per
-            # quanto e' grande il libro. Zero quando manca uno dei due —
-            # sessioni vecchie senza frazione, lettore web, o un libro di
-            # cui non e' mai stato contato il testo (PDF, o "Ricalcola le
-            # pagine stimate" mai lanciato).
-            "chars_read": _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id))),
+            # Caratteri letti in questa sessione. **La misura vera dove c'e'**
+            # (passo 4, 20/11/2026): se la sessione e' stata arricchita dalle
+            # righe in caratteri (`exact` = 1) il numero viene dall'indice del
+            # server; altrimenti e' la stima di sempre — frazione di libro per
+            # quanto e' grande il libro, zero quando manca uno dei due
+            # (sessioni vecchie senza frazione, lettore web, o un libro di cui
+            # non e' mai stato contato il testo). Le due misure hanno
+            # denominatori diversi (il 4% misurato) e qui convivono come
+            # CONTEGGI assoluti, mai come percentuali: `exact` dice quale
+            # delle due stai guardando.
+            "chars_read": (s.chars_read if s.exact and s.chars_read is not None
+                           else _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id)))),
+            # Le colonne nuove del passo 4, esposte cosi' come sono: vuote
+            # sulle sessioni stimate.
+            "char_start": s.char_start,
+            "char_end": s.char_end,
+            "exact": bool(s.exact),
             # I metadati del libro viaggiano con la sessione: sono quello che
             # permette di incrociare "quanto ho letto" con "cosa possiedo".
             # None dove il metadato non c'e' (la meta' dei libri non ha tag),
@@ -1149,6 +1166,11 @@ def compute_raw(db: Session, library: str, user_id: int) -> list:
             # non c'e' un conteggio caratteri da usare: resta la frazione,
             # che pero' da sola non fa caratteri.
             "chars_read": 0,
+            # E non puo' avere la misura esatta: le righe in caratteri si
+            # agganciano per libro risolto.
+            "char_start": None,
+            "char_end": None,
+            "exact": False,
             # Stessi campi delle righe risolte, perche' il costruttore di
             # grafici pivota su una forma sola: gli orfani non hanno una
             # biblioteca in cui cercare i metadati, quindi restano vuoti —

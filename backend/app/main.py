@@ -165,7 +165,7 @@ async def _drain_pending_writes_loop(write_queue: CalibreWriteQueue) -> None:
 # _drain_pending_writes_loop above) so the first refresh happens right at
 # startup instead of only after the first full interval.
 #
-# devices.py::upload_device_backup now also triggers an immediate
+# devices/backups_stats.py::upload_device_backup now also triggers an immediate
 # refresh_stats_cache right after processing a fresh statistics.sqlite3, so
 # a device sync no longer waits for this loop at all — this interval is
 # just the safety net catching what a backup-triggered refresh can't: web

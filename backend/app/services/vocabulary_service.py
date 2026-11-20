@@ -10,7 +10,7 @@ from .. import models
 def process_vocabulary_db(db_path: str, user_id: int, device_id: int, db: Session) -> dict:
     """
     Parses a KOReader vocabulary_builder.sqlite3 file (uploaded wholesale as
-    part of the device backup — see devices.py's upload_device_backup, same
+    part of the device backup — see devices/backups_stats.py's upload_device_backup, same
     call site as stats_service.process_statistics_db) into VocabularyEntry
     rows.
 

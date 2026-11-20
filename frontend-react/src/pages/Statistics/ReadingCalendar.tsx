@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
-import { useLingua, type Valori } from '@/lib/i18n'
+import { numeroCompatto, useLingua, type Valori } from '@/lib/i18n'
 import type { ReadingSessionRaw } from '@/lib/statsQueries'
 import { libriPerGiorno, type LibroDelGiorno } from './statsCompute'
 
@@ -189,8 +189,20 @@ export function ReadingCalendar({ sessions }: { sessions: ReadingSessionRaw[] })
                 c.oggi && 'ring-1 ring-primary'
               )}
               title={
+                // Il distintivo della misura sta qui, dove la singola
+                // lettura si vede: accanto ai caratteri del libro nel
+                // giorno, «esatto» se ogni sua sessione è misurata dalle
+                // righe per pagina (passo 4, 20/11/2026), «stimato»
+                // altrimenti. Sul tempo non serve: quello è esatto sempre.
                 libri.length
-                  ? `${c.iso}\n${libri.map((l) => `${l.title} — ${durataCorta(l.secondi)}`).join('\n')}`
+                  ? `${c.iso}\n${libri
+                      .map((l) =>
+                        `${l.title} — ${durataCorta(l.secondi)}` +
+                        (l.caratteri > 0
+                          ? ` · ${numeroCompatto(l.caratteri)} ${t(l.esatto ? 'stats.reading.measure.exact' : 'stats.reading.measure.estimated')}`
+                          : '')
+                      )
+                      .join('\n')}`
                   : undefined
               }
             >

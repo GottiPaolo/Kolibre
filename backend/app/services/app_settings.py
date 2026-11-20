@@ -257,7 +257,7 @@ def set_auto_wiki_scrape_enabled(db: Session, enabled: bool) -> bool:
 # esposte a qualunque app OPDS di terze parti chiami quell'URL) da attivare
 # consapevolmente, a differenza degli altri toggle qui sopra che sono
 # comportamenti interni al server. Distinto e indipendente dal protocollo
-# JSON già usato dal plugin KOReader (devices.py::browse_catalog/
+# JSON già usato dal plugin KOReader (devices/catalog.py::browse_catalog/
 # catalog_sections), che resta invariato.
 OPDS_FEED_KEY = "opds_feed"
 
@@ -327,7 +327,7 @@ def set_web_reader_tracking_enabled(db: Session, enabled: bool) -> bool:
 # **Perche' adesso e' SPENTO di default.** Perche' quel modo non serve piu':
 # dal 15/11/2026 Kolibre ha una UI sua su KOReader, e la stima del server le
 # arriva nel **manifesto** del plugin (`server_pages`, vedi
-# `kolibre_manifest.lua` e `devices.py::_stime_per_il_manifesto`) — un file
+# `kolibre_manifest.lua` e `devices/sync.py::_stime_per_il_manifesto`) — un file
 # a parte, che si riscrive quanto si vuole senza toccare i libri. Scrivere
 # dentro i file, invece, e' costato caro: il 17/11/2026, su 296 righe di
 # consegna misurate sul Kindle di Paolo, **107 portavano l'impronta di un

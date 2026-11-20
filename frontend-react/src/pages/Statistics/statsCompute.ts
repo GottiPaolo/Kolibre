@@ -111,6 +111,31 @@ export function unitaMisura(misura: Misura): 'car' | 'min' {
   return misura === 'caratteri' ? 'car' : 'min'
 }
 
+/**
+ * Quanta parte del TEMPO di queste sessioni è coperta dalla misura esatta
+ * in caratteri (passo 4, 20/11/2026): le sessioni con `exact` vero portano
+ * i caratteri contati dal server sulle righe per pagina, le altre una stima
+ * da frazione di libro. La quota è sul tempo e non sul numero di sessioni,
+ * perché è il tempo che pesa nei totali che la pagina mostra.
+ *
+ * `null` quando nessuna sessione è esatta: su uno storico interamente
+ * stimato (tutto quello raccolto prima del 19/11/2026) la riga «misura
+ * esatta per 0% del tempo» sarebbe solo rumore.
+ */
+export function quotaTempoEsatto(sessions: ReadingSessionRaw[]): number | null {
+  let tutto = 0
+  let esatto = 0
+  for (const s of sessions) {
+    tutto += s.duration_seconds
+    if (s.exact) esatto += s.duration_seconds
+  }
+  if (!esatto || !tutto) return null
+  // Sotto il mezzo percento l'arrotondamento direbbe «0% del tempo», che
+  // suona come «niente» detto con un numero: meglio non dire ancora niente.
+  const percento = Math.round((esatto / tutto) * 100)
+  return percento > 0 ? percento : null
+}
+
 export function buildStackedByBookDatasets(
   dayKeys: string[],
   sessions: ReadingSessionRaw[],
@@ -616,6 +641,14 @@ export interface LibroDelGiorno {
   title: string
   secondi: number
   caratteri: number
+  /**
+   * Vero quando OGNI sessione di questo libro in questo giorno porta la
+   * misura esatta in caratteri (passo 4, 20/11/2026). Basta una sessione
+   * stimata perché la riga torni «stimato»: su una somma, la misura più
+   * debole è quella che comanda — dichiararla esatta a metà sarebbe il
+   * difetto che il distintivo esiste per evitare.
+   */
+  esatto: boolean
 }
 
 /**
@@ -631,9 +664,12 @@ export function libriPerGiorno(sessions: ReadingSessionRaw[]): Map<string, Libro
   const per = new Map<string, Map<string, LibroDelGiorno>>()
   for (const s of sessions) {
     const giorno = per.get(s.date) ?? new Map<string, LibroDelGiorno>()
-    const libro = giorno.get(s.book_title) ?? { title: s.book_title, secondi: 0, caratteri: 0 }
+    const libro = giorno.get(s.book_title) ?? { title: s.book_title, secondi: 0, caratteri: 0, esatto: true }
     libro.secondi += s.duration_seconds
     libro.caratteri += s.chars_read || 0
+    // `exact` arriva dal server (passo 4): sessione misurata dalle righe in
+    // caratteri. Una sola sessione stimata e la riga del giorno è stimata.
+    libro.esatto = libro.esatto && !!s.exact
     giorno.set(s.book_title, libro)
     per.set(s.date, giorno)
   }

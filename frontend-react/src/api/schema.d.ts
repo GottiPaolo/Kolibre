@@ -990,10 +990,16 @@ export interface paths {
         /**
          * Get Book Description
          * @description Untruncated companion to the excerpt list_books() above sends in bulk
-         *     — fetched on demand only by the book-detail page, which is the one place
+         *     — fetched on demand only by the metadata editor, which is the one place
          *     that needs the full text. A single targeted query (CalibreLibrary
          *     .get_description), not the whole list_books() machinery, for one field
          *     of one book.
+         *
+         *     GREZZO apposta, NON sanificato (20/11/2026): questo testo finisce nella
+         *     textarea dell'editor dei metadati e torna indietro con la PUT — se
+         *     partisse sanificato, ogni salvataggio riscriverebbe in Calibre una
+         *     versione impoverita della descrizione. La versione sanificata per la
+         *     visualizzazione è quella dell'elenco (vedi list_books).
          */
         get: operations["get_book_description_api_kolibre_books__id__description_get"];
         put?: never;
@@ -3478,6 +3484,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/devices/caratteri/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Device Letture State
+         * @description Da quale istante il dispositivo deve mandare le letture misurate in
+         *     caratteri.
+         *
+         *     Vedi `letture_service.stato_letture`: "da" e' l'ultimo istante noto meno
+         *     una finestra di sovrapposizione di un giorno, non l'ultimo istante secco —
+         *     una riga viene scritta quando la pagina viene LASCIATA, e un lettore puo'
+         *     restare spento in mezzo.
+         *
+         *     **Questa rotta esiste anche per dire al plugin che il server sa riceverle:**
+         *     un plugin piu' nuovo del server trova un 404 e tiene le sue righe invece
+         *     di buttarle.
+         */
+        get: operations["device_letture_state_api_kolibre_devices_caratteri_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/caratteri/incremental": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Letture Incremental
+         * @description Le letture misurate in caratteri che il dispositivo ha e il server no.
+         *
+         *     Una riga per pagina visitata — quando, per quanto, da quale carattere a
+         *     quale — piu' una per ogni popup di nota tenuto aperto. Le posizioni sono
+         *     xpointer di crengine; il carattere assoluto lo calcola il server
+         *     (`letture_service.converti_le_letture`), e questo e' il punto dell'intero
+         *     disegno: la PROVA resta nel database, quindi se l'indice del testo
+         *     migliora lo storico si ricalcola. Vedi la testa di `letture_service.py`.
+         *
+         *     La conversione si fa **subito dopo**, sul lotto appena arrivato, e non e'
+         *     bloccante per la risposta nel senso che conta: se fallisce, le righe
+         *     restano con `stato_conversione` vuoto e il giro successivo le riprende.
+         *     Una conversione che fallisce non deve far fallire una consegna riuscita.
+         */
+        post: operations["upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/devices/sync/restore-request": {
         parameters: {
             query?: never;
@@ -4369,24 +4437,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/kolibre/settings/incorpora-pagine": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Incorpora Pagine Setting */
-        get: operations["get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get"];
-        /** Update Incorpora Pagine Setting */
-        put: operations["update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/kolibre/settings/opds-feed": {
         parameters: {
             query?: never;
@@ -4416,6 +4466,24 @@ export interface paths {
         get: operations["get_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_get"];
         /** Update Web Reader Tracking Setting */
         put: operations["update_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/settings/incorpora-pagine": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Incorpora Pagine Setting */
+        get: operations["get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get"];
+        /** Update Incorpora Pagine Setting */
+        put: operations["update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -7132,7 +7200,9 @@ export interface components {
         };
         /**
          * DescrizioneLibro
-         * @description Il testo **intero**, non troncato come nell'elenco.
+         * @description Il testo **intero** e **grezzo**: ne' troncato ne' sanificato come
+         *     nell'elenco, perche' e' la sorgente dell'editor dei metadati — NON va
+         *     messo in `dangerouslySetInnerHTML` (20/11/2026).
          */
         DescrizioneLibro: {
             /** Description */
@@ -7187,10 +7257,7 @@ export interface components {
             hardware_id?: string | null;
             /** Is Default */
             is_default: boolean;
-            /**
-             * Device Token
-             * @description Presente SOLO nella risposta di POST /register: dal 20/11/2026 il server conserva l'impronta e non puo' ridire il token.
-             */
+            /** Device Token */
             device_token?: string | null;
             /** Last Sync At */
             last_sync_at?: string | null;
@@ -7202,8 +7269,6 @@ export interface components {
             storage_total?: number | null;
             /** Storage Available */
             storage_available?: number | null;
-            /** Folder Layout */
-            folder_layout: string;
             /** Write Folder Cover */
             write_folder_cover: boolean;
             /** Plugin Version */
@@ -7222,8 +7287,6 @@ export interface components {
             name?: string | null;
             /** Model */
             model?: string | null;
-            /** Folder Layout */
-            folder_layout?: string | null;
             /** Write Folder Cover */
             write_folder_cover?: boolean | null;
             /** Delete Policy */
@@ -7323,8 +7386,6 @@ export interface components {
             pending_restore_request: components["schemas"]["RichiestaDiRipristino"] | null;
             /** Supported Formats */
             supported_formats: string[];
-            /** Folder Layout */
-            folder_layout: string;
             /** Write Folder Cover */
             write_folder_cover: boolean;
             /** Books */
@@ -8368,10 +8429,16 @@ export interface components {
          * ImpostazioniLegacy
          * @description Due impostazioni su quattro: le altre il plugin di prima non le
          *     sapeva leggere.
+         *
+         *     `folder_layout` e' hardcoded `"author"` dal 20/11/2026 — stessa zeppa
+         *     di `ImpostazioniPerIlDispositivo`, stesso destino: muore con B1.
          */
         ImpostazioniLegacy: {
-            /** Folder Layout */
-            folder_layout: string;
+            /**
+             * Folder Layout
+             * @constant
+             */
+            folder_layout: "author";
             /** Write Folder Cover */
             write_folder_cover: boolean;
         } & {
@@ -8384,10 +8451,18 @@ export interface components {
          *     `report_pages` e' **sempre** `true`: il server le pagine le vuole
          *     sempre, e il campo esiste per poter dire di no un giorno senza
          *     cambiare la forma della risposta.
+         *
+         *     `folder_layout` e' **sempre** `"author"` dal 20/11/2026: l'opzione e'
+         *     stata rimossa (punto B8), ma il plugin fino alla 0.25.0 questo campo lo
+         *     legge da qui. Zeppa di compatibilita' fino alla rottura d'API di B1 —
+         *     quando l'API passera' a 3, questo campo muore.
          */
         ImpostazioniPerIlDispositivo: {
-            /** Folder Layout */
-            folder_layout: string;
+            /**
+             * Folder Layout
+             * @constant
+             */
+            folder_layout: "author";
             /** Write Folder Cover */
             write_folder_cover: boolean;
             /**
@@ -8730,6 +8805,39 @@ export interface components {
             date: string;
             /** Total Seconds */
             total_seconds: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LettureCucite
+         * @description Le righe nuove sono entrate.
+         *
+         *     `filigrana` e' l'ultimo istante che il server **ha davvero**, non l'ultimo
+         *     che il dispositivo ha mandato: il lettore pota solo quello che sta sotto
+         *     questo numero, quindi una riga rifiutata resta sul lettore invece di
+         *     sparire. `rifiutate` sono le righe che non si sono potute leggere (un file
+         *     troncato da una batteria finita), `doppioni` quelle che avevamo gia' — e
+         *     con la finestra di sovrapposizione i doppioni sono la norma, non un
+         *     sintomo.
+         */
+        LettureCucite: {
+            /**
+             * Status
+             * @constant
+             */
+            status: "ok";
+            /** Righe Aggiunte */
+            righe_aggiunte: number;
+            /** Doppioni */
+            doppioni: number;
+            /** Rifiutate */
+            rifiutate: number;
+            /** Filigrana */
+            filigrana: number;
+            /** Righe In Tutto */
+            righe_in_tutto?: number | null;
+            /** Motivo */
+            motivo?: string | null;
         } & {
             [key: string]: unknown;
         };
@@ -9147,8 +9255,10 @@ export interface components {
          *     esistono chiede `/api/kolibre/custom-columns`.
          *
          *     Tre campi sono **tagliati o derivati**, non il valore grezzo di Calibre:
-         *     `description` e' troncata a 400 caratteri (il testo intero si chiede a
-         *     `GET /{id}/description`), e `pubdate`/`last_modified`/`date_added`
+         *     `description` e' troncata a 400 caratteri e **sanificata** — HTML
+         *     ridotto a una lista bianca di tag, sicuro per `dangerouslySetInnerHTML`
+         *     (vedi `services/html_sanitizer.py`; il testo intero e grezzo si chiede
+         *     a `GET /{id}/description`) — e `pubdate`/`last_modified`/`date_added`
          *     portano solo il giorno.
          */
         LibroInElenco: {
@@ -10979,6 +11089,12 @@ export interface components {
             pages_read: number;
             /** Chars Read */
             chars_read: number;
+            /** Char Start */
+            char_start: number | null;
+            /** Char End */
+            char_end: number | null;
+            /** Exact */
+            exact: boolean;
             /** Series */
             series: string | null;
             /** Tags */
@@ -11425,6 +11541,29 @@ export interface components {
             blocked_until: string | null;
             /** Skipped */
             skipped: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * StatoDelleLetture
+         * @description Da quale istante il lettore deve mandare le letture misurate in caratteri.
+         *
+         *     `da` non e' l'ultimo istante noto: e' quello **meno una finestra di
+         *     sovrapposizione** di un giorno, perche' una riga viene scritta quando la
+         *     pagina viene LASCIATA e un lettore puo' restare spento in mezzo —
+         *     chiedere «solo quello che viene dopo» salterebbe una riga scritta in
+         *     ritardo ma datata prima. Su un deposito vuoto e' 0, cioe' «manda tutto».
+         *
+         *     `formato` e' la versione del formato delle righe che questo server sa
+         *     leggere: serve al lettore per non mandare qualcosa che verrebbe rifiutato.
+         */
+        StatoDelleLetture: {
+            /** Da */
+            da: number;
+            /** Righe */
+            righe: number;
+            /** Formato */
+            formato: number;
         } & {
             [key: string]: unknown;
         };
@@ -16785,6 +16924,61 @@ export interface operations {
             };
         };
     };
+    device_letture_state_api_kolibre_devices_caratteri_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatoDelleLetture"];
+                };
+            };
+        };
+    };
+    upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LettureCucite"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_device_restore_request_api_kolibre_devices_sync_restore_request_post: {
         parameters: {
             query?: never;
@@ -18132,74 +18326,6 @@ export interface operations {
             };
         };
     };
-    get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Interruttore"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Interruttore"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_opds_feed_setting_api_kolibre_settings_opds_feed_get: {
         parameters: {
             query?: {
@@ -18300,6 +18426,74 @@ export interface operations {
         };
     };
     update_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_put: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Interruttore"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Interruttore"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put: {
         parameters: {
             query?: {
                 token?: string | null;

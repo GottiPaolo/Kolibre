@@ -54,7 +54,7 @@ def _parse_calibre_annotation_timestamp(value):
     """Calibre's own annotation timestamp — confirmed directly against a
     real entry via calibre-debug (db.new_api.all_annotations_for_book):
     ISO8601 with a trailing 'Z', e.g. "2025-01-19T18:10:15.827Z". Same class
-    of bug as KOReader's own a.datetime (see devices.py's
+    of bug as KOReader's own a.datetime (see devices/_shared.py's
     _parse_koreader_datetime): this field existed all along but was never
     read, so every Calibre-viewer highlight's created_at was always "when
     this sync happened to run", not when the highlight was actually made.
@@ -85,14 +85,14 @@ def _apply_calibre_annotations(db: Session, user_id: int, folder: str, book_id: 
     row instead of duplicating it every time. Never deletes: an annotation
     that disappears from Calibre (edited/removed there) is left alone here,
     same "never destructive" rule already used for device-sourced highlights
-    in devices.py's push_device_annotations.
+    in devices/annotations.py's push_device_annotations.
     """
     for annot in annotations or []:
         annot_id = annot.get("annot_id")
         if not annot_id:
             continue
         # Same "device/source is the source of truth for the real creation
-        # date" fix as devices.py's push_device_annotations — applied on
+        # date" fix as devices/annotations.py's push_device_annotations — applied on
         # both insert and update so a highlight synced late (or before this
         # fix existed) self-heals to its real date on its very next sync.
         hl_datetime = _parse_calibre_annotation_timestamp(annot.get("timestamp"))
@@ -141,7 +141,7 @@ def list_transferable_libraries(
     (used by the web UI) is display-name-oriented and doesn't expose the
     on-disk folder_name that every other per-library endpoint (books,
     custom-columns, fulltext, this router) expects as its `library`/`folder`
-    parameter — mirrors the same reasoning as devices.py's
+    parameter — mirrors the same reasoning as devices/sync.py's
     /api/kolibre/devices/libraries (the KOReader-plugin equivalent).
 
     **Solo le sue** (8/11/2026). Questa elencava ogni biblioteca del
@@ -278,7 +278,7 @@ async def upload_library_fulltext_db(
     current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     """
-    Raw-bytes upload (no multipart, same pattern as devices.py's
+    Raw-bytes upload (no multipart, same pattern as devices/backups_stats.py's
     /api/kolibre/devices/backup) of a fulltext.db previously downloaded from
     THIS server (or another Kolibre server) — accepted only after validating
     it's actually a SQLite db with the expected fts_meta table, so a

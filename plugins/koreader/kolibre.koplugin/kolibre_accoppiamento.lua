@@ -477,7 +477,9 @@ function KolibreAccoppiamento._applyOverwriteBatch(self, to_overwrite, no_candid
     for idx, e in ipairs(to_overwrite) do
         self:_showProgress(t("koreader.library_init.overwriting_progress", { done = idx, total = #to_overwrite }))
         self:_deleteManagedBook(e.path)
-        self:_downloadCatalogBook(e.candidate, e.candidate.library)
+        -- true = muto (20/11/2026, E7): questo giro mostra gia' la sua
+        -- barra «Sovrascrivo x di y» qui sopra.
+        self:_downloadCatalogBook(e.candidate, e.candidate.library, true)
     end
     self:_closeProgress()
     self:_showNoCandidateMenu(no_candidate)

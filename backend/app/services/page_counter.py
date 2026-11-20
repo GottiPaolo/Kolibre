@@ -14,6 +14,8 @@ import zipfile
 import xml.etree.ElementTree as ET
 from typing import Optional
 
+from ..logging_utils import log_message
+
 CONTAINER_NS = {'ns': 'urn:oasis:names:tc:opendocument:xmlns:container'}
 OPF_NS = {'opf': 'http://www.idpf.org/2007/opf'}
 
@@ -101,7 +103,11 @@ def _count_pdf_pages(pdf_path: str) -> Optional[int]:
     from pypdf import PdfReader
     try:
         return len(PdfReader(pdf_path).pages)
-    except Exception:
+    except Exception as e:
+        # Il None che esce da qui diventa «nessun conteggio» senza altre
+        # tracce: il file che non si legge va detto, una riga per file.
+        log_message("warning", "pages",
+                    f"Page count failed: PDF not readable '{os.path.basename(pdf_path)}' ({type(e).__name__})")
         return None
 
 
@@ -157,5 +163,10 @@ def _extract_epub_text(epub_path: str) -> Optional[str]:
                 # di tutte le statistiche.
                 text_parts.append(_TAG_RE.sub(' ', _DA_TOGLIERE_RE.sub(' ', raw)))
             return ' '.join(text_parts)
-    except Exception:
+    except Exception as e:
+        # Da questo None discendono in silenzio: niente pagine, niente
+        # statistiche in caratteri, niente impronta di contenuto
+        # (text_fingerprint passa di qui). Una riga per file illeggibile.
+        log_message("warning", "pages",
+                    f"Text extraction failed on EPUB '{os.path.basename(epub_path)}' ({type(e).__name__})")
         return None

@@ -31,10 +31,12 @@ export async function registerDevice(name: string, model: string): Promise<Devic
   return data
 }
 
+// `folder_layout` non c'è più (20/11/2026, punto B8): l'opzione è stata
+// rimossa a tutto tondo — il server la ignora anche se una webapp vecchia
+// in cache la mandasse ancora.
 export interface DeviceUpdatePayload {
   name?: string
   model?: string
-  folder_layout?: string
   write_folder_cover?: boolean
   delete_policy?: string
 }

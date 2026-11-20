@@ -28,6 +28,7 @@ from typing import Optional
 
 import httpx
 
+from ..logging_utils import log_message
 from . import stardict_service
 
 # Which language a lookup prefers used to be TWO constants pinned to Italian:
@@ -182,6 +183,12 @@ def _fetch(word: str) -> Optional[dict]:
             # «rifai», non «non esiste».
             raise RicercaDaRifare(word, f"Wiktionary answered HTTP {resp.status_code}")
         break
+    # Un successo arrivato dopo dei rifiuti e' invisibile a chi chiama: la
+    # risposta e' identica a quella del primo colpo. Una riga dice che il
+    # limitatore di Wikimedia sta mordendo, prima che morda fino in fondo.
+    if attempt > 1:
+        log_message("info", "dictionaries",
+                    f"Wiktionary answered for '{word}' only on attempt {attempt} of {_MAX_ATTEMPTS} (rate-limited or failing before that)")
     try:
         data = resp.json()
     except (httpx.HTTPError, ValueError) as e:

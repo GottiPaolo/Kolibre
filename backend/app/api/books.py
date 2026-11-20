@@ -81,7 +81,7 @@ _LIST_DESCRIPTION_EXCERPT_CHARS = 400
 # riscaricare tutto per scoprire che non era cambiato niente. Su 100.000
 # libri l'elenco completo costa 9,4 secondi e 66 MB — misurati, vedi la
 # docstring di `list_books`. Il gettone di cambiamento esisteva, ma solo per
-# i dispositivi KOReader (`devices.py::_library_token`), e sulle liste di
+# i dispositivi KOReader (`devices/sync.py::_library_token`), e sulle liste di
 # libri non c'era nessun ETag: l'unico ETag del server stava sui file
 # immagine.
 #
@@ -509,7 +509,7 @@ def get_reading_position(
     current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     """
-    The web reader's counterpart to devices.py's kosync-style /sync/progress
+    The web reader's counterpart to devices/readings.py's kosync-style /sync/progress
     — same ReadingPosition table (a single universal "latest position" per
     book, shared with KOReader), but identified directly by calibre_book_id
     + library (which the web reader already knows) instead of by file hash

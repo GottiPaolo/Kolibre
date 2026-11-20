@@ -325,7 +325,7 @@ def get_user_or_device(
     caso vero e' uno solo: scaricare il file di un libro. Il server stesso
     dice al dispositivo di chiamare
     `/api/kolibre/books/{id}/download` (vedi il campo `download_url` in
-    api/devices.py), ma quel percorso stava dietro l'autenticazione utente,
+    api/devices/sync.py), ma quel percorso stava dietro l'autenticazione utente,
     che un dispositivo non ha e non puo' avere: dalla chiusura delle API
     (18/09/2026) ogni download dal plugin KOReader rispondeva 401. Riscontrato
     in uso, con il log del dispositivo.

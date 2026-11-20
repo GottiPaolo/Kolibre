@@ -107,8 +107,12 @@ end
 --- valore e' un errore da mostrare, e c'e' solo quando il server non ha
 --- risposto: «sei aggiornato» non e' un errore.
 function KolibreAggiornamento._versioneNuovaDelPlugin(self)
+    -- `breve` (20/11/2026, E7): la risposta e' un numero di versione e due
+    -- righe di novita'. I 10/30 s del profilo LARGE qui non sono margine:
+    -- sono quanto resta fermo il lettore se il server e' lento o assente.
     local result, err = self.api:request(
-        "GET", "/api/tools/plugins/koreader/version?lingua=" .. lingua_attiva())
+        "GET", "/api/tools/plugins/koreader/version?lingua=" .. lingua_attiva(),
+        nil, { breve = true })
     if not result or not result.version then return nil, tostring(err) end
     if not _isNewerVersion(result.version, VERSION) then return nil, nil end
     return { versione = result.version, novita = result.novita }, nil
@@ -658,7 +662,9 @@ end
 function KolibreAggiornamento._patchDaAggiornare(self)
     local ok, da_aggiornare = pcall(function()
         if not self:_cartellaDellePatch() then return {} end
-        local risposta = self.api:request("GET", "/api/tools/koreader/patches")
+        -- `breve` (20/11/2026, E7): stesso motivo del controllo di
+        -- versione qui sopra — un elenco piccolo per costruzione.
+        local risposta = self.api:request("GET", "/api/tools/koreader/patches", nil, { breve = true })
         return KolibrePatch.daAggiornare(
             risposta and risposta.patches or nil,
             function(patch) return self:_statoDellaPatch(patch) end,

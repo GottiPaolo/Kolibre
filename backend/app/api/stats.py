@@ -228,7 +228,7 @@ def pair_orphan_sessions(
 ):
     """
     Manual "Accoppia manualmente" action for orphan reading sessions —
-    same shape as devices.py's pair_device_book/queue_flagged_book_action
+    same shape as the devices package's pair_device_book/queue_flagged_book_action
     "pair" action for OrphanHighlight, applied to stats_service.
     pair_orphan_sessions (see StatsHashPairing's own docstring for why this
     is needed at all: automatic hash-based resolution has nothing left to

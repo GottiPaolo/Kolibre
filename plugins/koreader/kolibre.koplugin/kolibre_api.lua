@@ -70,8 +70,23 @@ KolibreApi.TIMEOUT_CONTROLLO_TOTALE = 9
 -- Returns decoded_body on success, or nil, err (err is a number for HTTP
 -- status errors, a string for transport-level errors).
 --
--- `opts.breve` chiede i timeout corti qui sopra: lo usa solo chi sta
--- verificando se il server c'e', mai chi sta trasferendo qualcosa.
+-- `opts.breve` chiede i timeout corti qui sopra: lo usa chi sta verificando
+-- se il server c'e', e dal 20/11/2026 (punto E7) anche chi chiede una
+-- risposta piccola e limitata per costruzione — il numero di versione del
+-- plugin, l'elenco delle patch. Per quelle domande i 10/30 s del profilo
+-- LARGE non sono un margine utile: sono la misura esatta del «dispositivo
+-- imbambolato», perche' il runtime e' a thread singolo e ogni secondo
+-- d'attesa e' un secondo di schermo fermo. Mai per chi trasferisce file:
+-- quelli hanno il profilo FILE qui sotto (vedi downloadTo).
+--
+-- **Il limite di LuaSocket, scritto una volta per tutte** (20/11/2026).
+-- `http.TIMEOUT` di LuaSocket e' UN numero solo, il timeout «di blocco» fra
+-- due letture: da solo non distingue connessione da lettura ne' mette un
+-- tetto complessivo. La distinzione la fa il `socketutil` di KOReader, che
+-- rimpiazza `socket.tcp` e imposta sul socket `settimeout(block, "b")` e
+-- `settimeout(total, "t")` (verificato in frontend/socketutil.lua, v2023.04
+-- e v2025.08). Per questo i timeout qui si passano SEMPRE attraverso
+-- `socketutil:set_timeout(blocco, totale)` e mai scrivendo `http.TIMEOUT`.
 function KolibreApi:request(method, path, body, opts)
     local sink = {}
     local request = {
@@ -187,7 +202,12 @@ function KolibreApi:downloadTo(path, local_path, max_bytes)
         },
     }
 
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    -- 20/11/2026 (E7): profilo FILE di KOReader (15 s di blocco / 60 totali),
+    -- non LARGE (10/30): questo e' un trasferimento di file veri, e con 30 s
+    -- totali un libro grosso su un WiFi lento veniva troncato a download
+    -- quasi finito. Sono gli stessi numeri che KOReader usa per i propri
+    -- download («File downloads» in frontend/socketutil.lua, dalla v2023.04).
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     local code, _, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
 
@@ -234,7 +254,9 @@ function KolibreApi:uploadFile(path, local_path)
         },
     }
 
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    -- Profilo FILE, come downloadTo: anche questo e' un trasferimento di
+    -- file (20/11/2026).
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     local code, _, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
 
@@ -270,7 +292,9 @@ function KolibreApi:uploadFileForJson(path, local_path)
         },
     }
 
-    socketutil:set_timeout(socketutil.LARGE_BLOCK_TIMEOUT, socketutil.LARGE_TOTAL_TIMEOUT)
+    -- Profilo FILE, come downloadTo: anche questo e' un trasferimento di
+    -- file (20/11/2026).
+    socketutil:set_timeout(socketutil.FILE_BLOCK_TIMEOUT, socketutil.FILE_TOTAL_TIMEOUT)
     local code, _, status = socket.skip(1, http.request(request))
     socketutil:reset_timeout()
 

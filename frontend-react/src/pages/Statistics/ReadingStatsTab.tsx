@@ -22,6 +22,7 @@ import {
   formatDurationHuman,
   inizioSettimanaDi,
   peakHoursBuckets,
+  quotaTempoEsatto,
   readingSpeedCharsPerHour,
   readingSpeedPagesPerHour,
   unitaMisura,
@@ -204,6 +205,12 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
     return buildStackedByBookDatasets(monthKeys, sessionsInYear, (s) => s.date.slice(5, 7), t, misura)
   }, [raw, monthYear, monthKeys, t, misura])
 
+  // Quanta parte del tempo mostrato è misurata davvero in caratteri (passo
+  // 4, 20/11/2026) invece che stimata da frazione di libro. Dal periodo
+  // filtrato, così la riga parla sempre dei numeri che hai davanti; nulla
+  // finché non esiste nemmeno una sessione esatta, cioè su tutto lo storico
+  // raccolto prima del 19/11/2026.
+  const quotaEsatta = useMemo(() => quotaTempoEsatto(rawPeriodo), [rawPeriodo])
   const peakHours = useMemo(() => peakHoursBuckets(rawPeriodo, t), [rawPeriodo, t])
   const streak = useMemo(() => currentStreakDays(raw), [raw])
   const speed = useMemo(() => readingSpeedPagesPerHour(summary), [summary])
@@ -264,6 +271,15 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
           {tuttoIlTempo && (
             <span>
               <span className="tabular-nums text-foreground">{summary?.year_books || 0}</span> {t('stats.reading.finishedThisYearSuffix')}
+            </span>
+          )}
+          {/* Da quando il lettore manda le righe per pagina (19/11/2026) i
+              caratteri sono in parte misurati e in parte stimati: questa riga
+              dichiara quanta parte del tempo è coperta dalla misura vera. */}
+          {quotaEsatta != null && (
+            <span>
+              {t('stats.reading.exactSharePrefix')}{' '}
+              <span className="tabular-nums text-foreground">{quotaEsatta}%</span> {t('stats.reading.exactShareSuffix')}
             </span>
           )}
         </p>

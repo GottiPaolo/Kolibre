@@ -34,6 +34,7 @@ from typing import Iterable, List, Optional
 from sqlalchemy.orm import Session
 
 from .. import config, models
+from ..logging_utils import log_message
 from . import fulltext_index
 
 # Quante note al massimo si interrogano per proporre un libro: il voto si
@@ -50,6 +51,20 @@ _MIN_PAROLE = _SALTA_PAROLE + _PAROLE_FRASE
 
 
 _ids_cache: dict = {}
+
+# Le biblioteche gia' segnalate come illeggibili. `ids_libri_esistenti` passa
+# su ogni nota e ogni hash, e il percorso di errore NON finisce nella cache:
+# senza questo insieme un disco scollegato scriverebbe una riga per nota.
+# Si svuota alla prima lettura riuscita, cosi' un guasto nuovo si rivede.
+_biblioteche_segnalate: set = set()
+
+
+def _segnala_illeggibile(library: str, errore: Exception) -> None:
+    if library in _biblioteche_segnalate:
+        return
+    _biblioteche_segnalate.add(library)
+    log_message("warning", "annotations",
+                f"metadata.db of library '{library}' could not be read ({type(errore).__name__}): widowed notes cannot be judged there")
 
 
 def ids_libri_esistenti(library: str) -> Optional[set]:
@@ -69,7 +84,8 @@ def ids_libri_esistenti(library: str) -> Optional[set]:
     try:
         st = os.stat(percorso)
         chiave = (percorso, st.st_size, st.st_mtime_ns)
-    except OSError:
+    except OSError as e:
+        _segnala_illeggibile(library, e)
         return None
     memo = _ids_cache.get(library)
     if memo and memo[0] == chiave:
@@ -80,8 +96,10 @@ def ids_libri_esistenti(library: str) -> Optional[set]:
             ids = {r[0] for r in conn.execute("SELECT id FROM books")}
         finally:
             conn.close()
-    except sqlite3.Error:
+    except sqlite3.Error as e:
+        _segnala_illeggibile(library, e)
         return None
+    _biblioteche_segnalate.discard(library)
     _ids_cache[library] = (chiave, ids)
     return ids
 
@@ -171,10 +189,12 @@ def suggest_books(db: Session, library: str, calibre_book_id: int, user_id: int)
     ids = _ids_esistenti(library) or set()
     voti: dict = {}
     cercate = 0
+    fallite = 0
     for frase in frasi:
         try:
             risultati = fulltext_index.search(library_path, f'"{frase}"', limit=5)
         except Exception:
+            fallite += 1
             continue
         cercate += 1
         for r in risultati:
@@ -186,6 +206,12 @@ def suggest_books(db: Session, library: str, calibre_book_id: int, user_id: int)
             if bid is None or bid == calibre_book_id or bid not in ids:
                 continue
             voti[bid] = voti.get(bid, 0) + 1
+
+    # Riepilogo a fine ciclo, non una riga per frase: frasi non cercate
+    # abbassano il voto senza che la pagina possa dirlo.
+    if fallite:
+        log_message("warning", "annotations",
+                    f"Widowed-note suggestion for book {calibre_book_id}: {fallite} of {len(frasi)} phrases could not be searched (full-text index error)")
 
     from ..calibre.library import CalibreLibrary
     lib = CalibreLibrary(library_path)

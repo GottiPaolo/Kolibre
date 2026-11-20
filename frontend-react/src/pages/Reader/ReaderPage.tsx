@@ -3,7 +3,7 @@
 // + reader.html): niente React Router, niente QueryClientProvider — i
 // parametri arrivano dalla query string della finestra e i dati passano da
 // chiamate dirette a lib/api.ts, non da hook di React Query.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ePub from 'epubjs'
 import type { Book, Contents, Location as EpubRenditionLocation, NavItem, Rendition } from 'epubjs'
 import { AlertTriangle, ArrowLeft, ChevronLeft, ChevronRight, List, Search, Settings2, Sparkles, X } from 'lucide-react'
@@ -11,54 +11,36 @@ import { authHeaders } from '@/lib/auth'
 import { api, withBackendUrl } from '@/lib/api'
 import { downloadFormatUrl } from '@/lib/bookActions'
 import { READER_HEIGHT, READER_WIDTH } from '@/lib/readerActions'
-import { createAnnotation, riposizionaAnnotazione, salvaAncoraRitrovata, trashHighlight, updateHighlightColor, updateHighlightNotes } from '@/lib/annotationActions'
-import type { NewAnnotationPayload } from '@/lib/annotationActions'
-import { getReadingPosition, putReadingPosition } from '@/lib/readingPositionActions'
-import { lookupWord } from '@/lib/dictionaryActions'
+import { salvaAncoraRitrovata } from '@/lib/annotationActions'
+import { getReadingPosition } from '@/lib/readingPositionActions'
 import { copiaNegliAppunti } from '@/lib/appunti'
 import { coloriDi, temaEScuro, temaPerEpubJs, type PreferenzeLettura } from './EpubTheme'
 import { unisciIRiquadriDeiSegni } from './UnisciRiquadri'
-import { spostaEstremoDiUnaParola, type Estremo, type Verso } from './EpubSearch'
-import { addWordToVocabulary } from '@/lib/vocabularyActions'
 import { useStyleVariant } from '@/lib/useStyleVariant'
 import { useLingua } from '@/lib/i18n'
 import { cn } from '@/lib/utils'
-import type { RealHighlight } from '@/types/annotation'
 import {
   HIGHLIGHT_COLORS,
   chapterPathForCfi,
-  colorHex,
   formatHighlightMeta,
-  highlightRenderCfi,
-  isNoteLink,
-  isNoteBacklink,
   isSingleWord,
-  loadNoteText,
-  pseudoPageForCfi,
   searchInBook,
   tocEntryForHref,
 } from './EpubHelpers'
 import {
-  EMPTY_HIGHLIGHT_POPUP,
-  EMPTY_SELECTION_POPUP,
   type EpubSearchMatch,
-  type HighlightPopupState,
   locationsTotal,
   renditionContentsList,
-  type SelectionPopupState,
   type SidebarTab,
 } from './EpubTypes'
 import { posizioneNelLibro, type PosizioneNelLibro } from './PosizioneNelLibro'
 import { titoloDellaFinestra } from './TitoloDellaFinestra'
 import {
-  clampFontScale,
-  FONT_SCALE_STEP,
   loadFontScale,
   loadPreferenzeLettura,
   savePreferenzeLettura,
   loadPageLayout,
   type PageLayout,
-  saveFontScale,
   savePageLayout,
   spreadForPageLayout,
 } from './EpubReaderSettings'
@@ -66,76 +48,10 @@ import { EpubHighlightPopup } from './EpubHighlightPopup'
 import { EpubSettingsPanel } from './EpubSettingsPanel'
 import { EpubSidebar } from './EpubSidebar'
 import { messaggioErrore } from '@/lib/messaggiErrore'
-
-const POPUP_WIDTH = 220
-const POPUP_HEIGHT = 190 // rough estimate: color row + note textarea + action buttons
-
-// Distanza euclidea tra i due punti di tocco di un gesto pinch — unica
-// funzione pura serve sia al touchmove sul container esterno sia a quello
-// registrato dentro ogni documento iframe (vedi attachPinchZoomListeners).
-function touchDistance(touches: TouchList): number {
-  const a = touches[0]
-  const b = touches[1]
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)
-}
-
-interface MarkClickData {
-  id?: number | string | null
-  cfiRange?: string
-}
-
-/**
- * Un rimando di nota visibile sulla pagina, nelle coordinate della finestra
- * esterna: sopra ognuno si disegna un bersaglio trasparente che riceve il
- * click al posto dell'iframe. Vedi refreshNoteHitboxes.
- */
-interface NoteHitbox {
-  key: string
-  left: number
-  top: number
-  width: number
-  height: number
-  href: string
-  /** Il testo del rimando ("1", "[12]"): serve a togliere lo stesso
-   *  numero dalla testa della nota. Vedi loadNoteText. */
-  marcatore: string
-  contents: Contents
-}
-
-// Vue's NewAnnotationPayload equivalent (annotationActions.ts) omits
-// chapter/page/cfi_position — real fields the backend's HighlightCreate
-// schema does accept (see schema.d.ts), just not modeled in that narrower
-// interface (built for the manual "Nuova annotazione" dialog on the
-// Annotazioni page, which has none of these). Assigning through a variable
-// of this wider type (rather than an inline object literal at the call
-// site) sidesteps TS's excess-property check while still reusing
-// createAnnotation 1:1 as instructed, instead of duplicating the POST call.
-interface ReaderAnnotationPayload extends NewAnnotationPayload {
-  chapter?: string | null
-  page?: number | null
-  cfi_position?: string | null
-}
-
-// Larghezza del popup della nota. Larga: una nota e' spesso un periodo
-// intero con una citazione dentro, e in una colonna stretta diventa una
-// scaletta di parole.
-const LARGHEZZA_NOTA = 560
-
-/**
- * Dove mettere il popup della nota: centrato sul rimando, sotto se ci sta,
- * sopra altrimenti, e comunque dentro lo schermo.
- *
- * `altezza` e' quella misurata dopo la resa (0 al primo giro, vedi
- * useLayoutEffect in ReaderPage): finche' non si conosce, si tenta sotto.
- */
-function posizioneNota(p: { x: number; y: number }, altezza: number) {
-  const larghezza = Math.min(LARGHEZZA_NOTA, window.innerWidth - 32)
-  const left = Math.max(16, Math.min(p.x - larghezza / 2, window.innerWidth - larghezza - 16))
-  const sotto = p.y + 18
-  const ciSta = sotto + altezza + 16 <= window.innerHeight
-  const top = ciSta ? sotto : Math.max(16, p.y - 18 - altezza)
-  return { left, top, width: larghezza }
-}
+import { useReaderGestures } from './useReaderGestures'
+import { posizioneNota, useFootnotePopups } from './useFootnotePopups'
+import { useAnnotationLayer } from './useAnnotationLayer'
+import { useReadingPositionSync } from './useReadingPositionSync'
 
 // Caratteri che l'XML non ammette e basta: i controlli C0 tranne tab, a
 // capo e ritorno a capo (XML 1.0 §2.2). Sono invisibili, non vogliono dire
@@ -316,13 +232,6 @@ export function ReaderPage() {
   // La barra in alto e' nascosta di default: il reader deve somigliare a una
   // pagina, non a un'applicazione. Si scopre toccando la fascia superiore.
   const [chromeVisible, setChromeVisible] = useState(false)
-  // Nota a pie' di pagina aperta sul posto. `text` null mentre carica: il
-  // file delle note puo' essere un documento a parte da leggere.
-  const [notePopup, setNotePopup] = useState<{ x: number; y: number; text: string | null } | null>(null)
-  // Bersagli cliccabili disegnati NELLA PAGINA ESTERNA sopra ogni rimando di
-  // nota. Vedi refreshNoteHitboxes: in Safari il click dentro l'iframe non
-  // arriva mai al nostro codice, quindi il rimando va intercettato da fuori.
-  const [noteHitboxes, setNoteHitboxes] = useState<NoteHitbox[]>([])
   // Dito invece di mouse. Deciso una volta sola all'avvio: non e' una cosa
   // che cambia mentre si legge, e rivalutarla ad ogni render non servirebbe.
   // Vero quando il lettore NON ha una finestra sua da chiudere: sempre col
@@ -340,17 +249,6 @@ export function ReaderPage() {
   const [tocco] = useState(
     () => typeof window !== 'undefined' && !!window.matchMedia?.('(pointer: coarse)').matches
   )
-  const notePopupRef = useRef<HTMLDivElement | null>(null)
-  // Quando l'ultimo gesto tattile e' stato gestito, per scartare il click
-  // sintetico che il browser manda subito dopo. Vedi zonaClick.
-  const ultimoToccoRef = useRef(0)
-  // Gesto gia' servito durante il movimento: vedi zonaTouchMove.
-  const gestoConsumatoRef = useRef(false)
-  // Il testo dell'ultima selezione per cui il popup e' stato mostrato: serve
-  // a non riproporlo dopo che l'utente l'ha scartato. Vedi il sondaggio
-  // della selezione piu' sotto.
-  const selezioneMostrataRef = useRef('')
-  const [noteHeight, setNoteHeight] = useState(0)
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>(null)
   // Il campo di ricerca della barra laterale, per portarci il fuoco quando
   // Cmd/Ctrl+F apre la scheda: senza, la scheda si apre e bisogna comunque
@@ -359,42 +257,17 @@ export function ReaderPage() {
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<EpubSearchMatch[]>([])
   const [searching, setSearching] = useState(false)
-  // Solo le evidenziazioni vere: un'annotazione orfana non ha un CFI e non
-  // si può disegnare su una pagina. Vedi HighlightPopupState.
-  const [existingHighlights, setExistingHighlights] = useState<RealHighlight[]>([])
-  // Quante annotazioni hanno un'ancora che in QUESTO file non risolve. Zero
-  // e' il caso normale; qualunque altro numero va detto.
-  const [annotazioniNonPosizionate, setAnnotazioniNonPosizionate] = useState(0)
-  // E quante non hanno ancora un'ancora per niente: arrivate da un
-  // dispositivo e non ancora convertite. E' uno stato di passaggio, non un
-  // guasto, e va detto in un altro modo.
-  const [annotazioniInAttesa, setAnnotazioniInAttesa] = useState(0)
   // L'avviso "nota non ritrovata". Non e' un messaggio fugace come gli
   // altri: e' la risposta a un gesto esplicito — hai chiesto di aprire UNA
   // nota — e se il lettore finisce altrove deve dirlo e restare li' a dirlo,
   // finche' non lo chiudi. In questa fase resta visibile anche per
   // distinguere un difetto da una nota che non si riesce a identificare.
   const [notaNonTrovata, setNotaNonTrovata] = useState<{ testo: string; motivo: string } | null>(null)
-  const [selectionPopup, setSelectionPopup] = useState<SelectionPopupState>(EMPTY_SELECTION_POPUP)
-  const [selectedColor, setSelectedColor] = useState('yellow')
-  const [selectionNote, setSelectionNote] = useState('')
-  // Lookup dizionario per selezioni di una singola parola (vedi isSingleWord
-  // in EpubHelpers.ts) — mostrato nello stesso EpubHighlightPopup della
-  // selezione, non un popup a parte (vedi EpubHighlightPopup.tsx).
-  const [wordLookup, setWordLookup] = useState<{
-    loading: boolean
-    definition: string | null
-    source: string | null
-    added: boolean
-  }>({ loading: false, definition: null, source: null, added: false })
   // Mostrato invece di fallire in silenzio: un'evidenziazione/posizione
   // poteva sembrare salvata (resa localmente) anche quando il salvataggio
   // server-side falliva davvero — invisibile finché non spariva
   // misteriosamente, altrove, in tutt'altra finestra.
   const [saveError, setSaveError] = useState('')
-  const [highlightPopup, setHighlightPopup] = useState<HighlightPopupState>(EMPTY_HIGHLIGHT_POPUP)
-  const [editNote, setEditNote] = useState('')
-  const [editColor, setEditColor] = useState('yellow')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [pageLayout, setPageLayout] = useState<PageLayout>(() => loadPageLayout())
   const [fontScale, setFontScale] = useState<number>(() => loadFontScale())
@@ -438,48 +311,123 @@ export function ReaderPage() {
   // il libro si apre in un punto dove non c'e' niente di evidenziato», senza
   // nemmeno l'avviso, perche' la ricerca ERA riuscita.
   const miraPresaRef = useRef(false)
-  const savePositionTimerRef = useRef<number | undefined>(undefined)
-  const lastKnownCfiRef = useRef<string | null>(null)
-  const lastKnownPercentageRef = useRef<number | null>(null)
+  // La scrittura della posizione di lettura vive in
+  // useReadingPositionSync.ts (estrazione del 20/11/2026); showSaveError
+  // e' una dichiarazione di funzione piu' sotto (hoisted).
+  const { scheduleSavePosition, flushReadingPosition } = useReadingPositionSync({
+    library,
+    bookId,
+    isIngestPreview,
+    t,
+    showSaveError,
+  })
   const saveErrorTimerRef = useRef<number | undefined>(undefined)
-  const attachedDocsRef = useRef<WeakSet<Document>>(new WeakSet())
-  const attachedPinchDocsRef = useRef<WeakSet<Document>>(new WeakSet())
-  const attachedHoverDocsRef = useRef<WeakSet<Document>>(new WeakSet())
-  const attachedNoteDocsRef = useRef(new WeakSet<Document>())
-  const attachedTapDocsRef = useRef<WeakSet<Document>>(new WeakSet())
-  // Posizione+istante del touchstart a UN dito — null quando non c'è un tap
-  // in corso (gesto a 2 dita, o già degenerato in trascinamento/selezione).
-  // Letto al touchend per decidere se è stato un vero tap (vedi
-  // isTap/attachTapNavigationListeners) o solo scartato.
-  const tapStateRef = useRef<{ x: number; y: number; time: number } | null>(null)
-  // null = niente vicino al bordo, altrimenti quale freccia mostrare — le
-  // freccette restano nascoste durante la lettura e compaiono solo quando il
-  // cursore si avvicina al bordo sinistro/destro (scelta del 2026-08-18),
-  // sia sopra il wrapper esterno sia dentro l'iframe di
-  // epub.js (la stragrande maggioranza dell'area lettore).
-  const [hoverEdge, setHoverEdge] = useState<'left' | 'right' | null>(null)
-  // Stato del gesto pinch in corso: distanza iniziale tra le due dita e
-  // fontScale di partenza, così ogni touchmove calcola una nuova percentuale
-  // relativa invece di accumulare deriva da un delta frame-a-frame.
-  const salvaCorpoTimerRef = useRef<number | null>(null)
-  const corpoDaApplicareRef = useRef<number | null>(null)
-  const fotogrammaCorpoRef = useRef<number | null>(null)
-  const pinchStateRef = useRef<{ distance: number; baseScale: number } | null>(null)
-  // Specchio di existingHighlights leggibile da onMarkClicked, registrato
-  // una sola volta su rendition — stesso motivo di locationsReadyRef sopra.
-  const highlightsRef = useRef<RealHighlight[]>([])
-  // Specchio di fontScale leggibile dai listener touch registrati una sola
-  // volta dentro ogni documento iframe (attachPinchZoomListeners) — stesso
-  // motivo di highlightsRef sopra.
-  const fontScaleRef = useRef(fontScale)
 
-  useEffect(() => {
-    highlightsRef.current = existingHighlights
-  }, [existingHighlights])
+  // Le note a pie' di pagina vivono in useFootnotePopups.ts (estrazione del
+  // 20/11/2026): popup, bersagli per Safari e le rimisure dopo i riflussi.
+  const {
+    notePopup,
+    setNotePopup,
+    notePopupRef,
+    noteHeight,
+    noteHitboxes,
+    attachNoteListeners,
+    openNotePopup,
+    scheduleNoteHitboxes,
+  } = useFootnotePopups({
+    renditionRef,
+    containerRef,
+    bookRef,
+    lastLocationRef,
+    tocco,
+    t,
+    sidebarTab,
+    pageLayout,
+    fontScale,
+  })
 
-  useEffect(() => {
-    fontScaleRef.current = fontScale
-  }, [fontScale])
+  // Selezione, popup ed evidenziazioni vivono in useAnnotationLayer.ts
+  // (estrazione del 20/11/2026). ritrovaDalTesto, apriRicercaSeScorciatoia
+  // e showSaveError sono dichiarazioni di funzione piu' sotto (hoisted).
+  const {
+    existingHighlights,
+    annotazioniNonPosizionate,
+    annotazioniInAttesa,
+    selectionPopup,
+    selectedColor,
+    setSelectedColor,
+    selectionNote,
+    setSelectionNote,
+    wordLookup,
+    highlightPopup,
+    editNote,
+    setEditNote,
+    editColor,
+    setEditColor,
+    ridisegnaEvidenziazioni,
+    loadExistingHighlights,
+    dismissSelectionPopup,
+    addSelectionToVocabulary,
+    saveHighlight,
+    applicaModifiche,
+    chiudiPopupEvidenziazione,
+    deleteHighlightAction,
+    spostaEstremo,
+    goToHighlightAndEdit,
+    onMarkClicked,
+    showSelectionPopup,
+    attachDirectSelectionListeners,
+  } = useAnnotationLayer({
+    renditionRef,
+    bookRef,
+    bookId,
+    library,
+    isIngestPreview,
+    tocItems,
+    locationsReadyRef,
+    t,
+    showSaveError,
+    setSidebarTab,
+    setNotaNonTrovata,
+    ritrovaDalTesto,
+    apriRicercaSeScorciatoia,
+  })
+
+  // I gesti e lo zoom vivono in useReaderGestures.ts (estrazione del
+  // 20/11/2026): qui arrivano solo i pezzi che pagina e JSX usano davvero.
+  // ridisegnaEvidenziazioni e scheduleNoteHitboxes sono dichiarazioni di
+  // funzione piu' sotto (hoisted), quindi passarle qui e' sicuro.
+  const {
+    hoverEdge,
+    setHoverEdge,
+    onEdgeHoverMove,
+    stepFontScale,
+    handlePinchStart,
+    handlePinchMove,
+    handlePinchEnd,
+    attaccaGestiTrackpad,
+    staccaGestiTrackpad,
+    attachPinchZoomListeners,
+    attachEdgeHoverListeners,
+    attachTapNavigationListeners,
+    handleTapStart,
+    handleTapEnd,
+    zonaClick,
+    zonaTouchStart,
+    zonaTouchMove,
+    zonaTouchEnd,
+    tapStateRef,
+    gestoConsumatoRef,
+  } = useReaderGestures({
+    renditionRef,
+    containerRef,
+    fontScale,
+    setFontScale,
+    prevPage,
+    nextPage,
+    ridisegnaEvidenziazioni,
+    scheduleNoteHitboxes,
+  })
 
   function showSaveError(msg: string) {
     setSaveError(msg)
@@ -504,192 +452,6 @@ export function ReaderPage() {
     savePageLayout(next)
   }
 
-  // Applica la dimensione testo a rendition + stato React senza persisterla —
-  // usata anche dal pinch, che la chiama molte volte per secondo durante il
-  // gesto: scrivere su localStorage ad ogni touchmove non serve (solo il
-  // valore finale conta) e sarebbe solo overhead sincrono nel bel mezzo del
-  // gesto.
-  /**
-   * Ridisegna i rettangoli delle evidenziazioni dove sta il testo ADESSO.
-   *
-   * epub.js ridisegna il pannello dei segni solo dentro `resize(w, h)`, cioe'
-   * quando cambiano le dimensioni della vista. Ma in impaginato cambiare il
-   * corpo del testo NON cambia le dimensioni dell'iframe — le colonne si
-   * riflow e basta — quindi i rettangoli restavano dove erano, sopra il testo
-   * vecchio, e si vedeva l'evidenziazione scollata dalla frase.
-   *
-   * Si toglie e si rimette, invece di cercare il pannello dentro le viste:
-   * `annotations.remove/add` sono API pubbliche, e il CFI non e' cambiato —
-   * cambiare stile non tocca il DOM — quindi rimettere lo stesso segno lo
-   * ricalcola sulle coordinate nuove senza spostare niente.
-   */
-  function ridisegnaEvidenziazioni() {
-    const rendition = renditionRef.current
-    if (!rendition) return
-    for (const h of highlightsRef.current) {
-      const cfi = highlightRenderCfi(h)
-      if (!cfi) continue
-      try {
-        rendition.annotations.remove(cfi, 'highlight')
-      } catch {
-        // non c'era: si disegna e basta
-      }
-      renderHighlightMark(cfi, h.color, h.id)
-      renderNoteUnderline(cfi, !!(h.notes && h.notes.trim()), h.color)
-    }
-  }
-
-  /**
-   * Applica una dimensione del testo durante un gesto, senza farlo a scatti.
-   *
-   * Il problema da cui nasce: un trackpad manda decine di eventi al secondo, e
-   * per ognuno si faceva `themes.fontSize()` — che riflow l'INTERO capitolo —
-   * piu' il ridisegno di tutte le evidenziazioni. Il risultato era un gesto a
-   * scatti, con il testo che arrancava dietro alle dita.
-   *
-   * Due cose, e sono diverse:
-   *
-   * 1. **Si applica una volta per fotogramma**, non una per evento. Gli eventi
-   *    in mezzo aggiornano solo il valore da raggiungere; disegna il browser,
-   *    quando e' pronto lui.
-   * 2. **Le evidenziazioni si ridisegnano alla FINE**, non durante. Durante il
-   *    gesto il testo si sta muovendo comunque e rifare i rettangoli a ogni
-   *    passo e' lavoro buttato; quello che conta e' che siano giusti quando ci
-   *    si ferma.
-   */
-  function applyFontScaleLive(next: number) {
-    const clamped = clampFontScale(next)
-    if (clamped === fontScaleRef.current) return
-    fontScaleRef.current = clamped
-    corpoDaApplicareRef.current = clamped
-    if (fotogrammaCorpoRef.current != null) return
-    fotogrammaCorpoRef.current = window.requestAnimationFrame(() => {
-      fotogrammaCorpoRef.current = null
-      const valore = corpoDaApplicareRef.current
-      if (valore == null) return
-      corpoDaApplicareRef.current = null
-      renditionRef.current?.themes.fontSize(`${valore}%`)
-      setFontScale(valore)
-    })
-  }
-
-  /** Fine del gesto: si rimettono i segni dove le parole stanno adesso. */
-  function fineCambioCorpo() {
-    saveFontScale(fontScaleRef.current)
-    ridisegnaEvidenziazioni()
-    scheduleNoteHitboxes()
-  }
-
-  /** I bottoni +/-: un colpo solo, si puo' fare tutto subito. */
-  function applyFontScaleStep(next: number) {
-    const clamped = clampFontScale(next)
-    renditionRef.current?.themes.fontSize(`${clamped}%`)
-    ridisegnaEvidenziazioni()
-    // E anche i bersagli dei rimandi di nota, per la stessa ragione per cui
-    // si ridisegnano i segni: cambiando il corpo del testo le parole si
-    // spostano, e i rimandi con loro. Mancava, e `fineCambioCorpo` (la fine
-    // del gesto di pizzico) lo faceva: la stessa cosa fatta in un modo e non
-    // nell'altro.
-    //
-    // Su Safari non e' un dettaglio estetico ma la differenza fra un link che
-    // funziona e uno che rompe la lettura: li' il click non arriva ai
-    // listener dentro l'iframe (bug WebKit 218086, spiegato in
-    // `refreshNoteHitboxes`), quindi passa per questi bersagli. Se restano
-    // dov'erano, il click cade a vuoto E il browser segue il link, portando
-    // l'iframe su un indirizzo che l'applicazione non ha.
-    scheduleNoteHitboxes()
-    fontScaleRef.current = clamped
-    setFontScale(clamped)
-  }
-
-  /** I bottoni +/- e le scorciatoie: un colpo solo, si applica e si salva. */
-  function commitFontScale(next: number) {
-    applyFontScaleStep(next)
-    saveFontScale(clampFontScale(next))
-  }
-
-  function stepFontScale(direction: 1 | -1) {
-    commitFontScale(fontScale + direction * FONT_SCALE_STEP)
-  }
-
-  function handlePinchStart(e: TouchEvent) {
-    if (e.touches.length === 2) {
-      pinchStateRef.current = { distance: touchDistance(e.touches), baseScale: fontScaleRef.current }
-    }
-  }
-
-  function handlePinchMove(e: TouchEvent) {
-    const state = pinchStateRef.current
-    if (e.touches.length !== 2 || !state) return
-    // Impedisce lo zoom/scroll nativo del browser sul gesto a due dita —
-    // senza, safari/chrome mobile provano a fare il proprio pinch-zoom della
-    // pagina oltre (o al posto di) quello del reader.
-    e.preventDefault()
-    const distance = touchDistance(e.touches)
-    if (distance <= 0) return
-    applyFontScaleLive(state.baseScale * (distance / state.distance))
-  }
-
-  function handlePinchEnd(e: TouchEvent) {
-    if (e.touches.length < 2 && pinchStateRef.current) {
-      pinchStateRef.current = null
-      fineCambioCorpo()
-    }
-  }
-
-  // ── Il pinch del TRACKPAD, che e' un'altra cosa da quello a due dita ────
-  //
-  // I gestori qui sopra sono per il tocco, e su un telefono vanno bene. Ma su
-  // un portatile il pinch del trackpad non e' un evento touch: Safari lo manda
-  // come `gesturestart/gesturechange/gestureend` (con `e.scale` relativa
-  // all'inizio del gesto), i browser basati su Chromium come un `wheel` con
-  // `ctrlKey` acceso. Nessuno dei due era gestito, quindi il gesto cadeva
-  // sullo zoom della PAGINA — che e' esattamente quello che non deve fare: il
-  // testo di un libro si ingrandisce cambiando corpo e riflow, non ingrandendo
-  // i pixel di tutta la finestra insieme alla barra e ai pannelli.
-
-  interface EventoGesto extends Event { scale: number }
-
-  function iniziaGesto(e: Event) {
-    e.preventDefault()
-    pinchStateRef.current = { distance: 1, baseScale: fontScaleRef.current }
-  }
-
-  function cambiaGesto(e: Event) {
-    const state = pinchStateRef.current
-    if (!state) return
-    e.preventDefault()
-    const scala = (e as EventoGesto).scale
-    if (!Number.isFinite(scala) || scala <= 0) return
-    applyFontScaleLive(state.baseScale * scala)
-  }
-
-  function finisceGesto(e: Event) {
-    if (!pinchStateRef.current) return
-    e.preventDefault()
-    pinchStateRef.current = null
-    fineCambioCorpo()
-  }
-
-  // Il pinch del trackpad su Chromium: un `wheel` con `ctrlKey`. Lo stesso
-  // evento arriva da Ctrl+rotella con il mouse, e li' il significato e' lo
-  // stesso — «ingrandisci» — quindi va bene trattarli insieme.
-  function rotellaConCtrl(e: WheelEvent) {
-    if (!e.ctrlKey) return
-    e.preventDefault()
-    // deltaY negativo = pinch in apertura.
-    //
-    // Il fattore era 0.01, cioe' fino al 10% a evento — e con decine di eventi
-    // al secondo il corpo sbatteva da 80 a 200 in mezzo gesto. 0.0015 da' un
-    // gesto che si puo' dosare: serve un movimento vero per attraversare tutta
-    // la scala, che e' quello che ci si aspetta da un pinch.
-    const fattore = 1 - e.deltaY * 0.0015
-    applyFontScaleLive(fontScaleRef.current * fattore)
-    if (salvaCorpoTimerRef.current) window.clearTimeout(salvaCorpoTimerRef.current)
-    salvaCorpoTimerRef.current = window.setTimeout(fineCambioCorpo, 300)
-  }
-
-  /** Attacca i gesti del trackpad a un documento (l'iframe del libro o il nostro). */
   /**
    * Riporta dentro la pagina gli elementi che il libro nasconde buttandoli
    * fuori campo.
@@ -747,22 +509,6 @@ export function ReaderPage() {
     } catch {
       // documento gia' invalidato: il prossimo capitolo riprova
     }
-  }
-
-  function attaccaGestiTrackpad(doc: Document | null | undefined) {
-    if (!doc) return
-    doc.addEventListener('gesturestart', iniziaGesto, { passive: false })
-    doc.addEventListener('gesturechange', cambiaGesto, { passive: false })
-    doc.addEventListener('gestureend', finisceGesto, { passive: false })
-    doc.addEventListener('wheel', rotellaConCtrl as EventListener, { passive: false })
-  }
-
-  function staccaGestiTrackpad(doc: Document | null | undefined) {
-    if (!doc) return
-    doc.removeEventListener('gesturestart', iniziaGesto)
-    doc.removeEventListener('gesturechange', cambiaGesto)
-    doc.removeEventListener('gestureend', finisceGesto)
-    doc.removeEventListener('wheel', rotellaConCtrl as EventListener)
   }
 
   function goToTocItem(item: NavItem) {
@@ -917,202 +663,6 @@ export function ReaderPage() {
       setSearchResults(await searchInBook(book, q))
     } finally {
       setSearching(false)
-    }
-  }
-
-  /** `false` se l'evidenziazione non si e' potuta disegnare: serve a contarle. */
-  /**
-   * La linea sottile che distingue chi ha un commento.
-   *
-   * Un'evidenziazione con una nota e' una cosa diversa da una senza: la prima
-   * dice «qui ho pensato qualcosa», la seconda «qui torna a leggere». A
-   * colpo d'occhio erano identiche.
-   *
-   * E' una SECONDA annotazione sullo stesso punto, di tipo 'underline':
-   * epub.js indicizza gli overlay per `cfi + tipo`, quindi convive con la
-   * 'highlight' invece di sostituirla.
-   *
-   * Continua e fine. Era tratteggiata, e il tratteggio sotto il testo
-   * competeva con il testo: a 3+2 px i segmenti hanno circa il passo delle
-   * aste delle lettere e la riga sembrava sporca invece che annotata.
-   *
-   * Poi l'ho fatta continua a mezzo pixel e 0,5 di opacita', e Paolo (06/10)
-   * non l'ha vista: «si vede davvero poco». Mezzo pixel non e' mezzo pixel —
-   * l'antialiasing lo spalma su due righe di pixel a meta' intensita', e
-   * moltiplicato per 0,5 di opacita' resta un quarto di segno.
-   *
-   * E non era continua lo stesso: `marks-pane` disegna un segmento per ogni
-   * riquadro che il browser restituisce, quindi una riga sola attraversata da
-   * un corsivo diventava tre trattini con due buchi. Lo risolve l'unione dei
-   * riquadri (vedi UnisciRiquadri.ts), che vale anche qui perche' `Underline`
-   * eredita da `Highlight`.
-   */
-  function renderNoteUnderline(cfiRange: string, haNota: boolean, colore?: string | null) {
-    const rendition = renditionRef.current
-    if (!rendition) return
-    try {
-      rendition.annotations.remove(cfiRange, 'underline')
-    } catch {
-      // non c'era: e' il caso normale
-    }
-    if (!haNota) return
-    try {
-      rendition.annotations.add('underline', cfiRange, {}, undefined, 'kolibre-nota', {
-        // **Il colore dell'evidenziazione, non quello del testo.** Era il
-        // colore del testo, cioe' un grigio chiaro sotto una fascia gialla:
-        // si leggeva come uno sbaglio di disegno, non come un segno. Tirata
-        // nella tinta della fascia e a piena opacita' diventa il suo bordo
-        // inferiore marcato — la stessa cosa, solo piu' decisa.
-        stroke: colorHex(colore),
-        'stroke-opacity': '1',
-        'stroke-width': '1.6',
-      })
-    } catch {
-      // un CFI che non risolve: il segno e' un di piu', non si insiste
-    }
-  }
-
-  function renderHighlightMark(cfiRange: string, colorValue: string | null, id: number | string | null): boolean {
-    const rendition = renditionRef.current
-    if (!rendition) return false
-    try {
-      // cfiRange è salvato anche in `data` (non solo usato come chiave di
-      // add()) così onMarkClicked può ritrovare l'evidenziazione anche
-      // quando `id` è ancora null (evidenziazione creata in questa sessione,
-      // prima che arrivi la risposta POST col vero id).
-      rendition.annotations.add('highlight', cfiRange, { id, cfiRange }, undefined, 'kolibre-highlight', {
-        fill: colorHex(colorValue),
-        // **L'opacita' sta sul GRUPPO, non sul riempimento dei rettangoli.**
-        //
-        // Un'evidenziazione non e' un rettangolo: `marks-pane` ne disegna uno
-        // per ogni riquadro che `Range.getClientRects()` restituisce, e quei
-        // riquadri si sovrappongono di continuo — una riga e la successiva
-        // quando l'interlinea e' maggiore del corpo, e due pezzi della stessa
-        // riga quando il brano attraversa un corsivo o un trattino
-        // invisibile. `filteredRanges()` scarta solo quelli contenuti *per
-        // intero* in un altro: le sovrapposizioni parziali restano tutte.
-        //
-        // Con `fill-opacity` ogni rettangolo si componeva per conto suo, e
-        // dove due si toccavano il colore si sommava — 0,35 due volte fa
-        // 0,58. Da qui le bande piu' scure fra le righe e le cuciture
-        // verticali dentro una riga sola: non erano un difetto del colore,
-        // erano due rettangoli.
-        //
-        // `opacity` su un gruppo SVG lo fa disegnare prima a parte e poi
-        // comporre una volta sola: dentro il gruppo le sovrapposizioni non
-        // esistono piu'. E' il motivo per cui questa riga non puo' tornare a
-        // essere `fill-opacity`.
-        'fill-opacity': '1',
-        opacity: '0.35',
-        // `mix-blend-mode` stava qui e non ha mai fatto niente: e' una
-        // proprieta' CSS e NON un attributo di presentazione SVG, e tutto
-        // quello che passiamo qui `marks-pane` lo scrive con `setAttribute`.
-        // Misurato: con la moltiplicazione attiva un giallo chiaro su fondo
-        // scuro verrebbe PIU' scuro dello sfondo, e invece e' piu' chiaro.
-        // Tolto: una riga che sembra fare una cosa e non la fa e' peggio di
-        // una riga che non c'e'.
-        // **Senza questo un'evidenziazione non si puo' cliccare**, e non su
-        // Safari: in nessun browser. `marks-pane` mette `pointer-events: none`
-        // sull'<svg> del pannello e i rettangoli dentro non lo ridichiarano,
-        // quindi lo ereditano e il clic passa attraverso. epub.js attacca
-        // diligentemente il suo listener su un elemento che non puo' ricevere
-        // clic, ed e' per questo che `markClicked` non si e' mai sentito.
-        //
-        // Gli `styles` che passiamo qui diventano attributi sull'elemento del
-        // segno, e in SVG `pointer-events` e' un attributo di presentazione:
-        // messo sul gruppo, vale per i rettangoli dentro.
-        'pointer-events': 'auto',
-      })
-      return true
-    } catch {
-      // A CFI from a different edition/format of this book won't resolve — skip it rather than crash.
-      return false
-    }
-  }
-
-  /** Torna gli id delle annotazioni che e' riuscita a disegnare davvero. */
-  async function loadExistingHighlights(): Promise<Set<string>> {
-    try {
-      const { data, error } = await api.GET('/api/kolibre/annotations')
-      if (error) return new Set<string>()
-      // Nessuna asserzione: da quando l'elenco dichiara le sue due forme
-      // (05/11/2026) il tipo arriva dallo schema, ed e' l'unione delle
-      // evidenziazioni vere con le orfane.
-      const all = data
-      // TUTTE le annotazioni vive di questo libro, anche quelle senza
-      // ancora. Prima il filtro pretendeva `cfi_start`, quindi una nota la
-      // cui conversione non era mai riuscita — il caso normale per le
-      // annotazioni arrivate da KOReader e mai convertite — non compariva
-      // nemmeno nell'elenco laterale: il pannello diceva "Nessuna
-      // annotazione per questo libro" su un libro pieno di annotazioni, che
-      // e' indistinguibile dall'averle perse.
-      // Il filtro **esclude le orfane**, e non per scelta di questa pagina:
-      // un'orfana non ha un libro di Calibre, quindi non puo' corrispondere
-      // a `bookId`. Prima era implicito nel confronto; adesso lo si dice al
-      // compilatore, che da li' in poi sa che queste sono tutte vere e ha
-      // un CFI da disegnare.
-      const mine = all.filter((h): h is RealHighlight =>
-        !h.is_orphan && h.calibre_book_id === bookId && h.library === library && !h.trashed)
-      setExistingHighlights(mine)
-      // Disegnare puo' fallire in silenzio (un CFI di un'altra edizione dello
-      // stesso libro non risolve, e il catch lo ingoia). Si contano: un
-      // numero e' l'unica differenza fra "non ci sono" e "non si riescono a
-      // mettere in questa pagina".
-      // **Due casi diversi, e dirli uguali era una bugia.** Una nota appena
-      // arrivata da un dispositivo NON ha ancora un punto: la conversione
-      // dall'indirizzo di KOReader gira in sottofondo ogni cinque minuti
-      // (main.py, HIGHLIGHT_POSITION_BACKFILL_INTERVAL_SECONDS), quindi fra
-      // la sincronizzazione e quel momento la nota c'e' e il suo punto no.
-      // Dire «il punto a cui punta non esiste in questo file» in quel caso
-      // afferma una cosa piu' grave e falsa — che l'ancora sia rotta — e
-      // manda a cercare un guasto che non c'e'. Segnalato da Paolo il 06/10
-      // su una nota presa sul Kindle: rifacendo la conversione a mano
-      // riusciva benissimo, era solo arrivato prima lui.
-      let inAttesa = 0
-      let nonRisolte = 0
-      const disegnate = new Set<string>()
-      for (const h of mine) {
-        if (!h.cfi_start) { inAttesa += 1; continue }
-        const cfiDisegno = highlightRenderCfi(h)
-        if (renderHighlightMark(cfiDisegno, h.color, h.id)) {
-          disegnate.add(String(h.id))
-          renderNoteUnderline(cfiDisegno, !!(h.notes && h.notes.trim()), h.color)
-        }
-        else nonRisolte += 1
-      }
-      setAnnotazioniInAttesa(inAttesa)
-      setAnnotazioniNonPosizionate(nonRisolte)
-      return disegnate
-    } catch {
-      // Highlights are a nice-to-have overlay; don't block reading if this fails.
-      return new Set<string>()
-    }
-  }
-
-  // Scioglie la selezione dentro l'iframe del libro.
-  //
-  // Serve perche' il browser dipinge DA SE' il testo selezionato, e nessuno la
-  // scioglieva: appena creata un'evidenziazione il testo restava selezionato e
-  // l'azzurro di sistema si sommava al nostro giallo — due evidenziazioni sullo
-  // stesso testo. Su WebKit durava anche di piu', perche' li' il popup nasce
-  // dal sondaggio della selezione e non da un clic che l'avrebbe sciolta.
-  //
-  // Si scioglie qui e non si spegne `::selection`: spegnerla toglierebbe anche
-  // il riscontro visivo MENTRE si trascina per selezionare, che e' l'unico modo
-  // di vedere cosa si sta prendendo.
-  function sciogliSelezione() {
-    const rendition = renditionRef.current
-    if (!rendition) return
-    // Stessa forma usata dal sondaggio piu' sotto: i tipi di epub.js dicono
-    // `Contents`, a runtime e' un array di sezioni attive.
-    const risultato = rendition.getContents() as unknown
-    const sezioni = (Array.isArray(risultato) ? risultato : [risultato]) as Contents[]
-    for (const contents of sezioni) {
-      try {
-        contents?.window?.getSelection?.()?.removeAllRanges()
-      } catch {
-        // documento invalidato da un cambio capitolo: si passa oltre
-      }
     }
   }
 
@@ -1309,670 +859,6 @@ export function ReaderPage() {
   }
 
   /**
-   * Sposta un estremo dell'evidenziazione di una frase.
-   *
-   * **Perche' cosi' e non con le maniglie, e non con la selezione.**
-   *
-   * La prima versione riapriva la selezione sul brano e chiedeva di rifarla a
-   * mano. Non serviva a niente: se devi riselezionare tutto, «estendi» non fa
-   * nulla che «elimina e rifai» non facesse gia' — e non si capiva nemmeno
-   * quale estremo si stesse muovendo.
-   *
-   * Le maniglie da trascinare vorrebbero `mousemove` e `touchmove` mentre il
-   * dito sta sopra il testo, cioe' dentro l'iframe blindato: la classe di
-   * eventi che su WebKit non arriva, quella che tiene rotti il pinch e le
-   * frecce ai bordi.
-   *
-   * Quattro bottoni invece: quale estremo e in che direzione lo dice
-   * l'etichetta, il risultato si vede subito perche' l'evidenziazione si
-   * ridisegna, e non serve nessun evento nuovo dentro l'iframe. Una frase per
-   * volta perche' e' l'unita' con cui si pensa leggendo: «prendi anche la
-   * frase dopo» si vuole davvero, «prendi anche la parola dopo» quasi mai.
-   */
-  async function spostaEstremo(h: RealHighlight, estremo: Estremo, verso: Verso) {
-    const rendition = renditionRef.current
-    const cfi = highlightRenderCfi(h)
-    if (!rendition || !cfi) return
-    try {
-      const range = rendition.getRange(cfi)
-      const doc = range?.startContainer.ownerDocument
-      if (!range || !doc) { showSaveError(t('reader.highlight.extendFailed')); return }
-      const nuovo = spostaEstremoDiUnaParola(doc, range, estremo, verso)
-      if (!nuovo) { showSaveError(t('reader.highlight.extendNoRoom')); return }
-
-      const contents = renditionContentsList(rendition).find((c) => c.document === doc)
-      const nuovoCfi = contents?.cfiFromRange(nuovo)
-      const testo = nuovo.toString().replace(/\s+/g, ' ').trim()
-      if (!nuovoCfi || !testo) { showSaveError(t('reader.highlight.extendFailed')); return }
-
-      try { rendition.annotations.remove(cfi, 'highlight') } catch { /* poteva non esserci */ }
-      renderHighlightMark(nuovoCfi, h.color, h.id)
-      // La sottolineatura e' un'annotazione a parte: va spostata a mano,
-      // altrimenti resta sul brano di prima mentre l'evidenziazione e' gia'
-      // altrove — due segni per una nota sola.
-      renderNoteUnderline(cfi, false)
-      renderNoteUnderline(nuovoCfi, !!h.notes?.trim(), h.color)
-      setExistingHighlights((prev) => prev.map((x) =>
-        x.id === h.id ? { ...x, cfi_start: nuovoCfi, cfi_end: nuovoCfi, text: testo, position_status: 'manuale' } : x
-      ))
-      setHighlightPopup((p) => (p.highlight?.id === h.id
-        ? { ...p, highlight: { ...p.highlight, cfi_start: nuovoCfi, cfi_end: nuovoCfi, text: testo } }
-        : p))
-      await riposizionaAnnotazione(Number(h.id), nuovoCfi, testo)
-    } catch {
-      showSaveError(t('reader.save.highlightFailed'))
-    }
-  }
-
-  function dismissSelectionPopup() {
-    sciogliSelezione()
-    // Il sondaggio ricorda l'ultimo testo per cui ha gia' mostrato il popup:
-    // azzerarlo qui fa si' che riselezionando la STESSA frase il popup
-    // ricompaia, invece di restare muto fino a che non si seleziona altro.
-    selezioneMostrataRef.current = ''
-    setSelectionPopup(EMPTY_SELECTION_POPUP)
-    setSelectionNote('')
-    setSelectedColor('yellow')
-    setWordLookup({ loading: false, definition: null, source: null, added: false })
-  }
-
-  // Cerca la definizione non appena il popup mostra la selezione di UNA sola
-  // parola — nessuna persistenza qui (vedi lookupWord/dictionaryActions.ts),
-  // solo un'anteprima prima che l'utente scelga se aggiungerla al vocabolario.
-  useEffect(() => {
-    if (!selectionPopup.visible || !isSingleWord(selectionPopup.text)) return
-    let cancelled = false
-    setWordLookup({ loading: true, definition: null, source: null, added: false })
-    lookupWord(selectionPopup.text).then((result) => {
-      if (cancelled) return
-      setWordLookup({ loading: false, definition: result?.definition ?? null, source: result?.source ?? null, added: false })
-    })
-    return () => {
-      cancelled = true
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectionPopup.visible, selectionPopup.text])
-
-  /**
-   * Evidenziare col dito su Safari: la selezione si CHIEDE, non si aspetta.
-   *
-   * Il popup di selezione nasce da mouseup/touchend attaccati al documento
-   * dentro l'iframe (attachDirectSelectionListeners), e su WebKit quegli
-   * eventi non arrivano mai — quindi sul telefono selezionare del testo non
-   * apriva niente e un'evidenziazione non si poteva proprio creare
-   * (verificato su un telefono reale). Ma il DOM dell'iframe resta LEGGIBILE
-   * dal padre:
-   * la selezione la si puo' interrogare a intervalli, che e' l'unica cosa
-   * che la sandbox non impedisce.
-   *
-   * Si aspetta che il testo selezionato smetta di cambiare prima di mostrare
-   * il popup: mentre si trascinano le maniglie la selezione cresce ad ogni
-   * giro, e un popup che insegue il dito e' peggio di nessun popup.
-   */
-  useEffect(() => {
-    const PAUSA = 200
-    const STABILE = 400
-    let ultimo = ''
-    let fermoDa = 0
-    const id = window.setInterval(() => {
-      const rendition = renditionRef.current
-      if (!rendition) return
-      const risultato = rendition.getContents() as unknown
-      const sezioni = (Array.isArray(risultato) ? risultato : [risultato]) as Contents[]
-      for (const contents of sezioni) {
-        let testo = ''
-        try {
-          testo = contents?.window?.getSelection?.()?.toString().trim() || ''
-        } catch {
-          // documento non piu' valido (cambio capitolo): si passa oltre
-        }
-        if (!testo) continue
-        if (testo !== ultimo) {
-          ultimo = testo
-          fermoDa = Date.now()
-          return
-        }
-        // Gia' mostrato per questo stesso testo — anche dal percorso a
-        // eventi, dove funziona: non si ripropone a chi l'ha appena chiuso.
-        if (selezioneMostrataRef.current === testo) return
-        if (Date.now() - fermoDa < STABILE) return
-        showSelectionPopup(contents)
-        return
-      }
-      ultimo = ''
-    }, PAUSA)
-    return () => window.clearInterval(id)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Ridimensionare la finestra reimpagina il libro: i bersagli delle note
-  // vanno rimisurati, o restano dov'erano sopra il testo nuovo.
-  useEffect(() => {
-    const onResize = () => scheduleNoteHitboxes()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  // Aprire il pannello laterale restringe l'area di lettura senza che la
-  // finestra cambi dimensione: stessa necessita' di rimisurare.
-  useEffect(() => {
-    scheduleNoteHitboxes()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sidebarTab, pageLayout, fontScale])
-
-  // Altezza reale del popup della nota, misurata dopo averlo reso: serve a
-  // decidere se ci sta sotto il rimando o va messo sopra (vedi
-  // posizioneNota). useLayoutEffect e non useEffect perche' la correzione
-  // deve avvenire PRIMA che il browser disegni, o il popup si vedrebbe
-  // saltare da una posizione all'altra.
-  useLayoutEffect(() => {
-    const el = notePopupRef.current
-    if (el) setNoteHeight(el.offsetHeight)
-  }, [notePopup?.text, notePopup?.x, notePopup?.y])
-
-  async function addSelectionToVocabulary() {
-    const { text } = selectionPopup
-    if (!text || isIngestPreview) return
-    try {
-      await addWordToVocabulary({
-        library,
-        calibre_book_id: bookId,
-        word: text,
-        highlight: text,
-        definition: wordLookup.definition,
-        definition_source: wordLookup.source,
-      })
-      setWordLookup((prev) => ({ ...prev, added: true }))
-    } catch {
-      showSaveError(t('reader.save.vocabularyFailed'))
-    }
-  }
-
-  async function saveHighlight() {
-    const { cfiRange, text } = selectionPopup
-    if (!cfiRange) return
-    // No calibre_book_id exists yet for a staging file — saving here would
-    // write a highlight against a bogus id that no real book will ever have.
-    if (isIngestPreview) {
-      showSaveError(t('reader.save.highlightUnavailablePreImport'))
-      dismissSelectionPopup()
-      return
-    }
-    renderHighlightMark(cfiRange, selectedColor, null)
-    try {
-      const book = bookRef.current
-      const payload: ReaderAnnotationPayload = {
-        calibre_book_id: bookId,
-        library,
-        text,
-        comment: selectionNote || null,
-        color: selectedColor,
-        chapter: book ? chapterPathForCfi(book, tocItems, cfiRange) : null,
-        page: book ? pseudoPageForCfi(book, locationsReadyRef.current, cfiRange) : null,
-        cfi_position: cfiRange,
-      }
-      const created = await createAnnotation(payload)
-      setExistingHighlights((prev) => [...prev, created])
-      // Il popup non si chiude: CAMBIA STATO. Da «stai per evidenziare» a
-      // «questa e' la tua evidenziazione», con la nota, gli estremi e il link.
-      // E' il momento in cui si vuole scrivere il commento, e chiuderlo
-      // obbligherebbe a ritrovare il brano per riaprirlo.
-      // Si chiude cliccando fuori, come tutto il resto.
-      sciogliSelezione()
-      selezioneMostrataRef.current = ''
-      setSelectionPopup(EMPTY_SELECTION_POPUP)
-      setSelectionNote('')
-      setWordLookup({ loading: false, definition: null, source: null, added: false })
-      setEditColor(created.color || selectedColor)
-      setEditNote(created.notes || '')
-      setHighlightPopup({ visible: true, x: selectionPopup.x, y: selectionPopup.y, highlight: created })
-      return
-    } catch {
-      showSaveError(t('reader.save.highlightFailed'))
-    }
-    dismissSelectionPopup()
-  }
-
-  // Lo stato che il server ha davvero per l'evidenziazione aperta. Serve a non
-  // rimandare due volte la stessa modifica: `highlightPopup.highlight` resta
-  // quello di quando il popup si e' aperto, e confrontarsi con lui direbbe
-  // «cambiato» anche subito dopo aver salvato.
-  const ultimoSalvatoRef = useRef<{ id: RealHighlight['id']; color: string; notes: string } | null>(null)
-
-  function dismissHighlightPopup() {
-    setHighlightPopup(EMPTY_HIGHLIGHT_POPUP)
-  }
-
-  function onMarkClicked(cfiRange: string, data: MarkClickData, contents: Contents) {
-    const targetCfi = data?.cfiRange || cfiRange
-    const hl = highlightsRef.current.find((h) => h.id === data?.id || h.cfi_start === targetCfi)
-    if (!hl) return
-
-    let rect: { left: number; top: number; width: number; bottom: number }
-    try {
-      rect = contents.range(targetCfi).getBoundingClientRect()
-    } catch {
-      rect = { left: 100, top: 100, width: 0, bottom: 120 }
-    }
-    const iframeEl = contents.window.frameElement
-    const iframeRect = iframeEl ? iframeEl.getBoundingClientRect() : { left: 0, top: 0 }
-
-    let x = iframeRect.left + rect.left + rect.width / 2 - POPUP_WIDTH / 2
-    let y = iframeRect.top + rect.bottom + 8
-    x = Math.max(8, Math.min(x, window.innerWidth - POPUP_WIDTH - 8))
-    if (y + POPUP_HEIGHT > window.innerHeight) {
-      y = iframeRect.top + rect.top - POPUP_HEIGHT - 8
-    }
-    y = Math.max(8, y)
-
-    setEditNote(hl.notes || '')
-    setEditColor(hl.color || 'yellow')
-    ultimoSalvatoRef.current = { id: hl.id, color: hl.color || 'yellow', notes: hl.notes || '' }
-    setHighlightPopup({ visible: true, x, y, highlight: hl })
-  }
-
-  /**
-   * Scrive colore e nota, e NON chiude il popup.
-   *
-   * Non c'e' piu' un «Salva»: si salva da se'. Un bottone di conferma su un
-   * pannello che non puo' fare altro che salvare pone una domanda a cui non si
-   * puo' rispondere male, e nel frattempo lascia credere che chiudere senza
-   * premerlo perda qualcosa.
-   *
-   * Si chiama da tre punti — il colore appena lo si tocca, la nota quando si
-   * finisce di scriverla, e la chiusura per tutto cio' che restasse — quindi
-   * deve poter essere chiamata a vuoto senza mandare niente: ci pensa
-   * `ultimoSalvatoRef`.
-   */
-  async function applicaModifiche(colore: string, nota: string) {
-    const hl = highlightPopup.highlight
-    if (!hl) return
-    const precedente = ultimoSalvatoRef.current
-    if (precedente && precedente.id === hl.id && precedente.color === colore && precedente.notes === nota) return
-    // Si segna PRIMA della richiesta: due chiamate ravvicinate (l'ultimo tocco
-    // sul colore e il clic fuori che lo segue) devono mandare una PUT sola.
-    ultimoSalvatoRef.current = { id: hl.id, color: colore, notes: nota }
-    try {
-      await Promise.all([updateHighlightColor(hl, colore), updateHighlightNotes(hl, nota)])
-    } catch {
-      ultimoSalvatoRef.current = precedente
-      showSaveError(t('reader.save.editFailed'))
-      return
-    }
-    const updated: RealHighlight = { ...hl, notes: nota, color: colore }
-    renditionRef.current?.annotations.remove(highlightRenderCfi(hl), 'highlight')
-    renderHighlightMark(highlightRenderCfi(updated), colore, updated.id)
-    // La sottolineatura compare o sparisce con la nota: aggiungerne una a
-    // un'evidenziazione che non ne aveva deve VEDERSI subito, non alla
-    // prossima apertura del libro.
-    renderNoteUnderline(highlightRenderCfi(updated), !!nota.trim(), colore)
-    setExistingHighlights((prev) => prev.map((h) => (h.id === hl.id ? updated : h)))
-    // Anche l'evidenziazione tenuta dal popup, altrimenti la prossima
-    // modifica ripartirebbe da quella di quando si e' aperto.
-    setHighlightPopup((prec) => (prec.visible && prec.highlight?.id === hl.id ? { ...prec, highlight: updated } : prec))
-  }
-
-  /** Chiude tenendo: e' il gesto normale di uscita, non un annullamento. */
-  function chiudiPopupEvidenziazione() {
-    void applicaModifiche(editColor, editNote)
-    dismissHighlightPopup()
-  }
-
-  async function deleteHighlightAction() {
-    const hl = highlightPopup.highlight
-    if (!hl) return
-    try {
-      await trashHighlight(hl)
-    } catch {
-      // Remove it locally regardless — worst case it reappears next time existingHighlights reloads from the server.
-    }
-    renditionRef.current?.annotations.remove(highlightRenderCfi(hl), 'highlight')
-    // E la sottolineatura della nota, che e' una SECONDA annotazione sullo
-    // stesso punto: togliendo solo la 'highlight' restava a galleggiare sul
-    // testo una riga sotto niente, e non andava via fino alla riapertura del
-    // libro. `renderNoteUnderline(cfi, false)` e' il modo di toglierla.
-    renderNoteUnderline(highlightRenderCfi(hl), false)
-    setExistingHighlights((prev) => prev.filter((h) => h.id !== hl.id))
-    dismissHighlightPopup()
-  }
-
-  // Click su una nota nella sidebar "Annotazioni": prima si limitava a un
-  // goToCfi che saltava lì e chiudeva la sidebar senza mostrare altro,
-  // costringendo a ritrovare a occhio l'evidenziazione nel testo e
-  // ricliccarla per poterne leggere/modificare la nota. Naviga E apre subito
-  // lo stesso popup di onMarkClicked, ancorato all'evidenziazione appena
-  // raggiunta.
-  function goToHighlightAndEdit(hl: RealHighlight) {
-    if (!hl.cfi_start) {
-      // Senza ancora il click era inerte. Ora si prova col testo, e se non
-      // si trova nemmeno quello lo si dice invece di non fare niente.
-      setSidebarTab(null)
-      void ritrovaDalTesto(hl.text || '', String(hl.id)).then((trovata) => {
-        if (trovata) {
-          showSaveError(t('reader.save.noteFoundByText'))
-        } else {
-          setNotaNonTrovata({
-            testo: hl.text || '',
-            motivo: t('reader.noteMissing.reason.noAnchor'),
-          })
-        }
-      })
-      return
-    }
-    const targetCfi = highlightRenderCfi(hl)
-    setSidebarTab(null)
-    // Il container del libro deve prima riprendere la larghezza piena (sidebar
-    // chiusa) prima di navigare — altrimenti le coordinate del popup, calcolate
-    // da onMarkClicked sul rendering post-navigazione, sarebbero relative a un
-    // layout che sta per cambiare sotto i piedi. Stesso motivo del piccolo
-    // setTimeout usato per la selezione testuale sopra.
-    window.setTimeout(async () => {
-      const rendition = renditionRef.current
-      if (!rendition) return
-      try {
-        await rendition.display(targetCfi)
-      } catch {
-        return
-      }
-      for (const contents of renditionContentsList(rendition)) {
-        try {
-          contents.range(targetCfi)
-        } catch {
-          continue // non è questa sezione (spread doppio: due view attive)
-        }
-        onMarkClicked(targetCfi, { id: hl.id, cfiRange: targetCfi }, contents)
-        return
-      }
-    }, 50)
-  }
-
-  // epub.js's own "selected" event only fires from an internal, debounced
-  // (250ms) `selectionchange` listener attached inside the sandboxed iframe —
-  // in practice that can silently miss real mouse-driven selections. This
-  // reader hedges the exact same way the source Vue implementation does: it
-  // listens to *both* `selectionchange` (via rendition's own 'selected'
-  // event below) and the immediate, synchronous `mouseup`/`touchend` that
-  // ends a drag (attachDirectSelectionListeners) — whichever fires first
-  // shows the popup; the other is a harmless no-op re-check.
-  function showSelectionPopup(contents: Contents, cfiRangeHint?: string) {
-    const selection = contents.window.getSelection()
-    if (!selection || selection.isCollapsed || selection.rangeCount === 0) return
-    const text = selection.toString().trim()
-    if (!text) return
-
-    const range = selection.getRangeAt(0)
-    const rect = range.getBoundingClientRect()
-    if (rect.width === 0 && rect.height === 0) return // stale/invalid range
-    const cfiRange = cfiRangeHint || contents.cfiFromRange(range)
-
-    const iframeEl = contents.window.frameElement
-    const iframeRect = iframeEl ? iframeEl.getBoundingClientRect() : { left: 0, top: 0 }
-
-    let x = iframeRect.left + rect.left + rect.width / 2 - POPUP_WIDTH / 2
-    let y = iframeRect.top + rect.bottom + 8
-    x = Math.max(8, Math.min(x, window.innerWidth - POPUP_WIDTH - 8))
-    if (y + POPUP_HEIGHT > window.innerHeight) {
-      y = iframeRect.top + rect.top - POPUP_HEIGHT - 8 // flip above the selection instead
-    }
-    y = Math.max(8, y)
-
-    selezioneMostrataRef.current = text
-    setSelectionPopup({ visible: true, x, y, cfiRange, text })
-  }
-
-  // Direct DOM attachment: registered on the same `hooks.content` extension
-  // point epub.js itself uses internally to bridge its own events, but
-  // bypassing that bridge entirely and reaching the real iframe Document
-  // (citing https://bugs.webkit.org/show_bug.cgi?id=218086 — event handling
-  // inside a sandboxed iframe can silently misbehave without allow-scripts).
-  // Fires once per rendered section/chapter (a new iframe document each time).
-  function attachDirectSelectionListeners(contents: Contents) {
-    const doc = contents.document
-    if (!doc || attachedDocsRef.current.has(doc)) return
-    attachedDocsRef.current.add(doc)
-    doc.addEventListener('mouseup', () => {
-      window.setTimeout(() => showSelectionPopup(contents), 10)
-    })
-    doc.addEventListener('touchend', () => {
-      window.setTimeout(() => showSelectionPopup(contents), 10)
-    })
-    // Cmd/Ctrl+F mentre si legge: il fuoco è dentro l'iframe, quindi il
-    // keydown non arriva alla finestra madre e sarebbe il browser a
-    // rispondere. epub.js inoltra solo il `keyup`, e un preventDefault su
-    // keyup arriva troppo tardi per fermare la ricerca del browser: l'unico
-    // punto utile è il keydown sul documento vero, che è questo.
-    //
-    // SOLO quella scorciatoia, e non tutto `onKeydown`: le frecce dentro
-    // l'iframe le gestisce già il keyup inoltrato da epub.js, e aggiungere
-    // qui un secondo gestore farebbe girare due pagine per ogni freccia.
-    doc.addEventListener('keydown', (e: KeyboardEvent) => apriRicercaSeScorciatoia(e))
-  }
-
-  // Stesso motivo di attachDirectSelectionListeners sopra: un touch a due
-  // dita sul testo del libro avviene dentro il documento dell'iframe, i cui
-  // eventi non risalgono al documento esterno — il pinch-to-zoom va quindi
-  // intercettato qui, non (solo) sul container React.
-  function attachPinchZoomListeners(contents: Contents) {
-    const doc = contents.document
-    if (!doc || attachedPinchDocsRef.current.has(doc)) return
-    attachedPinchDocsRef.current.add(doc)
-    doc.addEventListener('touchstart', handlePinchStart, { passive: true })
-    doc.addEventListener('touchmove', handlePinchMove, { passive: false })
-    doc.addEventListener('touchend', handlePinchEnd, { passive: true })
-    attaccaGestiTrackpad(doc)
-  }
-
-  // Soglia in pixel entro cui il cursore "attiva" la freccetta più vicina —
-  // stessa soglia usata sia sul wrapper esterno (onEdgeHoverMove sotto) sia
-  // dentro ogni iframe (attachEdgeHoverListeners), così il comportamento non
-  // cambia a seconda di dove si trova esattamente il cursore.
-  const EDGE_HOVER_THRESHOLD = 110
-
-  function edgeFromX(clientX: number, width: number): 'left' | 'right' | null {
-    if (clientX <= EDGE_HOVER_THRESHOLD) return 'left'
-    if (clientX >= width - EDGE_HOVER_THRESHOLD) return 'right'
-    return null
-  }
-
-  function onEdgeHoverMove(e: React.MouseEvent<HTMLDivElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    setHoverEdge(edgeFromX(e.clientX - rect.left, rect.width))
-  }
-
-  // La maggior parte dell'area lettore è dentro l'iframe di epub.js, i cui
-  // eventi mouse non risalgono al documento esterno (stesso motivo di
-  // attachDirectSelectionListeners/attachPinchZoomListeners sopra) — senza
-  // questo, avvicinarsi al bordo mentre il cursore è sul testo del libro non
-  // farebbe comparire nulla.
-  // Note a pie' di pagina: si aprono sul posto invece di far saltare a fondo
-  // volume perdendo il segno — e' il comportamento che hanno Kindle e Apple
-  // Books, e l'unico sensato per una nota di due righe.
-  //
-  // In cattura (true) e con preventDefault: epub.js gestisce a sua volta i
-  // click sui link interni per navigare, e senza fermarlo qui il salto
-  // avverrebbe comunque, subito dopo aver aperto il popup.
-  function attachNoteListeners(contents: Contents) {
-    const doc = contents.document
-    if (!doc || attachedNoteDocsRef.current.has(doc)) return
-    attachedNoteDocsRef.current.add(doc)
-    doc.addEventListener('click', (e: MouseEvent) => {
-      const a = (e.target as HTMLElement | null)?.closest?.('a[href]') as HTMLAnchorElement | null
-      if (!a || !isNoteLink(a) || isNoteBacklink(a)) return
-      e.preventDefault()
-      e.stopPropagation()
-
-      // Le coordinate del click sono relative all'iframe: vanno riportate
-      // alla finestra esterna, dove il popup vive.
-      const rect = contents.document.defaultView?.frameElement?.getBoundingClientRect()
-      openNotePopup(contents, a.getAttribute('href') || '', a.textContent || '', (rect?.left ?? 0) + e.clientX, (rect?.top ?? 0) + e.clientY)
-    }, true)
-  }
-
-  /** Apre il popup e ci carica dentro il testo della nota. */
-  function openNotePopup(contents: Contents, href: string, marcatore: string, x: number, y: number) {
-    setNotePopup({ x, y, text: null })
-    const book = bookRef.current
-    if (!book) return
-    // Il capitolo corrente serve come base per risolvere i percorsi
-    // relativi delle note in un file separato (vedi resolveSection).
-    const base = lastLocationRef.current?.start?.href
-    void loadNoteText(book, contents, href, base, marcatore).then((testo) => {
-      setNotePopup((prev) => (prev ? { ...prev, text: testo ?? t('reader.note.notFound') } : prev))
-    })
-  }
-
-  /**
-   * Ridisegna i bersagli cliccabili sopra i rimandi di nota della pagina.
-   *
-   * Perche' non basta il listener qui sopra: in WebKit (Safari, e quindi
-   * anche la webapp sul Mac e su iPhone) un iframe con sandbox senza
-   * `allow-scripts` non consegna NESSUN evento ai listener che il padre gli
-   * attacca — ne' click, ne' mouseup, ne' touchend. Verificato riga per riga
-   * con il motore di Safari su "Fini e inizi": in Chromium il listener
-   * scatta e il popup si apre, in WebKit non scatta e il browser segue il
-   * link, portando l'iframe su un indirizzo che nell'app non esiste. E' il
-   * bug https://bugs.webkit.org/show_bug.cgi?id=218086, gia' citato piu' su:
-   * la nota nel codice diceva che attaccare dal padre bastava, e per Chrome
-   * e' vero, per Safari no.
-   *
-   * Dal padre il DOM dell'iframe resta pero' LEGGIBILE (e' same-origin):
-   * possiamo sapere dove sta ogni rimando e mettergli sopra un bottone
-   * trasparente nella nostra pagina, che il click lo riceve sempre — e che
-   * per giunta impedisce al browser di seguire il link.
-   */
-  function refreshNoteHitboxes() {
-    const rendition = renditionRef.current
-    if (!rendition) {
-      setNoteHitboxes([])
-      return
-    }
-    // La finestrella di lettura vera: l'iframe di epub.js e' largo quanto
-    // TUTTO il capitolo impaginato a colonne, e viene fatto scorrere dentro
-    // questo contenitore. Ritagliare sull'iframe non filtrerebbe nulla —
-    // i rimandi delle pagine successive risultavano "visibili" a 3000px di
-    // distanza e prendevano un bersaglio in mezzo al testo.
-    const pagina = containerRef.current?.getBoundingClientRect()
-    if (!pagina) {
-      setNoteHitboxes([])
-      return
-    }
-    const risultato = rendition.getContents() as unknown
-    const sezioni = (Array.isArray(risultato) ? risultato : [risultato]) as Contents[]
-    const bersagli: NoteHitbox[] = []
-    for (const contents of sezioni) {
-      const doc = contents?.document
-      const frame = doc?.defaultView?.frameElement as HTMLElement | null | undefined
-      if (!doc || !frame) continue
-      const cornice = frame.getBoundingClientRect()
-      let n = 0
-      doc.querySelectorAll('a[href]').forEach((el) => {
-        const a = el as HTMLAnchorElement
-        if (!isNoteLink(a) || isNoteBacklink(a)) return
-        const r = a.getBoundingClientRect()
-        if (r.width === 0 || r.height === 0) return
-        const left = cornice.left + r.left
-        const top = cornice.top + r.top
-        if (left + r.width <= pagina.left || left >= pagina.right) return
-        if (top + r.height <= pagina.top || top >= pagina.bottom) return
-        // Un paio di pixel di margine: un click appena fuori dal bersaglio
-        // finirebbe sul link vero, che in Safari sposta via l'iframe. Col
-        // dito serve molto di piu': un rimando e' un numerino in apice di
-        // una dozzina di pixel, e centrarlo era quasi impossibile — se si
-        // sbagliava si finiva sulla fascia che volta pagina (visto provando
-        // col dito). 44px e' il minimo che Apple raccomanda per un bersaglio
-        // tattile, e il bersaglio si allarga attorno al numero restando
-        // centrato su di esso.
-        const minimo = tocco ? 44 : 0
-        const larghezza = Math.max(r.width + 4, minimo)
-        const altezza = Math.max(r.height + 4, minimo)
-        bersagli.push({
-          key: `${(contents as unknown as { sectionIndex?: number }).sectionIndex ?? 0}-${n++}-${Math.round(left)}-${Math.round(top)}`,
-          left: left + r.width / 2 - larghezza / 2,
-          top: top + r.height / 2 - altezza / 2,
-          width: larghezza,
-          height: altezza,
-          href: a.getAttribute('href') || '',
-          marcatore: a.textContent || '',
-          contents,
-        })
-      })
-    }
-    setNoteHitboxes(bersagli)
-  }
-
-  // I rimandi si spostano a ogni cambio pagina e a ogni ridimensionamento.
-  // Il rinvio di un frame lascia finire l'impaginazione di epub.js: misurare
-  // subito darebbe le posizioni della pagina precedente.
-  function scheduleNoteHitboxes() {
-    window.setTimeout(refreshNoteHitboxes, 120)
-  }
-
-  function attachEdgeHoverListeners(contents: Contents) {
-    const doc = contents.document
-    if (!doc || attachedHoverDocsRef.current.has(doc)) return
-    attachedHoverDocsRef.current.add(doc)
-    doc.addEventListener('mousemove', (e: MouseEvent) => {
-      const width = doc.defaultView?.innerWidth || 800
-      setHoverEdge(edgeFromX(e.clientX, width))
-    })
-    doc.addEventListener('mouseleave', () => setHoverEdge(null))
-  }
-
-  // Tocco singolo che si sposta <10px e dura <300ms — soglie standard per
-  // distinguere un tap da un trascinamento (selezione testo, già gestita da
-  // attachDirectSelectionListeners) o da un gesto pinch (handlePinchStart lo
-  // intercetta per primo con touches.length===2, quindi qui arrivano solo
-  // tocchi a un dito).
-  const TAP_MAX_MOVE = 10
-  const TAP_MAX_DURATION = 300
-
-  function handleTapStart(e: TouchEvent) {
-    if (e.touches.length !== 1) {
-      tapStateRef.current = null
-      return
-    }
-    const t = e.touches[0]
-    tapStateRef.current = { x: t.clientX, y: t.clientY, time: Date.now() }
-  }
-
-  // width è la larghezza del documento/container in cui il tap è avvenuto —
-  // dentro l'iframe è quella del suo defaultView (coordinate già relative al
-  // proprio iframe, left=0), sul container esterno quella del proprio
-  // elemento; `left` è l'offset da sottrarre a clientX per lo stesso motivo
-  // per cui onEdgeHoverMove fa `e.clientX - rect.left` — il container
-  // esterno non parte necessariamente dal bordo sinistro della finestra
-  // (nessun "terzo" globale che ignori dove il container è davvero
-  // posizionato).
-  // Spostamento orizzontale oltre il quale il gesto e' uno scorrimento e non
-  // un tocco storto. 45px su un telefono sono circa un centimetro: abbastanza
-  // da essere intenzionale, abbastanza poco da non dover attraversare mezzo
-  // schermo. Il confronto con lo spostamento verticale (1.5x) evita che uno
-  // scorrimento in diagonale, o il gesto di selezione, volti pagina.
-  const SWIPE_MIN = 45
-  const SWIPE_MAX_DURATION = 800
-
-  /** Pagina voltata da uno scorrimento, oppure false se il gesto non lo era. */
-  function scorrimento(dx: number, dy: number, dt: number): boolean {
-    if (Math.abs(dx) < SWIPE_MIN || Math.abs(dx) < Math.abs(dy) * 1.5 || dt > SWIPE_MAX_DURATION) return false
-    // Si tira la pagina verso sinistra per andare avanti, come si gira un
-    // foglio: la direzione e' quella del testo, non quella del bottone.
-    if (dx < 0) nextPage()
-    else prevPage()
-    return true
-  }
-
-  // Le fasce laterali gestiscono il gesto per intero — tocco e scorrimento —
-  // invece di affidarsi al click: un click sintetico arriverebbe anche in
-  // fondo a uno scorrimento, voltando due pagine invece di una.
-  /**
-   * Il click che resta: le fasce sono <button> veri, non <div>, perche'
-   * VoiceOver e gli altri lettori di schermo attivano un bottone generando
-   * un click, non un tocco — con soli gestori touch sarebbero inattivabili.
-   * Questo tiene a bada il doppione: un click che arriva subito dopo un
-   * tocco gia' gestito viene ignorato.
-   */
-  /**
    * Torna da dove si e' arrivati. Indietro nella cronologia, non un salto
    * alla home: se il lettore ha preso il posto della libreria nella stessa
    * scheda, tornare indietro la ritrova com'era — filtri, ricerca e punto
@@ -1990,132 +876,6 @@ export function ReaderPage() {
       return
     }
     window.location.href = '/'
-  }
-
-  function zonaClick(lato: 'sinistra' | 'destra') {
-    if (Date.now() - ultimoToccoRef.current < 600) return
-    if (lato === 'sinistra') prevPage()
-    else nextPage()
-  }
-
-  function zonaTouchStart(e: React.TouchEvent) {
-    const t = e.touches[0]
-    tapStateRef.current = t ? { x: t.clientX, y: t.clientY, time: Date.now() } : null
-    gestoConsumatoRef.current = false
-  }
-
-  /**
-   * La pagina si volta appena il dito ha percorso abbastanza, non alla fine
-   * del gesto.
-   *
-   * Non e' solo reattivita': decidere al `touchend` voleva dire non decidere
-   * affatto quando il touchend non arriva. Su iOS trascinare verso destra
-   * partendo da sinistra e' il gesto di sistema "torna indietro": il sistema
-   * se lo prende, il nostro tocco viene ANNULLATO, e lo scorrimento
-   * all'indietro non funzionava mai mentre quello in avanti si' (verificato
-   * su iOS). Deciso durante il movimento, la pagina e' gia' voltata quando
-   * il sistema interviene. Il `touch-action: none` sulle fasce chiede al
-   * browser di non interpretare da se' i gesti che cominciano li'.
-   */
-  function zonaTouchMove(e: React.TouchEvent) {
-    const start = tapStateRef.current
-    if (!start || gestoConsumatoRef.current) return
-    const t = e.touches[0]
-    if (!t) return
-    if (scorrimento(t.clientX - start.x, t.clientY - start.y, Date.now() - start.time)) {
-      gestoConsumatoRef.current = true
-      ultimoToccoRef.current = Date.now()
-    }
-  }
-
-  function zonaTouchEnd(e: React.TouchEvent, lato: 'sinistra' | 'destra') {
-    const start = tapStateRef.current
-    tapStateRef.current = null
-    const t = e.changedTouches[0]
-    // Niente click sintetico dopo il tocco: il gesto lo gestiamo tutto qui, e
-    // un click in coda a uno scorrimento volterebbe una seconda pagina.
-    e.preventDefault()
-    // Pagina gia' voltata durante il movimento: qui non resta niente da fare.
-    if (gestoConsumatoRef.current) {
-      gestoConsumatoRef.current = false
-      return
-    }
-    if (!start || !t) return
-    if (typeof window !== 'undefined' && window.getSelection()?.toString()) return
-    ultimoToccoRef.current = Date.now()
-    const dx = t.clientX - start.x
-    const dy = t.clientY - start.y
-    const dt = Date.now() - start.time
-    if (scorrimento(dx, dy, dt)) return
-    if (Math.abs(dx) > TAP_MAX_MOVE || Math.abs(dy) > TAP_MAX_MOVE || dt > TAP_MAX_DURATION) return
-    if (lato === 'sinistra') prevPage()
-    else nextPage()
-  }
-
-  function handleTapEnd(e: TouchEvent, width: number, left = 0) {
-    const start = tapStateRef.current
-    tapStateRef.current = null
-    // Pagina gia' voltata mentre il dito si muoveva: vedi zonaTouchMove.
-    if (gestoConsumatoRef.current) {
-      gestoConsumatoRef.current = false
-      return
-    }
-    if (!start) return
-    // L'utente ha appena selezionato del testo (gestito da
-    // attachDirectSelectionListeners) — un tap non deve anche voltare
-    // pagina in quel caso.
-    if (typeof window !== 'undefined' && window.getSelection()?.toString()) return
-    const touch = e.changedTouches[0]
-    if (!touch) return
-    // Lo scorrimento vale anche qui, nel terzo centrale, sui browser che gli
-    // eventi dell'iframe li consegnano: cosi' dove funziona si scorre da
-    // tutta la pagina, non solo dai bordi.
-    if (scorrimento(touch.clientX - start.x, touch.clientY - start.y, Date.now() - start.time)) return
-    const dx = Math.abs(touch.clientX - start.x)
-    const dy = Math.abs(touch.clientY - start.y)
-    const dt = Date.now() - start.time
-    if (dx > TAP_MAX_MOVE || dy > TAP_MAX_MOVE || dt > TAP_MAX_DURATION) return
-    const x = touch.clientX - left
-    if (x < width / 3) prevPage()
-    else if (x > (width * 2) / 3) nextPage()
-    // Terzo centrale: nessuna azione. La barra si scopre dalla fascia in
-    // alto, e lasciare libero il centro vuol dire poterci ancora selezionare
-    // il testo senza che ogni tocco volti pagina.
-  }
-
-  // Stesso pattern doppio-registro di attachPinchZoomListeners/
-  // attachDirectSelectionListeners/attachEdgeHoverListeners: la maggior
-  // parte dell'area lettore vive dentro l'iframe di epub.js, i cui eventi
-  // touch non risalgono al documento esterno.
-  function attachTapNavigationListeners(contents: Contents) {
-    const doc = contents.document
-    if (!doc || attachedTapDocsRef.current.has(doc)) return
-    attachedTapDocsRef.current.add(doc)
-    doc.addEventListener('touchstart', (e: TouchEvent) => {
-      handleTapStart(e)
-      gestoConsumatoRef.current = false
-    }, { passive: true })
-    doc.addEventListener('touchmove', (e: TouchEvent) => {
-      const start = tapStateRef.current
-      if (!start || gestoConsumatoRef.current) return
-      const t = e.touches[0]
-      if (!t) return
-      if (scorrimento(t.clientX - start.x, t.clientY - start.y, Date.now() - start.time)) {
-        gestoConsumatoRef.current = true
-      }
-    }, { passive: true })
-    doc.addEventListener('touchend', (e: TouchEvent) => {
-      // I terzi vanno misurati sulla PAGINA, non sull'iframe: impaginato a
-      // colonne, l'iframe e' largo quanto tutto il capitolo e scorre dentro
-      // il contenitore, quindi il suo innerWidth e' un numero enorme. Usarlo
-      // voleva dire che praticamente ogni tocco cadeva nel "terzo sinistro" —
-      // toccare in mezzo alla pagina tornava indietro di una pagina, su
-      // Android e su Chrome desktop con schermo tattile.
-      const pagina = containerRef.current?.getBoundingClientRect()
-      const cornice = doc.defaultView?.frameElement?.getBoundingClientRect()
-      if (!pagina || !cornice) return
-      handleTapEnd(e, pagina.width, pagina.left - cornice.left)
-    }, { passive: true })
   }
 
   // Il fuoco è dentro un campo di testo? Allora le frecce servono a muovere
@@ -2175,36 +935,6 @@ export function ReaderPage() {
       // Esc chiude anche la barra: la scorciatoia da tastiera per la X.
       setChromeVisible(false)
       setNotePopup(null)
-    }
-  }
-
-  function scheduleSavePosition(cfi: string, percentage: number) {
-    lastKnownCfiRef.current = cfi
-    lastKnownPercentageRef.current = percentage
-    if (savePositionTimerRef.current) window.clearTimeout(savePositionTimerRef.current)
-    // Debounced rather than on every single page turn — flipping through
-    // several pages quickly (or holding an arrow key) would otherwise fire
-    // one PUT per page for no real benefit, since only the LAST one before
-    // the reader closes/idles actually matters.
-    savePositionTimerRef.current = window.setTimeout(() => {
-      putReadingPosition(library, bookId, { cfi, percentage }).catch(() => {
-        showSaveError(t('reader.save.positionFailed'))
-      })
-    }, 2000)
-  }
-
-  // keepalive so this specific save has a real chance of reaching the
-  // server even as the page starts unloading — browsers otherwise cancel
-  // in-flight fetches once teardown begins.
-  function flushReadingPosition() {
-    if (isIngestPreview) return
-    if (savePositionTimerRef.current) window.clearTimeout(savePositionTimerRef.current)
-    const cfi = lastKnownCfiRef.current
-    const percentage = lastKnownPercentageRef.current
-    if (cfi && percentage != null) {
-      putReadingPosition(library, bookId, { cfi, percentage }, { keepalive: true }).catch(() => {
-        // best-effort — the window is closing, nothing more we can do
-      })
     }
   }
 

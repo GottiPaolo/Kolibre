@@ -629,6 +629,89 @@ def hash_device_tokens() -> None:
         conn.commit()
 
 
+def drop_device_folder_layout() -> None:
+    """
+    Toglie la colonna `devices.folder_layout` (20/11/2026, revisione
+    critica del 19/11, punto B8).
+
+    **Il contesto.** La colonna diceva al plugin KOReader come disporre i
+    libri sul dispositivo: "author" (una cartella per autore) o "flat"
+    (tutti i file in una cartella sola). Paolo ha sempre usato solo
+    "author" — verificato in sola lettura sul server: TUTTI e 4 i
+    dispositivi reali ce l'hanno — e ha deciso di togliere l'opzione a
+    tutto tondo: «crea meno confusione». Il valore non e' piu' una scelta,
+    e' IL comportamento: il plugin continua a riceverlo, hardcoded
+    "author", dalla risposta del sync (la zeppa sta in api/devices/sync.py e
+    muore con la rottura d'API di B1).
+
+    **Perche' un DROP COLUMN semplice basta.** SQLite sa fare
+    `ALTER TABLE ... DROP COLUMN` dalla 3.35 (il Python 3.11 di Homebrew ne
+    porta una ben piu' nuova), purche' la colonna non compaia in indici,
+    vincoli UNIQUE/PK o colonne generate — e `folder_layout` non compare in
+    nessuno dei tre: era una Column(String) nuda, senza indice (l'unico
+    indice di devices e' quello sull'impronta del token). Niente
+    ricostruzione della tabella, al contrario della voce 3.
+
+    **Idempotente per controllo preventivo**: su un database che la colonna
+    non ce l'ha piu' — o non l'ha mai avuta, come uno nuovo nato da
+    create_all col modello di oggi — e' un no-op, ed e' cosi' che regge il
+    vincolo fresh == migrated.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(devices)")}
+        if "folder_layout" in colonne:
+            conn.exec_driver_sql("ALTER TABLE devices DROP COLUMN folder_layout")
+            log_message("info", "system",
+                        "devices: dropped 'folder_layout' (the option is gone; the plugin "
+                        "still receives a hardcoded 'author' until the B1 API break).")
+        conn.commit()
+
+
+def add_exact_chars_to_reading_sessions() -> None:
+    """
+    Le colonne della misura ESATTA su `reading_sessions` (20/11/2026,
+    passo 4 delle statistiche in caratteri — decisione del 19/11 con Paolo).
+
+    **Il contesto.** Dal 19/11 il dispositivo manda una riga per pagina
+    visitata (tabella `letture_di_pagina`: xpointer piu' conteggio caratteri)
+    e il server la risolve in caratteri assoluti col proprio indice. Le
+    sessioni pero' continuavano a stimare i caratteri da `fraction_read`
+    (che presume ogni pagina lunga uguale — misurato: la pagina 12 su 248 de
+    «La linea d'ombra» e' il 4,8% del libro in pagine e l'1,8% in caratteri).
+    Queste quattro colonne portano il dato vero sulla sessione, dove c'e':
+
+      * `chars_read`  — caratteri davvero letti (somma delle righe esatte);
+      * `char_start`, `char_end` — inizio e fine in caratteri assoluti;
+      * `exact`       — il distintivo binario: 0 stimata, 1 esatta.
+
+    **Ammesse vuote per disegno**: le sessioni vecchie, quelle del lettore
+    web e quelle dei dispositivi senza plugin 0.24.0 restano stimate
+    (`exact` = 0, il default di ogni riga esistente). Nessun backfill qui:
+    il riempimento lo fa `letture_service.derive_reading_sessions`, che e'
+    idempotente e rieseguibile su tutto lo storico — e' la migrazione a dare
+    il posto, non il valore.
+
+    **Idempotente per controllo preventivo**, come ogni voce additiva: su un
+    database nuovo le colonne nascono gia' da create_all col modello di oggi
+    e il giro e' un no-op (fresh == migrated).
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reading_sessions)")}
+        if not colonne:
+            return
+        for col, ddl in (
+            ("chars_read", "ALTER TABLE reading_sessions ADD COLUMN chars_read INTEGER"),
+            ("char_start", "ALTER TABLE reading_sessions ADD COLUMN char_start INTEGER"),
+            ("char_end", "ALTER TABLE reading_sessions ADD COLUMN char_end INTEGER"),
+            ("exact", "ALTER TABLE reading_sessions ADD COLUMN exact INTEGER NOT NULL DEFAULT 0"),
+        ):
+            if col not in colonne:
+                conn.exec_driver_sql(ddl)
+                log_message("info", "system",
+                            f"reading_sessions: added missing '{col}' column (exact character measure).")
+        conn.commit()
+
+
 # ── Come si aggiunge la prossima migrazione ──────────────────────────────
 # 1. Scrivi qui sopra una funzione idempotente (controlla prima di alterare;
 #    su un database nuovo deve essere un no-op o produrre lo stesso schema
@@ -638,8 +721,6 @@ def hash_device_tokens() -> None:
 # 3. Mai riordinare, mai togliere, mai modificare una voce gia' spedita: i
 #    database in giro ricordano solo un numero, e quel numero promette che
 #    tutto cio' che viene prima e' gia' stato fatto cosi' com'era.
-# Prossimi cantieri gia' noti che aggiungeranno voci: la rimozione di
-# folder_layout.
 MIGRATIONS = [
     # Le prime tre voci sono il trasloco (20/11/2026) delle tre funzioni che
     # main.py chiamava a ogni avvio, nello stesso ordine di allora.
@@ -647,6 +728,8 @@ MIGRATIONS = [
     (2, "fraction_read on both reading-session tables", add_fraction_read_to_sessions),
     (3, "per-user reading positions, coverage and stats cache", rebuild_positions_per_user),
     (4, "device tokens become SHA-256 fingerprints", hash_device_tokens),
+    (5, "drop devices.folder_layout (the option is gone)", drop_device_folder_layout),
+    (6, "exact character columns on reading_sessions", add_exact_chars_to_reading_sessions),
 ]
 
 

@@ -43,6 +43,7 @@ from sqlalchemy.orm import Session
 
 from .. import config, models
 from ..istanti import quando
+from ..logging_utils import log_message
 from . import book_records
 from ..calibre.functions import string_to_authors
 from ..calibre.library import CalibreLibrary
@@ -204,7 +205,11 @@ def sha256(percorso: str) -> str | None:
             for blocco in iter(lambda: f.read(1024 * 1024), b""):
                 h.update(blocco)
         return h.hexdigest()
-    except OSError:
+    except OSError as e:
+        # Un file non hashabile rompe la prova «stesso file» del suo gruppo
+        # e lo fa sembrare solo «non misurabile»: va detto quale file era.
+        log_message("warning", "duplicates",
+                    f"File could not be read for hashing: '{os.path.basename(percorso)}' ({e})")
         return None
 
 
@@ -236,7 +241,12 @@ def nomi_file(cartella_biblioteca: str) -> dict:
             }
         finally:
             conn.close()
-    except sqlite3.Error:
+    except sqlite3.Error as e:
+        # Senza questa mappa OGNI libro della biblioteca risulta senza file,
+        # quindi non misurabile: un guasto totale che altrimenti si
+        # presenterebbe come tanti «non so» sparsi.
+        log_message("warning", "duplicates",
+                    f"metadata.db could not be queried in '{os.path.basename(cartella_biblioteca)}' ({e}): file names unknown, every book there will stay unmeasured")
         return {}
 
 
@@ -282,7 +292,11 @@ def trova_doppioni(db: Session, biblioteca: str, limite_gruppi: int = 200) -> di
         cartella = config.library_path(biblioteca)
         libri = CalibreLibrary(cartella).list_books()
         mappa_nomi = nomi_file(cartella)
-    except Exception:
+    except Exception as e:
+        # Il risultato vuoto e' indistinguibile da «nessun doppione»: la
+        # differenza fra le due cose sta solo in questa riga.
+        log_message("error", "duplicates",
+                    f"Library '{biblioteca}' could not be read ({type(e).__name__}): duplicate search aborted, empty result returned")
         return {"gruppi": [], "gruppi_totali": 0, "non_mostrati": 0}
 
     for b in libri:
@@ -464,9 +478,12 @@ def _qualita_del_file(percorso: str, formato: str):
         return None
     try:
         return qualita_epub.qualita_epub(percorso)
-    except Exception:
+    except Exception as e:
         # Un file che fa cadere la misura e' un file di cui non si sa niente,
-        # e «non si sa niente» qui vuol dire che non si accorpa.
+        # e «non si sa niente» qui vuol dire che non si accorpa. Ma quale
+        # file fosse va scritto: la misura non dovrebbe mai cadere.
+        log_message("warning", "duplicates",
+                    f"Quality measurement crashed on '{os.path.basename(percorso)}' ({type(e).__name__}): the file stays unmeasured")
         return None
 
 
@@ -697,6 +714,11 @@ def leggi_scansione(db: Session, biblioteca: str) -> dict | None:
     try:
         dati = json.loads(riga.risultato_json)
     except ValueError:
+        # Riga presente ma illeggibile: alla pagina sembra che la ricerca
+        # non sia mai stata fatta, e rifarla sistema. Ma va distinto da
+        # «mai fatta», o il guasto non ha nessun posto dove vedersi.
+        log_message("warning", "duplicates",
+                    f"Saved duplicate scan for '{biblioteca}' is not readable JSON: it will look as if no scan was ever run")
         return None
     dati["calcolato_il"] = quando(riga.calcolato_il)
     return dati
@@ -722,6 +744,11 @@ def cerca_e_conserva(db: Session, biblioteca: str) -> dict:
     for g in risultato["gruppi"]:
         g["azioni"] = cosa_si_puo_fare(db, g)
     salva_scansione(db, biblioteca, risultato)
+    # Una ricerca esplicita, una riga: e' il riepilogo che data la scansione
+    # conservata quando la si rilegge fra un mese.
+    log_message("info", "duplicates",
+                f"Duplicates: {risultato['gruppi_totali']} groups found in '{biblioteca}'"
+                + (f" ({risultato['non_mostrati']} not shown)" if risultato.get("non_mostrati") else ""))
     return leggi_scansione(db, biblioteca) or risultato
 
 

@@ -21,6 +21,10 @@
     "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
   ],
   "plugin": {
+    "0.26.0": {
+      "it": "Il lettore non resta piu' imbambolato senza dire niente. Ogni volta che il plugin parla col server — prova di connessione, apertura del catalogo, controllo aggiornamenti, scarico di un libro, invio del registro — sullo schermo compare un segno d'attesa PRIMA che la rete parta, cosi' sai che sta lavorando e non che si e' bloccato. E i tempi d'attesa massimi sono giusti per ogni cosa: un controllo piccolo si arrende dopo pochi secondi invece di mezzo minuto, mentre lo scarico di un libro grosso ha piu' tempo e non viene piu' troncato sul WiFi lento.",
+      "en": "The reader no longer freezes without saying anything. Whenever the plugin talks to the server — connection test, opening the catalogue, update check, downloading a book, sending the log — a waiting sign appears on screen BEFORE the network call starts, so you know it is working rather than stuck. Timeouts now fit each job: a small check gives up after a few seconds instead of half a minute, while a large book download gets more time and is no longer cut short on slow WiFi."
+    },
     "0.25.0": {
       "it": "Le automazioni della sincronizzazione percorrono la cartella dei libri UNA volta sola. Prima, con «manda le posizioni» e «prendi le posizioni» accese insieme, la cartella si percorreva due volte di fila — un'impronta per file, e su un lettore e-ink si sente. Sotto il cofano il plugin e' stato anche riordinato in moduli piu' piccoli (accoppiamento, aggiornamento, sincronizzazione): non cambia niente nell'uso, ma le prossime correzioni toccheranno file corti invece di uno da settemila righe.",
       "en": "Sync automations walk the books folder ONCE. Before, with \"push positions\" and \"pull positions\" both enabled, the folder was walked twice in a row — one fingerprint per file, which you can feel on an e-ink reader. Under the hood the plugin has also been reorganised into smaller modules (pairing, updates, sync): nothing changes in use, but future fixes will touch short files instead of a seven-thousand-line one."

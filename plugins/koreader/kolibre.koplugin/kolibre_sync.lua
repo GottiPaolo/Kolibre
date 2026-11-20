@@ -723,9 +723,13 @@ function KolibreSync._syncNowRun(self, interactive, trigger, allow_migration, so
                 ok = self:_deleteManagedBook(fa.local_path)
             elseif fa.action == "overwrite" then
                 self:_deleteManagedBook(fa.local_path)
+                -- Il terzo argomento e' il muto della sincronizzazione
+                -- (20/11/2026, E7): se i popup automatici sono spenti, anche
+                -- il segno del download resta spento; da un giro chiesto a
+                -- mano invece si vede quale libro sta scendendo.
                 ok = self:_downloadCatalogBook(
                     { id = fa.calibre_book_id, title = fa.title, author = fa.author, formats = { fa.format } },
-                    fa.library
+                    fa.library, muto
                 )
             end
             if ok then table.insert(applied_action_ids, fa.id) end

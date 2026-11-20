@@ -142,7 +142,7 @@ def _build_book_meta(highlights: list) -> dict:
                     # pagina Annotazioni chiedeva sempre l'EPUB, con un
                     # commento che diceva "nessun percorso di sync da
                     # dispositivo produce highlight su un PDF": non e' vero,
-                    # devices.py ha un ramo di deduplica apposta per i PDF
+                    # api/devices/annotations.py ha un ramo di deduplica apposta per i PDF
                     # (pos0 e' EPUB-only, quindi ricade su pagina+testo) — e
                     # su un libro di solo PDF il lettore EPUB si apriva su
                     # "Impossibile caricare il libro nel web reader".

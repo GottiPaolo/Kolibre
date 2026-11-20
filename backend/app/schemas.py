@@ -59,7 +59,6 @@ class DeviceResponse(BaseModel):
     storage_used: Optional[int] = None
     storage_total: Optional[int] = None
     storage_available: Optional[int] = None
-    folder_layout: str
     write_folder_cover: bool
     plugin_version: Optional[str] = None
     last_seen_at: Optional[datetime] = None
@@ -69,9 +68,12 @@ class DeviceResponse(BaseModel):
         from_attributes = True
 
 class DeviceUpdate(BaseModel):
+    # `folder_layout` non c'e' piu' (20/11/2026, punto B8): una webapp
+    # vecchia in cache che ancora lo manda non rompe niente — Pydantic di
+    # suo ignora i campi sconosciuti (extra="ignore" e' il default, provato
+    # in prove/la_cartella_per_autore_non_si_sceglie_piu.py).
     name: Optional[str] = None
     model: Optional[str] = None
-    folder_layout: Optional[str] = None
     write_folder_cover: Optional[bool] = None
     delete_policy: Optional[str] = None  # auto | ask | never
 

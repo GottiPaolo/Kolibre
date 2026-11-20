@@ -655,7 +655,7 @@ local KolibreAccoppiamento = require("kolibre_accoppiamento")
 -- calcoli il server e non noi.
 local KolibreLetture = require("kolibre_letture")
 
-local VERSION = "0.25.0"
+local VERSION = "0.26.0"
 
 -- La versione la dichiara questo file (la legge anche il server, vedi
 -- backend/app/api/tools.py); i moduli che la usano la ricevono qui.
@@ -1195,7 +1195,13 @@ function Kolibre:_toolsMenuItems()
         text = t("koreader.update.menu_check"),
         help_text = t("koreader.update.menu_check_help"),
         keep_menu_open = true,
-        callback = function() self:controllaAggiornamenti(true) end,
+        -- Sotto il segno d'attesa (20/11/2026, E7): fa due richieste di fila
+        -- (versione del plugin, elenco patch) e prima non mostrava niente.
+        -- Si avvolge QUI e non dentro controllaAggiornamenti: il chiamante
+        -- automatico (_autoCheckForUpdate) deve restare muto.
+        callback = function()
+            self:_runWithWaitingSign(nil, function() self:controllaAggiornamenti(true) end)
+        end,
     })
     items[#items].separator = true
     table.insert(items, {
@@ -1375,16 +1381,20 @@ function Kolibre:testConnection()
     end
     -- Timeout corto: qui si sta solo chiedendo «ci sei?», e aspettare dieci
     -- secondi la risposta a quella domanda vuol dire dieci secondi di lettore
-    -- fermo (vedi KolibreApi.TIMEOUT_CONTROLLO).
-    local result, err = self.api:request("GET", "/api/devices/me", nil, { breve = true })
-    if not result then
-        UIManager:show(InfoMessage:new{ text = t("koreader.settings.test_failed", { error = tostring(err) }) })
-        return
-    end
-    -- A successful manual probe is exactly the same one _isReachable would
-    -- make — warm its cache instead of throwing this result away.
-    self._reachable_checked_at, self._reachable_cached, self._reachable_cached_err = os.time(), true, nil
-    UIManager:show(InfoMessage:new{ text = t("koreader.settings.test_ok", { name = tostring(result.name) }) })
+    -- fermo (vedi KolibreApi.TIMEOUT_CONTROLLO). E il segno d'attesa
+    -- (20/11/2026, E7): anche tre secondi a schermo fermo, senza niente che
+    -- dica «sto lavorando», sono esattamente la lamentela d'origine.
+    self:_runWithWaitingSign(t("koreader.common.contacting_server"), function()
+        local result, err = self.api:request("GET", "/api/devices/me", nil, { breve = true })
+        if not result then
+            UIManager:show(InfoMessage:new{ text = t("koreader.settings.test_failed", { error = tostring(err) }) })
+            return
+        end
+        -- A successful manual probe is exactly the same one _isReachable would
+        -- make — warm its cache instead of throwing this result away.
+        self._reachable_checked_at, self._reachable_cached, self._reachable_cached_err = os.time(), true, nil
+        UIManager:show(InfoMessage:new{ text = t("koreader.settings.test_ok", { name = tostring(result.name) }) })
+    end)
 end
 
 -- ── Reachability gate ──
@@ -1520,6 +1530,51 @@ function Kolibre:_showProgressBar(current, total, label)
         math.floor((current - 1) / n * 100), label))
 end
 
+-- -- Il segno d'attesa prima di parlare con la rete (E7, 20/11/2026) --
+--
+-- La regola di progetto: qualunque operazione che puo' superare il secondo
+-- o mostra un'attesa, oppure va in sottofondo. Le due lamentele d'origine
+-- («il lettore resta fermo qualche secondo senza dire niente», «un
+-- controllo di connessione costa 3 s») sono la stessa malattia: una
+-- chiamata di rete sincrona senza nessun segno sullo schermo.
+--
+-- **Perche' il nextTick, e non solo il messaggio.** Su e-ink un InfoMessage
+-- mostrato e subito seguito dal socket che blocca non arriva allo schermo:
+-- il disegno non ha avuto il suo giro. `_showProgress` fa gia' un
+-- `forceRePaint`, e il `nextTick` lascia comunque respirare la coda degli
+-- eventi prima che il socket blocchi: cosi' il messaggio si VEDE davvero.
+--
+-- **Il pcall non e' prudenza di maniera.** Quello che succede dentro un
+-- `nextTick` non e' protetto da niente (lo dice gia' il commento sulla
+-- apertura dei libri della vista): un errore li' dentro risale fino in
+-- cima e lascerebbe il messaggio d'attesa appeso per sempre.
+--
+-- **La rientranza.** Un flusso gia' sotto segno (es. «Cambia libreria» che
+-- riapre il catalogo) non deve impilare un secondo nextTick: il primo
+-- chiuderebbe il segno del secondo prima che giri. Dentro un segno attivo
+-- si aggiorna il testo e si esegue subito.
+function Kolibre:_runWithWaitingSign(text, fn)
+    local label = text or t("koreader.common.contacting_server")
+    if self._waiting_sign_active then
+        self:_showProgress(label)
+        local ok, err = pcall(fn)
+        if not ok then
+            logger.err("Kolibre: azione fallita sotto il segno d'attesa:", err)
+        end
+        return
+    end
+    self._waiting_sign_active = true
+    self:_showProgress(label)
+    UIManager:nextTick(function()
+        local ok, err = pcall(fn)
+        self:_closeProgress()
+        self._waiting_sign_active = false
+        if not ok then
+            logger.err("Kolibre: azione fallita sotto il segno d'attesa:", err)
+        end
+    end)
+end
+
 -- ── Local library scan ──
 --
 -- La camminata vive in kolibre_sync.lua (trasloco del 20/11/2026), con la
@@ -1610,7 +1665,11 @@ function Kolibre:_ensureAuthorFolderCover(author, target_dir)
     self.api:downloadTo("/api/kolibre/authors/" .. urlEncode(author) .. "/photo/thumbnail", cover_path)
 end
 
-function Kolibre:_downloadCatalogBook(book, library)
+-- `muto` (20/11/2026, E7): i chiamanti che stanno GIA' sotto un loro segno
+-- d'attesa (il giro di sovrascritture dell'inizializzazione libreria, la
+-- Fase 2.5 della sincronizzazione quando i popup automatici sono spenti)
+-- passano true e questo non tocca lo schermo.
+function Kolibre:_downloadCatalogBook(book, library, muto)
     local formats = book.formats or {}
     local fmt = formats[1] or "EPUB"
     local dir_calcolata = self.books_dir
@@ -1632,7 +1691,17 @@ function Kolibre:_downloadCatalogBook(book, library)
 
     local url = string.format("/api/kolibre/books/%d/download?library=%s&format=%s", book.id, library, fmt)
 
+    -- 20/11/2026 (E7): un libro intero puo' costare decine di secondi, e il
+    -- tocco su «Scarica» non mostrava niente fino all'esito. `_showProgress`
+    -- e non `_runWithWaitingSign`: chi chiama (la Fase 2.5 della
+    -- sincronizzazione) ha bisogno dell'esito SUBITO, quindi niente
+    -- nextTick; il forceRePaint dentro _showProgress porta comunque il
+    -- messaggio allo schermo prima che il socket blocchi.
+    if not muto then
+        self:_showProgress(t("koreader.catalog.downloading", { title = book.title or filename }))
+    end
     local ok, err = self.api:downloadTo(url, local_path)
+    if not muto then self:_closeProgress() end
     if ok then
         -- Device-initiated acquisition: record it in the manifest (Kolibre
         -- now manages this book) and tell the server to start tracking it.
@@ -1833,6 +1902,17 @@ end
 -- for and would need its own exclude_on_device support in
 -- catalog/sections, which is a different endpoint.
 function Kolibre:_openKolibreCatalog(library, query, sort, drill, exclude_on_device)
+    -- 20/11/2026 (E7): la prima pagina del catalogo e' una richiesta
+    -- sincrona che su una biblioteca grande puo' costare secondi, e il
+    -- tocco (da ricerca, drill o «Tutti i libri») non mostrava niente.
+    -- Involucro e corpo separati perche' il corpo ha piu' uscite e viene
+    -- richiamato da cinque punti diversi: tutti passano da qui.
+    self:_runWithWaitingSign(t("koreader.catalog.loading"), function()
+        self:_openKolibreCatalogNow(library, query, sort, drill, exclude_on_device)
+    end)
+end
+
+function Kolibre:_openKolibreCatalogNow(library, query, sort, drill, exclude_on_device)
     sort = sort or "author"
 
     -- One grid screen's worth per request (see KolibreCatalog.mosaicPageSize)
@@ -1999,6 +2079,11 @@ function Kolibre:_browseCatalogSection(section, library, sort)
     end
 
     local function loadPage(page)
+        -- 20/11/2026 (E7): ogni pagina di secchielli e' una richiesta
+        -- sincrona — sia l'apertura sia il tocco su «Altro…» — e prima non
+        -- mostrava niente. Il corpo resta com'era, solo spostato sotto il
+        -- segno (rientro incluso: e' un involucro, non una riscrittura).
+        self:_runWithWaitingSign(t("koreader.catalog.loading"), function()
         local result, err = self:_fetchCatalogSectionPage(section, library, page)
         if not result then
             UIManager:show(InfoMessage:new{ text = t("koreader.catalog.section_list_unavailable", { error = tostring(err) }) })
@@ -2026,6 +2111,7 @@ function Kolibre:_browseCatalogSection(section, library, sort)
         end
 
         showItems(result.total)
+        end)
     end
 
     loadPage(1)
@@ -2036,30 +2122,36 @@ end
 -- Reused by openCatalogDashboard, the Browser menu's "Cambia libreria", and
 -- the catalog-menu search entry (Wave C) instead of each duplicating it.
 function Kolibre:_withCatalogLibrary(on_library)
-    if not self:_requireReachable(true) then return end
-    local libraries, err = self.api:request("GET", "/api/kolibre/devices/libraries")
-    if not libraries or #libraries == 0 then
-        UIManager:show(InfoMessage:new{ text = t("koreader.catalog.no_library", { error = tostring(err) }) })
-        return
-    end
-    if #libraries == 1 then
-        on_library(libraries[1].library)
-        return
-    end
+    -- 20/11/2026 (E7): il controllo di raggiungibilita' (3 s a server
+    -- spento) e la richiesta delle biblioteche avvenivano senza nessun
+    -- segno: il tocco su «Catalogo» lasciava il lettore imbambolato. Il
+    -- controllo sta DENTRO il segno, cosi' anche i suoi 3 s si vedono.
+    self:_runWithWaitingSign(t("koreader.catalog.loading"), function()
+        if not self:_requireReachable(true) then return end
+        local libraries, err = self.api:request("GET", "/api/kolibre/devices/libraries")
+        if not libraries or #libraries == 0 then
+            UIManager:show(InfoMessage:new{ text = t("koreader.catalog.no_library", { error = tostring(err) }) })
+            return
+        end
+        if #libraries == 1 then
+            on_library(libraries[1].library)
+            return
+        end
 
-    local picker
-    local items = {}
-    for _idx, lib in ipairs(libraries) do
-        table.insert(items, {
-            text = lib.name,
-            callback = function()
-                UIManager:close(picker)
-                on_library(lib.library)
-            end,
-        })
-    end
-    picker = Menu:new{ title = t("koreader.catalog.choose_library"), item_table = items, is_popout = true }
-    UIManager:show(picker)
+        local picker
+        local items = {}
+        for _idx, lib in ipairs(libraries) do
+            table.insert(items, {
+                text = lib.name,
+                callback = function()
+                    UIManager:close(picker)
+                    on_library(lib.library)
+                end,
+            })
+        end
+        picker = Menu:new{ title = t("koreader.catalog.choose_library"), item_table = items, is_popout = true }
+        UIManager:show(picker)
+    end)
 end
 
 -- "Catalogo" top-level entry (addToMainMenu) — a small home screen instead
@@ -2383,40 +2475,45 @@ function Kolibre:mandaIlRegistro()
 end
 
 function Kolibre:_mandaIlRegistroDavvero(percorso)
-    local grezzo = util.readFromFile(percorso, "rb")
-    if not grezzo then
-        UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
-        return
-    end
-    local pronto = KolibreDiagnostica.prepara(grezzo, {
-        dispositivo = Device and Device.model or "?",
-        versione = VERSION,
-        quando = os.date("%Y-%m-%d %H:%M:%S"),
-    })
-    -- Un file di passaggio accanto al registro, e si toglie SEMPRE: anche
-    -- quando l'invio fallisce, perche' un file dimenticato nella cartella
-    -- dati di KOReader e' esattamente il genere di cosa che dopo un mese
-    -- nessuno sa piu' da dove viene.
-    local temporaneo = percorso .. ".kolibre-da-mandare"
-    local f = io.open(temporaneo, "wb")
-    if not f then
-        UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
-        return
-    end
-    f:write(pronto)
-    f:close()
+    -- 20/11/2026 (E7): il registro puo' pesare centinaia di KB e il
+    -- caricamento e' sincrono — dopo il «Manda» della conferma lo schermo
+    -- restava fermo senza dire niente fino all'esito.
+    self:_runWithWaitingSign(t("koreader.diagnostica.invio"), function()
+        local grezzo = util.readFromFile(percorso, "rb")
+        if not grezzo then
+            UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
+            return
+        end
+        local pronto = KolibreDiagnostica.prepara(grezzo, {
+            dispositivo = Device and Device.model or "?",
+            versione = VERSION,
+            quando = os.date("%Y-%m-%d %H:%M:%S"),
+        })
+        -- Un file di passaggio accanto al registro, e si toglie SEMPRE: anche
+        -- quando l'invio fallisce, perche' un file dimenticato nella cartella
+        -- dati di KOReader e' esattamente il genere di cosa che dopo un mese
+        -- nessuno sa piu' da dove viene.
+        local temporaneo = percorso .. ".kolibre-da-mandare"
+        local f = io.open(temporaneo, "wb")
+        if not f then
+            UIManager:show(InfoMessage:new{ text = t("koreader.diagnostica.illeggibile") })
+            return
+        end
+        f:write(pronto)
+        f:close()
 
-    local ok, err = self.api:uploadFile("/api/kolibre/devices/diagnostic-log", temporaneo)
-    os.remove(temporaneo)
-    if ok then
-        UIManager:show(InfoMessage:new{
-            text = t("koreader.diagnostica.mandato", { kb = math.floor(#pronto / 1024) }),
-        })
-    else
-        UIManager:show(InfoMessage:new{
-            text = t("koreader.diagnostica.fallito", { errore = tostring(err) }),
-        })
-    end
+        local ok, err = self.api:uploadFile("/api/kolibre/devices/diagnostic-log", temporaneo)
+        os.remove(temporaneo)
+        if ok then
+            UIManager:show(InfoMessage:new{
+                text = t("koreader.diagnostica.mandato", { kb = math.floor(#pronto / 1024) }),
+            })
+        else
+            UIManager:show(InfoMessage:new{
+                text = t("koreader.diagnostica.fallito", { errore = tostring(err) }),
+            })
+        end
+    end)
 end
 
 --- Apre la vista libreria. `dove` e' facoltativo.
@@ -2525,6 +2622,13 @@ end
 -- calls the general uncapped browse — on this same 1190-book library that
 -- is a known, not yet fixed, remaining risk of the identical failure mode.
 function Kolibre:_openCatalogRecent(library)
+    -- 20/11/2026 (E7): rete sincrona al tocco, prima senza nessun segno.
+    self:_runWithWaitingSign(t("koreader.catalog.loading"), function()
+        self:_openCatalogRecentNow(library)
+    end)
+end
+
+function Kolibre:_openCatalogRecentNow(library)
     local path = "/api/kolibre/devices/catalog?library=" .. urlEncode(library) .. "&sort=recent&page=1&size=24"
     local result, err = self.api:request("GET", path)
     if not result then
@@ -2566,6 +2670,14 @@ end
 -- reshuffle button: reopening this same entry from the dashboard already
 -- issues a fresh request and gets a new random pick.
 function Kolibre:_openCatalogDiscover(library)
+    -- 20/11/2026 (E7): come _openCatalogRecent — i suggerimenti li calcola
+    -- il server, e il calcolo puo' costare piu' della pagina normale.
+    self:_runWithWaitingSign(t("koreader.catalog.loading"), function()
+        self:_openCatalogDiscoverNow(library)
+    end)
+end
+
+function Kolibre:_openCatalogDiscoverNow(library)
     local path = "/api/kolibre/devices/catalog/discover?library=" .. urlEncode(library) .. "&limit=24"
     local result, err = self.api:request("GET", path)
     if not result then
@@ -3630,28 +3742,32 @@ end
 -- nessuno stato "a metà" da recuperare, solo un booleano "c'è una richiesta
 -- in attesa" con i suoi dati).
 function Kolibre:_startDeviceRestore()
-    if not self:_requireReachable(true) then return end
-    local siblings, err = self.api:request("GET", "/api/kolibre/devices/siblings")
-    if not siblings or #siblings == 0 then
-        UIManager:show(InfoMessage:new{
-            text = t("koreader.restore.no_other_device", { error = tostring(err or t("koreader.restore.none_registered")) }),
-        })
-        return
-    end
+    -- 20/11/2026 (E7): controllo di raggiungibilita' piu' richiesta dei
+    -- dispositivi fratelli, tutto sincrono e prima senza nessun segno.
+    self:_runWithWaitingSign(nil, function()
+        if not self:_requireReachable(true) then return end
+        local siblings, err = self.api:request("GET", "/api/kolibre/devices/siblings")
+        if not siblings or #siblings == 0 then
+            UIManager:show(InfoMessage:new{
+                text = t("koreader.restore.no_other_device", { error = tostring(err or t("koreader.restore.none_registered")) }),
+            })
+            return
+        end
 
-    local picker
-    local items = {}
-    for _idx, dev in ipairs(siblings) do
-        table.insert(items, {
-            text = dev.name .. " (" .. tostring(dev.model) .. ")",
-            callback = function()
-                UIManager:close(picker)
-                self:_confirmDeviceRestoreSource(dev)
-            end,
-        })
-    end
-    picker = Menu:new{ title = t("koreader.restore.choose_source"), item_table = items, is_popout = true }
-    UIManager:show(picker)
+        local picker
+        local items = {}
+        for _idx, dev in ipairs(siblings) do
+            table.insert(items, {
+                text = dev.name .. " (" .. tostring(dev.model) .. ")",
+                callback = function()
+                    UIManager:close(picker)
+                    self:_confirmDeviceRestoreSource(dev)
+                end,
+            })
+        end
+        picker = Menu:new{ title = t("koreader.restore.choose_source"), item_table = items, is_popout = true }
+        UIManager:show(picker)
+    end)
 end
 
 function Kolibre:_confirmDeviceRestoreSource(source_device)
@@ -3825,7 +3941,16 @@ function Kolibre:_patchMenuItems()
 
     local elenco = nil
     if self:_requireReachable(false) then
-        local risposta = self.api:request("GET", "/api/tools/koreader/patches")
+        -- 20/11/2026 (E7): questo codice gira DENTRO sub_item_table_func,
+        -- che deve tornare la tabella subito: il nextTick di
+        -- _runWithWaitingSign qui non si puo' usare. Si mostra il segno e
+        -- si ridisegna (il forceRePaint sta dentro _showProgress) PRIMA
+        -- della chiamata, cosi' sull'e-ink il messaggio arriva allo
+        -- schermo; e la risposta e' un elenco piccolo per costruzione,
+        -- quindi vale il profilo `breve` (3/9 s), non i 10/30 di LARGE.
+        self:_showProgress(t("koreader.common.contacting_server"))
+        local risposta = self.api:request("GET", "/api/tools/koreader/patches", nil, { breve = true })
+        self:_closeProgress()
         elenco = risposta and risposta.patches or nil
     end
 

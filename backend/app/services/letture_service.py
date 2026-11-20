@@ -32,7 +32,7 @@ pochi byte; una riga saltata non torna piu'.
 import calendar
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from sqlalchemy.orm import Session
@@ -451,5 +451,196 @@ def converti_le_letture(db: Session, limite: int = LOTTO_DI_CONVERSIONE) -> dict
         else:
             esito["fallite"] += 1
 
+    db.commit()
+    return esito
+
+
+# ── Dal dato grezzo alle sessioni e alla copertura (passo 4) ────────────
+#
+# Le sessioni (`ReadingSession`) continuano a NASCERE dal canale statistiche
+# col raggruppamento a 15 minuti: qui non se ne crea e non se ne cancella
+# nessuna. Il dato vero le ARRICCHISCE — decisione di Paolo, 20/11/2026 —
+# scrivendo sulle sessioni che hanno righe esatte nella propria finestra
+# temporale i caratteri davvero letti, e lasciando TUTTE le altre come sono
+# (stima da fraction_read, `exact` = 0).
+
+def _segna_intervallo_esatto(mappa: bytearray, bins: int,
+                             inizio: int, fine: int, totale: int) -> bool:
+    """Segna nella mappa di copertura i bin coperti da un intervallo di
+    caratteri — l'ingresso ESATTO del bitmap, accanto a quello per pagine
+    di `stats_service._segna_pagina`.
+
+    Il denominatore e' `totale`, cioe' `caratteri_del_libro` DELLA RIGA:
+    l'unico con cui e' lecito normalizzare i suoi caratteri (vedi la testa
+    di questo modulo: le due misure del totale differiscono del 4% misurato,
+    e una frazione fatta mescolandole e' sbagliata senza che niente lo dica).
+    """
+    if not totale or totale <= 0 or inizio is None or fine is None:
+        return False
+    if fine <= inizio or inizio >= totale:
+        return False
+    primo = int(inizio / totale * bins)
+    ultimo = max(primo + 1, int(min(fine, totale) / totale * bins))
+    for k in range(max(0, primo), min(bins, ultimo)):
+        mappa[k // 8] |= 1 << (k % 8)
+    return True
+
+
+def derive_reading_sessions(db: Session) -> dict:
+    """
+    Arricchisce sessioni e copertura con le righe risolte in caratteri.
+
+    **Cosa fa, per ogni libro/utente che ha righe `exact`:**
+
+      1. **Sessioni.** Ogni riga di PAGINA esatta cade (o no) nella finestra
+         temporale di una sessione KOReader dello stesso utente e libro —
+         `start_time <= istante <= start_time + duration`. Sulle sessioni
+         che hanno almeno una riga si scrive: `chars_read` (somma degli
+         intervalli carattere_fine - carattere_inizio), `char_start`/
+         `char_end` (min/max assoluti) e `exact` = 1. Le sessioni senza
+         righe NON si toccano: restano stimate, `exact` = 0.
+      2. **Copertura.** I bin del bitmap (`BookReadingCoverage`) si marcano
+         dagli intervalli veri, normalizzati col `caratteri_del_libro`
+         DELLA RIGA, e si uniscono alla mappa esistente con la stessa
+         unione di `stats_service.aggiorna_copertura`.
+
+    **Le decisioni dichiarate, e il loro perche':**
+
+      * **Le righe di NOTA (genere 'n') non si sommano ai caratteri di
+        pagina.** Il tempo su un popup di nota e' gia' separato alla fonte
+        proprio perche' KOReader lo attribuiva alla pagina ferma sotto, e
+        rimetterlo dentro qui rifarebbe lo stesso errore sui caratteri: i
+        caratteri della nota sono un dato SUO, che restera' leggibile dalle
+        righe grezze quando si decidera' come mostrarlo. Per lo stesso
+        motivo le note non marcano la copertura: l'apparato non e' il corpo
+        del libro percorso.
+      * **La finestra e' [inizio, inizio + durata] inclusivo**, su istanti
+        UTC (lo stesso orologio: entrambe le tabelle convertono l'epoch del
+        lettore con utcfromtimestamp). Una riga che non cade in nessuna
+        finestra — la sessione arrivera' col prossimo backup delle
+        statistiche — resta in attesa: questo passo e' rieseguibile e la
+        riprende al giro dopo.
+      * **Il dispositivo NON fa parte dell'aggancio**, di proposito: le
+        sessioni si fondono fra dispositivi della stessa persona (il caso
+        Syncthing: 737 doppioni su 743, misurato) e `device_id` resta al
+        primo che ha sincronizzato, mentre le righe portano il dispositivo
+        che le ha misurate. Pretendere l'uguaglianza mancherebbe proprio le
+        sessioni fuse. L'utente, il libro e la finestra bastano.
+      * **Solo sessioni `source` = 'koreader'**: le righe vengono dal
+        lettore; una sessione del lettore web nello stesso momento e' una
+        lettura diversa e non va rietichettata.
+      * **Una riga senza `carattere_fine`** (l'ultima pagina del libro, che
+        non ha «l'inizio della pagina dopo») non entra ne' nella somma ne'
+        nella copertura: di quel tratto si sa dove comincia ma non quanto e'
+        lungo, e inventare una fine sarebbe un numero falso.
+      * **Idempotente per ricalcolo da zero**: ogni giro RICALCOLA i valori
+        dalla totalita' delle righe esatte invece di accumulare sul valore
+        precedente, quindi due giri danno lo stesso risultato, e un giro
+        dopo che l'indice e' migliorato (righe `failed` diventate `exact`)
+        aggiorna tutto lo storico — e' il principio «si conserva la prova».
+        La copertura e' un OR di bit: rimarcarla non cambia niente.
+      * **Niente soglie e niente pulizia degli outlier** (Paolo, 20/11/2026,
+        punto F2): una pagina lasciata aperta la notte conta per la sua
+        durata vera. La soglia si decidera' guardando i dati grezzi, che
+        restano — non qui.
+
+    **Esatto e stimato sullo stesso libro convivono cosi':** sulla singola
+    sessione vince una misura sola, dichiarata da `exact`; sul bitmap di
+    copertura le due si UNISCONO (OR), perche' la copertura risponde a «cosa
+    ho visto almeno una volta» e un millesimo visto resta visto con
+    qualunque misura lo si sia guardato.
+
+    Il costo: oggi ricalcola su TUTTE le righe esatte a ogni giro — che al
+    20/11/2026 sono decine, non migliaia. Limitarlo ai libri toccati
+    dall'ultimo lotto e' l'ottimizzazione successiva, quando servira'.
+
+    Commit alla fine, come `converti_le_letture`. Non solleva per un libro
+    storto: ogni gruppo e' indipendente.
+    """
+    from . import stats_service  # qui e non in testa: nessun giro di import
+
+    righe = (
+        db.query(models.LetturaDiPagina)
+        .filter(
+            models.LetturaDiPagina.stato_conversione == "exact",
+            models.LetturaDiPagina.genere == models.LetturaDiPagina.PAGINA,
+            models.LetturaDiPagina.carattere_inizio.isnot(None),
+            models.LetturaDiPagina.carattere_fine.isnot(None),
+            models.LetturaDiPagina.library.isnot(None),
+            models.LetturaDiPagina.calibre_book_id.isnot(None),
+        )
+        .order_by(
+            models.LetturaDiPagina.library,
+            models.LetturaDiPagina.calibre_book_id,
+            models.LetturaDiPagina.istante,
+        )
+        .all()
+    )
+    esito = {"sessioni_arricchite": 0, "righe_esatte": len(righe),
+             "libri": 0, "biblioteche": [], "copertura_aggiornata": 0}
+    if not righe:
+        return esito
+
+    gruppi: dict = {}
+    for riga in righe:
+        gruppi.setdefault((riga.user_id, riga.library, riga.calibre_book_id), []).append(riga)
+
+    biblioteche = set()
+    for (user_id, library, calibre_book_id), del_libro in gruppi.items():
+        esito["libri"] += 1
+
+        # ── 1. Le sessioni di questo libro, arricchite dalla finestra ──
+        sessioni = (
+            db.query(models.ReadingSession)
+            .filter(
+                models.ReadingSession.user_id == user_id,
+                models.ReadingSession.library == library,
+                models.ReadingSession.calibre_book_id == calibre_book_id,
+                models.ReadingSession.source == "koreader",
+            )
+            .order_by(models.ReadingSession.start_time)
+            .all()
+        )
+        for sessione in sessioni:
+            inizio_finestra = sessione.start_time
+            fine_finestra = sessione.start_time + timedelta(seconds=sessione.duration or 0)
+            somma, char_start, char_end, quante = 0, None, None, 0
+            for riga in del_libro:
+                if riga.istante < inizio_finestra or riga.istante > fine_finestra:
+                    continue
+                larghezza = riga.carattere_fine - riga.carattere_inizio
+                if larghezza <= 0:
+                    continue
+                quante += 1
+                somma += larghezza
+                if char_start is None or riga.carattere_inizio < char_start:
+                    char_start = riga.carattere_inizio
+                if char_end is None or riga.carattere_fine > char_end:
+                    char_end = riga.carattere_fine
+            if not quante:
+                continue  # nessuna riga: la sessione resta stimata, intatta
+            if (sessione.chars_read != somma or sessione.char_start != char_start
+                    or sessione.char_end != char_end or not sessione.exact):
+                sessione.chars_read = somma
+                sessione.char_start = char_start
+                sessione.char_end = char_end
+                sessione.exact = 1
+                esito["sessioni_arricchite"] += 1
+                biblioteche.add(library)
+
+        # ── 2. La copertura, dagli intervalli veri ─────────────────────
+        mappa = bytearray(stats_service._BINS // 8)
+        segnato = False
+        for riga in del_libro:
+            if _segna_intervallo_esatto(mappa, stats_service._BINS,
+                                        riga.carattere_inizio, riga.carattere_fine,
+                                        riga.caratteri_del_libro):
+                segnato = True
+        if segnato:
+            stats_service.aggiorna_copertura(db, user_id, library, calibre_book_id, mappa)
+            esito["copertura_aggiornata"] += 1
+            biblioteche.add(library)
+
+    esito["biblioteche"] = sorted(biblioteche)
     db.commit()
     return esito

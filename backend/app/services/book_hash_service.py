@@ -4,13 +4,14 @@ from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..logging_utils import log_message
 from . import koreader_hash, text_fingerprint, widowed_highlights
 
 
 class BookMatch(NamedTuple):
     """
     Deliberately exposes the same three attribute names a models.BookHash row
-    does (library / calibre_book_id / format): every call site in devices.py
+    does (library / calibre_book_id / format): every call site in the devices package
     used to hold a BookHash instance, and this lets them switch to the
     three-tier resolver without touching the code that reads the result.
     """
@@ -197,7 +198,33 @@ def _preferisci_vivi(db: Session, matches: list) -> list:
     if vivi:
         return vivi
     gemelli = _per_impronta(db, matches)
-    return gemelli or matches
+    morto = matches[0]
+    if gemelli:
+        # Il salto per impronta e' la strada piu' indiretta di tutte e nel
+        # risultato non si distingue da una risoluzione normale: va scritto
+        # da quale libro morto a quale vivo si e' saltati.
+        _segnala_una_volta(
+            ("impronta", morto.library, morto.calibre_book_id), "info",
+            f"Hash resolved through the content fingerprint: book {morto.library}/{morto.calibre_book_id} is deleted, using {gemelli[0].library}/{gemelli[0].calibre_book_id} instead")
+        return gemelli
+    # Tutte morte e nessun gemello: da qui nascono le note vedove.
+    _segnala_una_volta(
+        ("morto", morto.library, morto.calibre_book_id), "warning",
+        f"Hash resolves only to deleted books (e.g. {morto.library}/{morto.calibre_book_id}): keeping the dead match, new notes for it will be widowed")
+    return matches
+
+
+# I casi gia' scritti nel registro. La risoluzione passa a ogni posizione di
+# lettura e a ogni nota: lo stesso libro morto su un lettore si ripresenta a
+# ogni sincronizzazione, e una riga a sincronizzazione sarebbe solo rumore.
+_gia_segnalati: set = set()
+
+
+def _segnala_una_volta(chiave: tuple, livello: str, messaggio: str) -> None:
+    if chiave in _gia_segnalati:
+        return
+    _gia_segnalati.add(chiave)
+    log_message(livello, "devices", messaggio)
 
 
 def _per_impronta(db: Session, morti: list) -> list:
@@ -295,7 +322,7 @@ def upsert_book_hash(db: Session, library: str, calibre_book_id: int, format: st
     logic at all: a device's push_device_annotations resolves its own reported
     hash against this table, and a book indexed only through rescan had no row
     to match against, so every annotation for it was silently dropped into the
-    'unresolved' counter — see devices.py's push_device_annotations).
+    'unresolved' counter — see devices/annotations.py's push_device_annotations).
 
     Also computes and stores the content-level fingerprint (text_fingerprint.py)
     alongside the byte hash, for the same three call sites — this is how the
@@ -315,7 +342,7 @@ def record_device_hash(db: Session, library: str, calibre_book_id: int, format: 
     """
     Records a hash the DEVICE reported (not recomputed from the server's own
     copy of the file) against a book — used by the manual "pair" actions
-    (devices.py's queue_flagged_book_action and pair_device_book) when a
+    (the devices package's queue_flagged_book_action and pair_device_book) when a
     local file was matched to a book by the user (or by fuzzy title/author
     guess) rather than by hash. Deliberately does NOT verify this hash
     against the server's actual file: the whole point of manual pairing is
@@ -324,7 +351,7 @@ def record_device_hash(db: Session, library: str, calibre_book_id: int, format: 
     not hypothetical, while investigating a book that wouldn't auto-pair).
 
     verified=False is the whole point of this function existing separately
-    from upsert_book_hash: it's read back by devices.py's list_devices to
+    from upsert_book_hash: it's read back by devices/management.py's list_devices to
     show a "non verificato per checksum" badge on the resulting DeviceBook
     row — including on a LATER sync, once this same (now-forced) hash flows
     through the ordinary hash-adoption path (_adopt_managed_books), which
