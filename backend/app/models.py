@@ -1048,6 +1048,14 @@ class IngestedBook(Base):
     file_format = Column(String, nullable=False)
     file_size_bytes = Column(Integer, nullable=True)
     file_hash = Column(String, nullable=True, index=True)
+    # Il proprietario del file in attesa (21/11/2026, voce 7 del registro):
+    # un file in `ingest/<id>-<utente>/` appartiene a quell'utente, uno
+    # caricato dal web a chi lo ha caricato. **NULL e' una risposta, non un
+    # buco**: significa «di prima, o dalla radice di ingest» — le righe nate
+    # prima di questa colonna e i file messi a mano nella radice non si
+    # attribuiscono mai a nessuno per deduzione. Le righe NULL le vede solo
+    # l'amministratore (vedi api/ingest.py).
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
 
     title = Column(String, nullable=False, default="Unknown Title")
     author = Column(String, nullable=True)

@@ -719,8 +719,8 @@ async def rescan_library(
             # restava quella di un file che non esisteva piu'. Di tutti e tre
             # i percorsi d'ingresso questo e' il sospetto piu' forte per i due
             # libri che su questo impianto portavano ancora un'impronta
-            # sbagliata, e per le 125 impronte rotte su 157 che
-            # `anarcobiblioteca` aveva il 04/10: una scansione tocca tutti i
+            # sbagliata, e per le 125 impronte rotte su 157 che una
+            # biblioteca reale aveva il 04/10: una scansione tocca tutti i
             # libri in una volta.
             try:
                 await run_in_threadpool(

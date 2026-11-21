@@ -2253,6 +2253,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/devices/{device_id}/queue/bulk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Queue Books For Device
+         * @description L'invio multiplo (21/11/2026, regola di Paolo): «se seleziono un libro
+         *     sul dispositivo e uno no, partono SOLO quelli che mancano».
+         *
+         *     Prima questa rotta non c'era: il browser faceva N chiamate a /queue, e
+         *     un libro gia' a bordo tornava in coda come se niente fosse (la clessidra
+         *     che Paolo ha visto). Qui il giro e' UNO, e la risposta dice libro per
+         *     libro cosa e' partito (`queued`) e cosa no e perche' (`skipped`, con un
+         *     codice motivo): saltare in silenzio sarebbe l'altro modo di mentire.
+         *
+         *     Corpo: {library, action: "queued_download", books: [{calibre_book_id,
+         *     format?}]}. Solo l'invio: le rimozioni in blocco restano sulle chiamate
+         *     per riga di /queue, dove la riga c'e' per forza. Un libro saltato non
+         *     e' un errore della richiesta — la selezione mista e' il caso normale —
+         *     quindi si risponde 200 anche quando non parte niente.
+         */
+        post: operations["queue_books_for_device_api_devices__device_id__queue_bulk_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/devices/{device_id}/vocabulary": {
         parameters: {
             query?: never;
@@ -8888,6 +8921,24 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * InviiAccodati
+         * @description L'esito dell'invio multiplo (21/11/2026, regola di Paolo): partono SOLO
+         *     i libri che sul dispositivo mancano, e la risposta dice uno per uno
+         *     quali sono partiti e quali no — perche' il browser deve poterlo
+         *     mostrare, non solo saperlo. Le due liste insieme coprono tutti i libri
+         *     chiesti; entrambe possono essere vuote, mai tutte e due.
+         */
+        InviiAccodati: {
+            /** Status */
+            status: string;
+            /** Queued */
+            queued: components["schemas"]["LibroAccodato"][];
+            /** Skipped */
+            skipped: components["schemas"]["LibroSaltato"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * LibriDaScoprire
          * @description «Da scoprire»: libri che su questo lettore non ci sono, scelti fra
          *     quelli dello stesso autore o con le stesse etichette di cio' che e'
@@ -8954,6 +9005,18 @@ export interface components {
             status: string;
             /** Book Id */
             book_id: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LibroAccodato
+         * @description Un libro che l'invio multiplo ha messo in coda, col formato scelto.
+         */
+        LibroAccodato: {
+            /** Calibre Book Id */
+            calibre_book_id: number;
+            /** Format */
+            format: string;
         } & {
             [key: string]: unknown;
         };
@@ -9186,6 +9249,10 @@ export interface components {
         LibroInArretrato: {
             /** Id */
             id: number;
+            /** Owner User Id */
+            owner_user_id: number | null;
+            /** Owner Username */
+            owner_username: string | null;
             /** Title */
             title: string;
             /** Author */
@@ -9469,6 +9536,24 @@ export interface components {
             rating: number | null;
             /** Pubdate */
             pubdate: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LibroSaltato
+         * @description Un libro che l'invio multiplo NON ha accodato, e perche'.
+         *
+         *     Il motivo e' un codice e non una frase: la frase la sceglie il browser
+         *     nella lingua della persona, e un codice non si puo' tradurre a meta'.
+         */
+        LibroSaltato: {
+            /** Calibre Book Id */
+            calibre_book_id: number;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "already_on_device" | "removal_pending" | "already_queued" | "no_format";
         } & {
             [key: string]: unknown;
         };
@@ -15533,6 +15618,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    queue_books_for_device_api_devices__device_id__queue_bulk_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviiAccodati"];
                 };
             };
             /** @description Validation Error */

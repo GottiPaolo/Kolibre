@@ -1665,6 +1665,40 @@ class AzioniAccodate(Esito):
     updated: int
 
 
+class LibroAccodato(Permissivo):
+    """Un libro che l'invio multiplo ha messo in coda, col formato scelto."""
+    calibre_book_id: int
+    format: str
+
+
+class LibroSaltato(Permissivo):
+    """
+    Un libro che l'invio multiplo NON ha accodato, e perche'.
+
+    Il motivo e' un codice e non una frase: la frase la sceglie il browser
+    nella lingua della persona, e un codice non si puo' tradurre a meta'.
+    """
+    calibre_book_id: int
+    #: `already_on_device` — il libro risulta gia' sul dispositivo;
+    #: `removal_pending` — e' ancora a bordo, in attesa che il lettore ne
+    #: confermi la rimozione; `already_queued` — un invio e' gia' in coda;
+    #: `no_format` — il libro non ha nessun formato da mandare.
+    reason: Literal["already_on_device", "removal_pending",
+                    "already_queued", "no_format"]
+
+
+class InviiAccodati(Esito):
+    """
+    L'esito dell'invio multiplo (21/11/2026, regola di Paolo): partono SOLO
+    i libri che sul dispositivo mancano, e la risposta dice uno per uno
+    quali sono partiti e quali no — perche' il browser deve poterlo
+    mostrare, non solo saperlo. Le due liste insieme coprono tutti i libri
+    chiesti; entrambe possono essere vuote, mai tutte e due.
+    """
+    queued: list[LibroAccodato]
+    skipped: list[LibroSaltato]
+
+
 # ── Dispositivi: il protocollo che parla col plugin KOReader ─────────────
 #
 # Queste risposte non passano dal browser: le legge il plugin Lua su un
@@ -3072,6 +3106,13 @@ class LibroInArretrato(Permissivo):
     carica vede subito le schede, senza rileggere l'elenco.
     """
     id: int
+    #: Il proprietario del file (21/11/2026: la cartella di ingest e' per
+    #: utente). `null` significa «di prima della colonna, o messo a mano
+    #: nella radice di ingest» — righe che vede solo l'amministratore.
+    owner_user_id: Optional[int]
+    #: Lo username del proprietario, per la scheda dell'amministratore.
+    #: `null` quando `owner_user_id` e' `null`.
+    owner_username: Optional[str]
     #: Mai vuoto: senza titolo nei metadati risponde «Unknown Title».
     title: str
     #: Mai vuoto: senza autore risponde «Unknown Author».

@@ -14,8 +14,8 @@ import {
 import type { Book } from '@/types/library'
 import type { Device } from '@/types/device'
 import { useBookActions } from '@/lib/bookActionsContext'
-import { queueBookForDevice } from '@/lib/deviceActions'
-import { deviceBookColumnState, pickPreferredDeviceFormat } from '@/lib/deviceFormat'
+import { deviceErrorDetail, queueBookForDevice, queueBooksForDevice } from '@/lib/deviceActions'
+import { deviceBookColumnState, pickPreferredDeviceFormat, sendBlockReason, sendSkipReasonLabel } from '@/lib/deviceFormat'
 import { useQueryClient } from '@tanstack/react-query'
 import { toast } from '@/lib/toast'
 import { useLingua } from '@/lib/i18n'
@@ -48,25 +48,52 @@ export function BulkBookContextMenu({ books, children }: BulkBookContextMenuProp
     const row = device.books.find((b) => b.library === folder && b.calibre_book_id === book.id)
     return row ? deviceBookColumnState(row.status) : 'off'
   }
-  // Un dispositivo compare come bersaglio "Invia" se almeno uno dei libri
-  // selezionati non ce l'ha ancora sopra (e viceversa per "Rimuovi") — non
-  // nasconde il dispositivo solo perché uno dei tanti libri scelti è già a
-  // posto, altrimenti l'azione bulk sparirebbe per selezioni miste.
-  const sendTargets = devices.filter((d) => books.some((b) => statusFor(d, b) !== 'on'))
+  function sendBlockFor(device: Device, book: Book) {
+    if (!folder) return null
+    const statuses = device.books
+      .filter((b) => b.library === folder && b.calibre_book_id === book.id)
+      .map((b) => b.status)
+    return sendBlockReason(statuses)
+  }
+  // Un dispositivo compare come bersaglio "Invia" se ALMENO UNO dei libri
+  // selezionati può davvero partire (21/11/2026, regola di Paolo: nella
+  // selezione mista partono SOLO quelli che mancano) — e come bersaglio
+  // "Rimuovi" se almeno uno ce l'ha sopra: non si nasconde il dispositivo
+  // solo perché uno dei tanti libri scelti è già a posto, altrimenti
+  // l'azione bulk sparirebbe per selezioni miste.
+  const sendTargets = devices.filter((d) => books.some((b) => !sendBlockFor(d, b)))
   const removeTargets = devices.filter((d) => books.some((b) => statusFor(d, b) !== 'off'))
 
   async function handleBulkSendToDevice(device: Device) {
     if (!folder) return
-    const results = await Promise.allSettled(
-      books.map((book) => {
-        const format = pickPreferredDeviceFormat(book.formats)
-        if (!format) return Promise.reject(new Error('nessun formato compatibile'))
-        return queueBookForDevice(device.id, { calibre_book_id: book.id, library: folder, format, action: 'queued_download' })
+    // UNA chiamata, non N (21/11/2026): il server accoda i mancanti e dice
+    // chi ha saltato e perché — prima un libro già a bordo tornava in coda
+    // come se niente fosse, e la clessidra compariva senza un invio dietro.
+    // Al termine si dice cosa è partito e cosa no: un invio che tace sui
+    // saltati farebbe credere che siano partiti tutti.
+    try {
+      const esito = await queueBooksForDevice(device.id, {
+        library: folder,
+        action: 'queued_download',
+        books: books.map((book) => ({ calibre_book_id: book.id, format: pickPreferredDeviceFormat(book.formats) })),
       })
-    )
-    const failed = results.filter((r) => r.status === 'rejected').length
-    if (failed > 0) toast.error(t('library.contextMenu.bulkSendFailed', { n: failed, total: books.length, name: device.name }))
-    queryClient.invalidateQueries({ queryKey: ['devices'] })
+      const titleById = new Map(books.map((b) => [b.id, b.title]))
+      if (esito.queued.length > 0) {
+        toast.success(t('library.contextMenu.bulkSendQueued',
+                        { count: esito.queued.length, n: esito.queued.length, name: device.name }))
+      }
+      if (esito.skipped.length > 0) {
+        const details = esito.skipped
+          .map((s) => `${titleById.get(s.calibre_book_id) ?? `#${s.calibre_book_id}`}: ${sendSkipReasonLabel(s.reason, t)}`)
+          .join('; ')
+        toast.info(t('library.contextMenu.bulkSendSkipped',
+                     { count: esito.skipped.length, n: esito.skipped.length, details }))
+      }
+    } catch (e) {
+      toast.error(deviceErrorDetail(e, t('library.contextMenu.sendToDeviceFailed')))
+    } finally {
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+    }
   }
 
   async function handleBulkRemoveFromDevice(device: Device) {

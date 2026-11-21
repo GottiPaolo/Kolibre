@@ -712,6 +712,47 @@ def add_exact_chars_to_reading_sessions() -> None:
         conn.commit()
 
 
+def add_owner_to_ingested_books() -> None:
+    """
+    La colonna `user_id` su `ingested_books` (21/11/2026: la cartella di
+    ingest diventa per utente — richiesta di Paolo, voce del 03/11 della
+    roadmap).
+
+    **Il contesto.** La cartella di ingest era una sola per tutti e la
+    tabella dei file in attesa non aveva un proprietario: con due persone,
+    la pagina Ingest mostrava a ciascuno i file degli altri. Da oggi dentro
+    `data/ingest` c'e' una sottocartella per utente (`<id>-<username>`,
+    creata da sola all'avvio e alla creazione dell'utente — vedi
+    services/ingest_folders.py), il watcher attribuisce il proprietario dal
+    percorso, e l'upload dal web salva nella cartella di chi carica.
+
+    **Nessun backfill, di proposito.** Le righe esistenti restano NULL:
+    sono nate quando il proprietario non si registrava, e attribuirle ora
+    sarebbe un'ipotesi — la regola del progetto e' non dedurre mai un dato
+    dell'utente. NULL significa «di prima, o dalla radice di ingest», e
+    quelle righe le vede (e le lavora) solo l'amministratore, com'era di
+    fatto ieri per tutto.
+
+    **Idempotente per controllo preventivo**: su un database nuovo la
+    colonna e l'indice nascono gia' da create_all col modello di oggi
+    (`index=True` sul modello produce lo stesso nome `ix_ingested_books_
+    user_id`), e il giro e' un no-op — fresh == migrated, indice compreso.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ingested_books)")}
+        if not colonne:
+            return
+        if "user_id" not in colonne:
+            conn.exec_driver_sql(
+                "ALTER TABLE ingested_books ADD COLUMN user_id INTEGER REFERENCES users(id)"
+            )
+            log_message("info", "system", "Migrated ingested_books: added missing 'user_id' column.")
+        conn.exec_driver_sql(
+            "CREATE INDEX IF NOT EXISTS ix_ingested_books_user_id ON ingested_books (user_id)"
+        )
+        conn.commit()
+
+
 # ── Come si aggiunge la prossima migrazione ──────────────────────────────
 # 1. Scrivi qui sopra una funzione idempotente (controlla prima di alterare;
 #    su un database nuovo deve essere un no-op o produrre lo stesso schema
@@ -730,6 +771,7 @@ MIGRATIONS = [
     (4, "device tokens become SHA-256 fingerprints", hash_device_tokens),
     (5, "drop devices.folder_layout (the option is gone)", drop_device_folder_layout),
     (6, "exact character columns on reading_sessions", add_exact_chars_to_reading_sessions),
+    (7, "owner column on ingested_books", add_owner_to_ingested_books),
 ]
 
 

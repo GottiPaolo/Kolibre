@@ -15,6 +15,8 @@ Le rotte:
 * PUT  /api/devices/{id} e DELETE /api/devices/{id};
 * POST /api/devices/{id}/set-default;
 * POST /api/devices/{id}/queue — mette in coda un libro da mandare;
+* POST /api/devices/{id}/queue/bulk — l'invio multiplo (21/11/2026):
+  accoda i libri che mancano e dice quali ha saltati e perche';
 * DELETE /api/devices/{id}/vocabulary — dimentica il vocabolario del
   dispositivo;
 * GET  /api/devices/{id}/sync-history — lo storico delle sessioni di sync;
@@ -43,7 +45,7 @@ from ...logging_utils import log_message
 from ...calibre.library import CalibreLibrary
 from ...services import book_hash_service, patch_koreader, permessi
 from ...schemas_risposte import (
-    DispositivoInElenco, Esito, OrfaneMigrate,
+    DispositivoInElenco, Esito, InviiAccodati, OrfaneMigrate,
     SincronizzazioneNelloStorico, VocabolarioDimenticato,
 )
 from ..libraries import resolve_default_library_folder
@@ -354,6 +356,97 @@ def set_default_device(
     return dev
 
 
+#: Gli stati di DeviceBook con cui un NUOVO invio dello stesso libro non ha
+#: senso, in QUALUNQUE formato (21/11/2026, regola di Paolo: un libro gia'
+#: sul dispositivo non si rimanda — e mandare un altro formato dello stesso
+#: libro e' il doppione che file_sul_dispositivo e' nata per ripulire):
+#: `synced` e `delete_declined` — il file e' a bordo; `pending_delete` — e'
+#: ancora a bordo finche' il lettore non conferma la rimozione (per
+#: ripensarci c'e' /books/{row}/cancel, non un nuovo invio); `pending_send`
+#: — un invio e' gia' in coda, rifarlo sarebbe solo un doppione di coda.
+#: Fuori di proposito: `send_failed` (ritentare e' il rimedio giusto) e
+#: `removed_by_device` (il file sul lettore non c'e' piu').
+_SEND_BLOCKING_STATUSES = ("synced", "delete_declined", "pending_delete", "pending_send")
+
+#: La frase che arriva al browser per ciascun motivo di rifiuto — in
+#: inglese come ogni `detail` del server (vedi il_server_parla_inglese.py).
+_SEND_BLOCK_DETAILS = {
+    "already_on_device": "The book is already on this device",
+    "removal_pending": "The book is still on this device, waiting to be "
+                       "removed: cancel the removal instead of sending it again",
+    "already_queued": "The book is already queued for this device",
+}
+
+
+def _send_block_reason(db, device_id, library, calibre_book_id):
+    """
+    Perche' un invio di questo libro NON deve partire — o None se puo'.
+
+    Guarda TUTTE le righe del libro su quel dispositivo, non solo quella del
+    formato chiesto: «gia' sul dispositivo» per Paolo e' una proprieta' del
+    libro (e' cosi' che la colonna della Libreria la mostra), e un secondo
+    formato a bordo sarebbe comunque una copia doppia. I motivi in ordine di
+    forza: presente batte in coda. (21/11/2026)
+    """
+    statuses = {s for (s,) in db.query(models.DeviceBook.status).filter(
+        models.DeviceBook.device_id == device_id,
+        models.DeviceBook.library == library,
+        models.DeviceBook.calibre_book_id == calibre_book_id,
+        models.DeviceBook.status.in_(_SEND_BLOCKING_STATUSES),
+    ).all()}
+    if "synced" in statuses or "delete_declined" in statuses:
+        return "already_on_device"
+    if "pending_delete" in statuses:
+        return "removal_pending"
+    if "pending_send" in statuses:
+        return "already_queued"
+    return None
+
+
+def _resolve_send_format(library, calibre_book_id, fmt):
+    """
+    Il formato da mandare: quello chiesto, o il primo che il libro ha.
+
+    v1 ammetteva la richiesta senza formato, e DeviceBook.format e' NOT
+    NULL: da li' il ripiego sul primo formato disponibile. None vuol dire
+    che il libro non ha proprio formati, e cosa farne lo decide chi chiama:
+    errore secco nell'invio singolo, riga saltata in quello multiplo.
+    (21/11/2026: estratto dalla rotta singola per servire anche il multiplo.)
+    """
+    if fmt:
+        return fmt
+    lib = CalibreLibrary(config.library_path(library))
+    formats = lib.get_formats(calibre_book_id)
+    return formats[0]["format"] if formats else None
+
+
+def _upsert_pending_send(db, device_id, library, calibre_book_id, fmt):
+    """
+    Scrive lo stato desiderato «da mandare» per (libro, formato).
+
+    Se la riga esiste — e il blocco qui sopra e' gia' passato, quindi puo'
+    essere solo `send_failed` o `removed_by_device` — la si rimette in coda
+    pulendo l'errore e la data di rimozione; altrimenti nasce adesso.
+    (21/11/2026: estratto dalla rotta singola per servire anche il multiplo.)
+    """
+    row = db.query(models.DeviceBook).filter(
+        models.DeviceBook.device_id == device_id,
+        models.DeviceBook.library == library,
+        models.DeviceBook.calibre_book_id == calibre_book_id,
+        models.DeviceBook.format == fmt,
+    ).first()
+    if row:
+        row.status = "pending_send"
+        row.requested_by = "server"
+        row.last_error = None
+        row.removed_at = None
+    else:
+        db.add(models.DeviceBook(
+            device_id=device_id, library=library, calibre_book_id=calibre_book_id,
+            format=fmt, status="pending_send", requested_by="server",
+        ))
+
+
 @router.post(
     "/{device_id}/queue",
     responses={200: {"model": Esito}},
@@ -390,30 +483,17 @@ def queue_book_for_device(
     fmt = (payload.get("format") or "").upper() or None
 
     if action == "queued_download":
+        # Il blocco dell'invio (21/11/2026, regola di Paolo): un libro che
+        # risulta gia' sul dispositivo — o gia' in coda per arrivarci — si
+        # rifiuta, col motivo. Il blocco sta QUI e non solo nel browser,
+        # perche' solo il server vede lo stato vero delle righe.
+        reason = _send_block_reason(db, device_id, library, calibre_book_id)
+        if reason:
+            raise HTTPException(status_code=409, detail=_SEND_BLOCK_DETAILS[reason])
+        fmt = _resolve_send_format(library, calibre_book_id, fmt)
         if not fmt:
-            # v1 allowed a missing format; DeviceBook.format is NOT NULL, so
-            # fall back to the book's first available format.
-            lib = CalibreLibrary(config.library_path(library))
-            formats = lib.get_formats(calibre_book_id)
-            if not formats:
-                raise HTTPException(status_code=404, detail="The book has no formats available to send")
-            fmt = formats[0]["format"]
-        row = db.query(models.DeviceBook).filter(
-            models.DeviceBook.device_id == device_id,
-            models.DeviceBook.library == library,
-            models.DeviceBook.calibre_book_id == calibre_book_id,
-            models.DeviceBook.format == fmt,
-        ).first()
-        if row:
-            row.status = "pending_send"
-            row.requested_by = "server"
-            row.last_error = None
-            row.removed_at = None
-        else:
-            db.add(models.DeviceBook(
-                device_id=device_id, library=library, calibre_book_id=calibre_book_id,
-                format=fmt, status="pending_send", requested_by="server",
-            ))
+            raise HTTPException(status_code=404, detail="The book has no formats available to send")
+        _upsert_pending_send(db, device_id, library, calibre_book_id, fmt)
     else:  # queued_delete
         query = db.query(models.DeviceBook).filter(
             models.DeviceBook.device_id == device_id,
@@ -439,6 +519,78 @@ def queue_book_for_device(
     db.commit()
     log_message("info", "devices", f"Queued {action} for book {calibre_book_id} on device '{dev.name}'")
     return {"status": "ok"}
+
+
+@router.post(
+    "/{device_id}/queue/bulk",
+    responses={200: {"model": InviiAccodati}},
+)
+def queue_books_for_device(
+    device_id: int,
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user),
+):
+    """
+    L'invio multiplo (21/11/2026, regola di Paolo): «se seleziono un libro
+    sul dispositivo e uno no, partono SOLO quelli che mancano».
+
+    Prima questa rotta non c'era: il browser faceva N chiamate a /queue, e
+    un libro gia' a bordo tornava in coda come se niente fosse (la clessidra
+    che Paolo ha visto). Qui il giro e' UNO, e la risposta dice libro per
+    libro cosa e' partito (`queued`) e cosa no e perche' (`skipped`, con un
+    codice motivo): saltare in silenzio sarebbe l'altro modo di mentire.
+
+    Corpo: {library, action: "queued_download", books: [{calibre_book_id,
+    format?}]}. Solo l'invio: le rimozioni in blocco restano sulle chiamate
+    per riga di /queue, dove la riga c'e' per forza. Un libro saltato non
+    e' un errore della richiesta — la selezione mista e' il caso normale —
+    quindi si risponde 200 anche quando non parte niente.
+    """
+    dev = db.query(models.Device).filter(
+        models.Device.id == device_id, models.Device.user_id == current_user.id
+    ).first()
+    if not dev:
+        raise HTTPException(status_code=404, detail="Device not found")
+
+    if payload.get("action") != "queued_download":
+        raise HTTPException(status_code=400, detail="action must be 'queued_download'")
+    library = payload.get("library") or resolve_default_library_folder(db)
+    if not library:
+        raise HTTPException(status_code=404, detail="No library is configured. Create one first.")
+    books = payload.get("books")
+    if not isinstance(books, list) or not books:
+        raise HTTPException(status_code=400, detail="books must be a list with at least one entry")
+
+    queued, skipped = [], []
+    #: I libri gia' accodati DENTRO questa richiesta: la sessione ha
+    #: autoflush=False, quindi _send_block_reason non vede le righe appena
+    #: aggiunte e lo stesso libro chiesto due volte passerebbe due volte —
+    #: fino all'IntegrityError sul vincolo unico. Il doppione si ferma qui,
+    #: col suo stesso motivo: per chi chiama E' gia' in coda. (21/11/2026)
+    queued_in_request = set()
+    for entry in books:
+        book_id = entry.get("calibre_book_id") if isinstance(entry, dict) else None
+        if not book_id:
+            raise HTTPException(status_code=400, detail="calibre_book_id is required for every book")
+        if book_id in queued_in_request:
+            skipped.append({"calibre_book_id": book_id, "reason": "already_queued"})
+            continue
+        reason = _send_block_reason(db, device_id, library, book_id)
+        if reason:
+            skipped.append({"calibre_book_id": book_id, "reason": reason})
+            continue
+        fmt = _resolve_send_format(library, book_id, (entry.get("format") or "").upper() or None)
+        if not fmt:
+            skipped.append({"calibre_book_id": book_id, "reason": "no_format"})
+            continue
+        _upsert_pending_send(db, device_id, library, book_id, fmt)
+        queued.append({"calibre_book_id": book_id, "format": fmt})
+        queued_in_request.add(book_id)
+    db.commit()
+    log_message("info", "devices",
+                f"Bulk queue for device '{dev.name}': {len(queued)} queued, {len(skipped)} skipped")
+    return {"status": "ok", "queued": queued, "skipped": skipped}
 
 
 @router.delete(

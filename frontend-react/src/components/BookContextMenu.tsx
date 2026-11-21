@@ -35,7 +35,7 @@ import type { Device } from '@/types/device'
 import { useBookActions } from '@/lib/bookActionsContext'
 import { copyBookToLibrary } from '@/lib/bookActions'
 import { queueBookForDevice, deviceErrorDetail } from '@/lib/deviceActions'
-import { deviceBookColumnState, pickPreferredDeviceFormat } from '@/lib/deviceFormat'
+import { deviceBookColumnState, pickPreferredDeviceFormat, sendBlockReason, sendSkipReasonLabel } from '@/lib/deviceFormat'
 import { splitAuthorNames } from '@/lib/authorNames'
 import { errorDetail, recomputeBookPageCount } from '@/lib/librarySettingsActions'
 import { useQueryClient } from '@tanstack/react-query'
@@ -96,7 +96,20 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
       return [d.id, row ? deviceBookColumnState(row.status) : 'off'] as const
     })
   )
-  const sendTargets = devices.filter((d) => deviceStatusById.get(d.id) !== 'on')
+  // Perché un invio verso quel dispositivo NON partirebbe (21/11/2026,
+  // regola di Paolo): prima la voce spariva solo per lo stato 'on', e un
+  // libro in coda o in attesa di rimozione si poteva «rimandare» — la
+  // clessidra compariva senza un invio vero dietro. Ora la voce resta
+  // visibile ma disabilitata, col motivo nel tooltip: una voce che
+  // sparisce non spiega niente. Il blocco vero sta sul server (409).
+  const sendBlockById = new Map(
+    devices.map((d) => {
+      const statuses = d.books
+        .filter((b) => b.library === folder && b.calibre_book_id === book.id)
+        .map((b) => b.status)
+      return [d.id, sendBlockReason(statuses)] as const
+    })
+  )
   const removeTargets = devices.filter((d) => deviceStatusById.get(d.id) !== 'off')
 
   async function handleCopy(targetFolder: string, deleteSource: boolean) {
@@ -245,17 +258,25 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
           </ContextMenuSub>
         )}
 
-        {sendTargets.length > 0 && (
+        {devices.length > 0 && (
           <ContextMenuSub>
             <ContextMenuSubTrigger>
               <Send /> {t('library.contextMenu.sendToDevice')}
             </ContextMenuSubTrigger>
             <ContextMenuSubContent>
-              {sendTargets.map((d) => (
-                <ContextMenuItem key={d.id} onSelect={() => handleSendToDevice(d)}>
-                  <Smartphone /> {d.name}
-                </ContextMenuItem>
-              ))}
+              {devices.map((d) => {
+                const block = sendBlockById.get(d.id) ?? null
+                return (
+                  // Il div attorno serve al tooltip: la voce disabilitata
+                  // ha pointer-events-none, e un title messo su di lei non
+                  // comparirebbe mai.
+                  <div key={d.id} title={block ? sendSkipReasonLabel(block, t) : undefined}>
+                    <ContextMenuItem disabled={block !== null} onSelect={() => handleSendToDevice(d)}>
+                      <Smartphone /> {d.name}
+                    </ContextMenuItem>
+                  </div>
+                )
+              })}
             </ContextMenuSubContent>
           </ContextMenuSub>
         )}

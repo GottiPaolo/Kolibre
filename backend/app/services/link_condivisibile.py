@@ -146,7 +146,7 @@ def pezzo_della_biblioteca(cartella: str) -> str:
     se il caso che l'ha mostrata non c'e' piu'.
 
     Il nome di una cartella e' gia' quasi sempre scrivibile in un indirizzo
-    (`libreria`, `anarcobiblioteca`, `ldb`), quindi il prezzo di questa scelta
+    (`libreria`, `saggistica`, `fumetti`), quindi il prezzo di questa scelta
     si paga solo su un nome con spazi o accenti, dove compare un `%20`. Un
     link leggibile che apre la biblioteca sbagliata non e' un buon affare.
     """

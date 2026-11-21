@@ -137,3 +137,29 @@ export function deviceBookColumnState(status: string): DeviceBookColumnState {
   if (status === 'pending_send' || status === 'send_failed') return 'queued'
   return 'off' // removed_by_device
 }
+
+// Specchio di _send_block_reason del server (api/devices/management.py,
+// 21/11/2026): perché un invio NON deve partire, o null se può. Il blocco
+// vero sta sul server (risponde 409): qui serve solo a non offrire
+// l'azione — la voce si disabilita col motivo nel tooltip. Guarda TUTTE le
+// righe del libro su quel dispositivo, in qualunque formato: «già sul
+// dispositivo» è una proprietà del libro, come la mostra la colonna.
+// Restano invii leciti i due rimedi: send_failed (ritenta) e
+// removed_by_device (il file sul lettore non c'è più).
+export type SendBlockReason = 'already_on_device' | 'removal_pending' | 'already_queued'
+export function sendBlockReason(statuses: string[]): SendBlockReason | null {
+  if (statuses.includes('synced') || statuses.includes('delete_declined')) return 'already_on_device'
+  if (statuses.includes('pending_delete')) return 'removal_pending'
+  if (statuses.includes('pending_send')) return 'already_queued'
+  return null
+}
+
+// L'etichetta tradotta di un motivo di blocco/salto dell'invio — i codici
+// sono quelli di LibroSaltato.reason, più i tre del blocco qui sopra (che
+// ne sono un sottoinsieme). Un codice che il server inventasse domani si
+// mostra com'è invece di sparire: un motivo illeggibile è comunque più
+// onesto di nessun motivo (21/11/2026).
+export function sendSkipReasonLabel(reason: string, t: Traduci): string {
+  const noti = ['already_on_device', 'removal_pending', 'already_queued', 'no_format']
+  return noti.includes(reason) ? t(`library.contextMenu.sendBlocked.${reason}`) : reason
+}

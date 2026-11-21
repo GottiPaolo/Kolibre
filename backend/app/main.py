@@ -16,7 +16,8 @@ from .calibre.library import purge_expired_book_lists
 from .calibre.write_queue import CalibreWriteQueue, WriteJob, retry_one_pending, serialize_pending
 from .services.watcher import start_watcher, stop_watcher
 from .services import (author_stats_service, highlight_position, identita_durevole,
-                       qualita_job, stardict_service, stats_service, widowed_highlights)
+                       ingest_folders, qualita_job, stardict_service, stats_service,
+                       widowed_highlights)
 from .api import auth as auth_router
 from .api import users as users_router
 from .api import libraries as libraries_router
@@ -364,6 +365,22 @@ async def lifespan(app: FastAPI):
             )
     finally:
         db.close()
+
+    # Le sottocartelle di ingest per utente (21/11/2026): una per ogni
+    # utente esistente, create qui cosi' il primo avvio dopo il deploy le fa
+    # nascere da solo — nessun passo a mano. Idempotente (una cartella che
+    # c'e' gia', anche con uno username vecchio nel nome, si riusa); una
+    # RIPARAZIONE e non una migrazione, quindi nel suo try: senza cartelle
+    # il server funziona lo stesso, i file si vedono e basta metterli nella
+    # radice come ieri.
+    try:
+        db_cartelle = database.SessionLocal()
+        try:
+            ingest_folders.ensure_all_user_folders(db_cartelle)
+        finally:
+            db_cartelle.close()
+    except Exception as exc:
+        log_message("error", "ingest", f"Creating the per-user ingest folders failed (the server starts anyway): {exc}")
 
     # Populate the per-author "Pagine" total cache once at startup (see
     # models.AuthorPagesCache's own docstring) — otherwise a fresh deploy

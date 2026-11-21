@@ -10,7 +10,7 @@ from ..schemas_risposte import (Esito, PreferenzeDellaPersona, TokenApplicazione
                                 TokenDellApplicazione)
 from ..istanti import quando
 from ..logging_utils import log_message
-from ..services import permessi, preferenze_utente
+from ..services import ingest_folders, permessi, preferenze_utente
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -200,6 +200,13 @@ def create_user(
     db.add(utente)
     db.commit()
     db.refresh(utente)
+    # La sua cartella di ingest nasce con lui (21/11/2026) — e se il disco
+    # dice di no, l'utente esiste lo stesso: la cartella la rifa' il
+    # prossimo avvio (ensure_all_user_folders in main.py).
+    try:
+        ingest_folders.ensure_user_folder(utente.id, utente.username)
+    except OSError as exc:
+        log_message("warning", "ingest", f"Creating the ingest folder for '{username}' failed: {exc}")
     log_message("info", "auth", f"User '{username}' created.")
     return utente
 

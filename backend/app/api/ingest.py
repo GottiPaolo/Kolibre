@@ -17,9 +17,9 @@ from ..schemas_risposte import (
     ImportazioneDaFermare, LibroImportato, LibroInArretrato, ModoPaginazione,
     PaginaDiArretrati, StatoImportazione,
 )
-from ..services import duplicates, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
+from ..services import duplicates, ingest_folders, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
 from ..services.library_scanner import EBOOK_EXTENSIONS
-from ..services.watcher import stage_ingest_file
+from ..services.watcher import ACTIVE_INGEST_STATUSES, stage_ingest_file
 from ..calibre import calibre_naming
 from ..calibre.library import CalibreLibrary
 from ..calibre.connection import page_count_fields
@@ -45,10 +45,39 @@ MAX_UPLOAD_SIZE_BYTES = 300 * 1024 * 1024  # 300 MB
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 
 
-def _serialize_ingest_item(item: models.IngestedBook) -> dict:
+# ── Chi vede cosa (21/11/2026: la cartella di ingest e' per utente) ──────
+#
+# L'amministratore vede TUTTO, comprese le righe senza proprietario (NULL:
+# quelle di prima della colonna user_id, e i file messi a mano nella radice
+# di ingest) — e' il comportamento che la pagina aveva ieri per chiunque.
+# Un utente normale vede SOLO le sue: non quelle degli altri e nemmeno le
+# NULL, perche' «di nessuno» non vuol dire «di tutti» — una riga non
+# attribuita puo' essere il file di un altro, e mostrarla sarebbe la stessa
+# area condivisa che questa modifica esiste per chiudere.
+def _visible_to(query, current_user: models.User):
+    if current_user.is_admin:
+        return query
+    return query.filter(models.IngestedBook.user_id == current_user.id)
+
+
+def _owner_usernames(db: Session, items) -> dict:
+    """{user_id: username} per le righe passate: il nome si mostra solo
+    all'amministratore sulla scheda, ma si risponde sempre — e' un dato
+    della riga, non un segreto (per un utente normale e' il suo)."""
+    ids = {i.user_id for i in items if i.user_id is not None}
+    if not ids:
+        return {}
+    return dict(db.query(models.User.id, models.User.username).filter(models.User.id.in_(ids)).all())
+
+
+def _serialize_ingest_item(item: models.IngestedBook, usernames: dict = None) -> dict:
     """Wire format of a staged ingest item, shared by the list and upload endpoints."""
     return {
         "id": item.id,
+        # Il proprietario (21/11/2026): NULL = «di prima / radice di
+        # ingest», mai dedotto. Vedi _visible_to per chi vede cosa.
+        "owner_user_id": item.user_id,
+        "owner_username": (usernames or {}).get(item.user_id),
         "title": item.title,
         "author": item.author or "Unknown Author",
         "formats": [item.file_format],
@@ -105,11 +134,27 @@ def _scan_ingest_folder(db: Session) -> None:
     # ventimila sarebbero ventimila. Qui si chiede una volta e si chiamano
     # solo i file davvero nuovi — che di solito sono zero.
     with _scan_lock:
-        noti = {r[0] for r in db.query(models.IngestedBook.file_path).all()}
-        for f in sorted(os.listdir(config.INGEST_DIR)):
-            percorso = os.path.abspath(os.path.join(config.INGEST_DIR, f))
-            if percorso not in noti:
-                stage_ingest_file(db, percorso)
+        # Solo i percorsi con una riga ATTIVA (pending/importing) sono "gia'
+        # noti": una riga confirmed e' un'importazione passata, e un file che
+        # ricompare allo stesso percorso e' un file nuovo da mettere in
+        # attesa (22/11/2026 — vedi ACTIVE_INGEST_STATUSES in watcher.py).
+        noti = {
+            r[0]
+            for r in db.query(models.IngestedBook.file_path)
+            .filter(models.IngestedBook.status.in_(ACTIVE_INGEST_STATUSES))
+            .all()
+        }
+        # os.walk e non os.listdir (21/11/2026): dentro ingest ci sono le
+        # sottocartelle per utente, e un file li' dentro e' un file da
+        # mettere in attesa — col suo proprietario, letto dal percorso da
+        # stage_ingest_file. Le cartelle nascoste si saltano (le cartelle
+        # di servizio di Syncthing non contengono libri).
+        for dirpath, dirnames, filenames in os.walk(config.INGEST_DIR):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith('.'))
+            for f in sorted(filenames):
+                percorso = os.path.abspath(os.path.join(dirpath, f))
+                if percorso not in noti:
+                    stage_ingest_file(db, percorso)
 
 
 @router.get(
@@ -120,6 +165,7 @@ def list_ingest_books(
     db: Session = Depends(database.get_db),
     limit: int = None,
     offset: int = 0,
+    current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     """
     Senza `limit` restituisce tutto, come sempre. Con `limit` una pagina —
@@ -128,19 +174,26 @@ def list_ingest_books(
     Serve al caso vero: una cartella con migliaia di file da rivedere. La
     pagina Ingest disegna una scheda per ogni libro, con copertina e
     metadati, e a qualche migliaio diventa una pagina che non si apre.
+
+    Dal 21/11/2026 l'elenco e' per utente: l'amministratore vede tutto
+    (comprese le righe senza proprietario), un utente le sue — vedi
+    _visible_to.
     """
     _scan_ingest_folder(db)
-    q = (
+    q = _visible_to(
         db.query(models.IngestedBook)
-        .filter(models.IngestedBook.status == "pending")
-        .order_by(models.IngestedBook.id)
-    )
+        .filter(models.IngestedBook.status == "pending"),
+        current_user,
+    ).order_by(models.IngestedBook.id)
     if limit is None:
-        return [_serialize_ingest_item(item) for item in q.all()]
+        items = q.all()
+        nomi = _owner_usernames(db, items)
+        return [_serialize_ingest_item(item, nomi) for item in items]
     totale = q.count()
     items = q.limit(int(limit)).offset(max(0, int(offset))).all()
+    nomi = _owner_usernames(db, items)
     return {
-        "items": [_serialize_ingest_item(item) for item in items],
+        "items": [_serialize_ingest_item(item, nomi) for item in items],
         "total": totale,
         "offset": max(0, offset),
         "limit": limit,
@@ -155,6 +208,7 @@ async def start_ingest_import_job(
     payload: dict,
     request: Request,
     db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     """
     Avvia l'importazione in blocco SUL SERVER. Il browser puo' andarsene.
@@ -177,11 +231,31 @@ async def start_ingest_import_job(
     per_item = {str(k): v for k, v in (payload.get("per_item") or {}).items()}
     ids = payload.get("ids")
     if ids is None:
+        # "Tutte le voci in attesa" significa tutte quelle che QUESTO utente
+        # vede (21/11/2026): per l'amministratore e' tutto come ieri, per un
+        # utente sono le sue — mai quelle degli altri.
         ids = [
-            r[0] for r in db.query(models.IngestedBook.id)
-            .filter(models.IngestedBook.status == "pending")
-            .order_by(models.IngestedBook.id).all()
+            r[0] for r in _visible_to(
+                db.query(models.IngestedBook.id)
+                .filter(models.IngestedBook.status == "pending"),
+                current_user,
+            ).order_by(models.IngestedBook.id).all()
         ]
+    else:
+        # Ids espliciti: un utente normale puo' nominare solo righe sue. Un
+        # 403 e non un filtro silenzioso — un giro che "parte" saltando meta'
+        # delle voci chieste sembrerebbe riuscito mentre non lo e'.
+        ids = [int(i) for i in ids]
+        if not current_user.is_admin and ids:
+            visibili = {
+                r[0] for r in _visible_to(
+                    db.query(models.IngestedBook.id)
+                    .filter(models.IngestedBook.id.in_(ids)),
+                    current_user,
+                ).all()
+            }
+            if set(ids) - visibili:
+                raise HTTPException(status_code=403, detail="Some of these staged items are not yours")
     voci = [(int(i), per_item.get(str(i)) or generale) for i in ids]
     if not voci:
         raise HTTPException(status_code=400, detail="No books to import")
@@ -213,14 +287,21 @@ def stop_ingest_import_job():
     "/pagination",
     responses={200: {"model": ModoPaginazione}},
 )
-def get_ingest_pagination(db: Session = Depends(database.get_db)):
-    """Se la pagina Ingest va impaginata, e con che pagina. Conta e basta."""
+def get_ingest_pagination(
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
+):
+    """Se la pagina Ingest va impaginata, e con che pagina. Conta e basta.
+
+    Conta le righe che QUESTO utente vede (21/11/2026): il totale deve
+    corrispondere all'elenco, o la pagina crederebbe di avere pagine vuote.
+    """
     _scan_ingest_folder(db)
-    totale = (
+    totale = _visible_to(
         db.query(models.IngestedBook)
-        .filter(models.IngestedBook.status == "pending")
-        .count()
-    )
+        .filter(models.IngestedBook.status == "pending"),
+        current_user,
+    ).count()
     conf = app_settings.get_ingest_pagination(db)
     return {
         "total": totale,
@@ -238,6 +319,7 @@ def get_ingest_pagination(db: Session = Depends(database.get_db)):
 def ingest_duplicati(
     library: str = None,
     db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     """
     Quali file in attesa somigliano a qualcosa che in biblioteca c'e' gia'.
@@ -261,11 +343,13 @@ def ingest_duplicati(
     quello che si vuole vedere prima di importare.
     """
     folder = resolve_folder_name(db, library) if library else resolve_default_library_folder(db)
-    in_attesa = (
+    # Solo le righe che questo utente vede (21/11/2026): gli avvisi devono
+    # combaciare con le schede che ha davanti.
+    in_attesa = _visible_to(
         db.query(models.IngestedBook)
-        .filter(models.IngestedBook.status == "pending")
-        .all()
-    )
+        .filter(models.IngestedBook.status == "pending"),
+        current_user,
+    ).all()
     if not in_attesa:
         return {"library": folder, "duplicati": {}}
 
@@ -331,7 +415,13 @@ def get_ingest_file(
     yet, so unlike that endpoint this one is looked up directly by the
     IngestedBook row's own id, straight off disk from its file_path.
     """
-    item = db.query(models.IngestedBook).filter(models.IngestedBook.id == id).first()
+    item = _visible_to(
+        db.query(models.IngestedBook).filter(models.IngestedBook.id == id),
+        current_user,
+    ).first()
+    # 404 e non 403 per la riga di un altro (21/11/2026): per un utente
+    # normale quella riga non esiste, e dirgli «esiste ma non e' tua»
+    # racconterebbe gia' qualcosa che non deve vedere.
     if not item or not os.path.exists(item.file_path):
         raise HTTPException(status_code=404, detail="File not found in the staging folder")
     ext = os.path.splitext(item.file_path)[1].lower()
@@ -359,7 +449,11 @@ def get_ingest_cover(id: int, db: Session = Depends(database.get_db)):
     "/{id}",
     responses={200: {"model": Esito}},
 )
-def discard_ingest_item(id: int, db: Session = Depends(database.get_db)):
+def discard_ingest_item(
+    id: int,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
+):
     """
     "Scarta" reale per una riga di staging, singola: a differenza del vecchio
     comportamento solo-frontend (svuotava l'elenco in memoria, ma il file
@@ -370,7 +464,12 @@ def discard_ingest_item(id: int, db: Session = Depends(database.get_db)):
     staging, a differenza delle librerie vere (vedi settings.py's cestino
     librerie).
     """
-    item = db.query(models.IngestedBook).filter(models.IngestedBook.id == id).first()
+    # Scartare elimina il FILE di qualcuno: la riga di un altro, per un
+    # utente normale, non esiste (404, come in get_ingest_file — 21/11/2026).
+    item = _visible_to(
+        db.query(models.IngestedBook).filter(models.IngestedBook.id == id),
+        current_user,
+    ).first()
     if not item:
         raise HTTPException(status_code=404, detail="Staged item not found")
     if item.status != "pending":
@@ -394,18 +493,20 @@ def discard_ingest_item(id: int, db: Session = Depends(database.get_db)):
     return {"status": "ok"}
 
 
-def _open_ingest_destination(filename: str):
+def _open_ingest_destination(dest_dir: str, filename: str):
     """
     Returns an (open binary file handle, absolute path) pair for a new file in
-    the ingest folder. Uses exclusive creation ("xb") in a retry loop so two
-    concurrent uploads of the same name can't clobber each other: on collision
-    the name gets a " (2)", " (3)", ... suffix, mirroring Finder's convention.
+    the given ingest folder. Uses exclusive creation ("xb") in a retry loop so
+    two concurrent uploads of the same name can't clobber each other: on
+    collision the name gets a " (2)", " (3)", ... suffix, mirroring Finder's
+    convention. `dest_dir` e' la sottocartella dell'utente che carica
+    (21/11/2026), non piu' la radice di ingest.
     """
     name, ext = os.path.splitext(filename)
     candidate = filename
     counter = 2
     while True:
-        dest_path = os.path.join(config.INGEST_DIR, candidate)
+        dest_path = os.path.join(dest_dir, candidate)
         try:
             return open(dest_path, "xb"), dest_path
         except FileExistsError:
@@ -433,6 +534,9 @@ async def upload_ingest_files(
     non-hidden file, so this is the stricter, user-facing gate.
     """
     os.makedirs(config.INGEST_DIR, exist_ok=True)
+    # Il file caricato dal web finisce nella cartella di chi lo carica
+    # (21/11/2026): cosi' il proprietario non e' un'ipotesi, e' il percorso.
+    dest_dir = ingest_folders.ensure_user_folder(current_user.id, current_user.username)
     staged = []
     rejected = []
 
@@ -452,7 +556,7 @@ async def upload_ingest_files(
             })
             continue
 
-        out_handle, dest_path = _open_ingest_destination(original_name)
+        out_handle, dest_path = _open_ingest_destination(dest_dir, original_name)
         size = 0
         too_big = False
         try:
@@ -498,7 +602,7 @@ async def upload_ingest_files(
             continue
 
         log_message("info", "ingest", f"Upload web: file '{os.path.basename(dest_path)}' salvato in ingest")
-        staged.append(_serialize_ingest_item(item))
+        staged.append(_serialize_ingest_item(item, {current_user.id: current_user.username}))
 
     return {"staged": staged, "rejected": rejected}
 
@@ -511,13 +615,20 @@ async def import_book_from_ingest(
     payload: schemas.IngestImportRequest,
     db: Session = Depends(database.get_db),
     write_queue: CalibreWriteQueue = Depends(get_write_queue),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
 ):
     # Atomically claim the ingest row before doing anything else: two concurrent
     # imports of the same id (e.g. a double-click, or a retried request) must not
     # both pass the "pending" check and race to move the same source file.
+    # Il filtro di visibilita' sta DENTRO la stessa update (21/11/2026): un
+    # utente normale non puo' reclamare la riga di un altro, e per lui
+    # l'esito e' lo stesso 409 di una riga che non c'e' piu'.
     claimed = (
-        db.query(models.IngestedBook)
-        .filter(models.IngestedBook.id == payload.id, models.IngestedBook.status == "pending")
+        _visible_to(
+            db.query(models.IngestedBook)
+            .filter(models.IngestedBook.id == payload.id, models.IngestedBook.status == "pending"),
+            current_user,
+        )
         .update({"status": "importing"}, synchronize_session=False)
     )
     db.commit()

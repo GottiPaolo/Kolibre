@@ -12,8 +12,8 @@ La mappa del pacchetto:
 * _shared.py       — i tre router e gli attrezzi usati da piu' mestieri;
 * management.py    — la gestione del parco dispositivi (webapp, JWT);
 * sync.py          — il protocollo di sincronizzazione (plugin, token di
-                     dispositivo); il disegno d'insieme sta in
-                     docs/storico/come-un-dispositivo-parla-con-il-server.md;
+                     dispositivo); il disegno d'insieme e' raccontato nel
+                     docstring di quel modulo;
 * catalog.py       — il catalogo sfogliato dal dispositivo;
 * annotations.py   — le annotazioni spinte dal dispositivo;
 * flagged_books.py — i file da riconoscere: segnalazioni e accoppiamento;
@@ -28,7 +28,7 @@ appende le sue rotte, e main.py continua a vedere `devices.router`,
 un file solo. L'ordine di registrazione delle rotte dentro ciascun router
 e' cambiato (segue l'ordine dei moduli qui sotto, non piu' l'ordine del
 vecchio file): e' innocuo perche' nessuna coppia di rotte si ombreggia —
-lo dimostra, per sempre, backend/prove/le_rotte_dei_dispositivi_non_si_ombreggiano.py.
+una prova permanente del progetto lo dimostra a ogni giro.
 
 Questo __init__ riesporta anche TUTTI i nomi di primo livello del vecchio
 modulo, helper con l'underscore compresi: per le prove e per chiunque
@@ -49,7 +49,10 @@ from .management import (
     register_device, _book_progress_percent, _build_book_titles,
     _build_hash_verified_map, _patch_riportate, list_devices,
     get_own_device, update_device, delete_device, set_default_device,
-    queue_book_for_device, forget_device_vocabulary,
+    queue_book_for_device, queue_books_for_device,
+    _SEND_BLOCKING_STATUSES, _SEND_BLOCK_DETAILS, _send_block_reason,
+    _resolve_send_format, _upsert_pending_send,
+    forget_device_vocabulary,
     get_device_sync_history, _get_owned_device_book,
     acknowledge_book_removal, cancel_pending_book_action,
     pair_device_book,
@@ -119,6 +122,9 @@ __all__ = [
     "_build_hash_verified_map", "_patch_riportate", "list_devices",
     "get_own_device", "update_device", "delete_device",
     "set_default_device", "queue_book_for_device",
+    "queue_books_for_device", "_SEND_BLOCKING_STATUSES",
+    "_SEND_BLOCK_DETAILS", "_send_block_reason", "_resolve_send_format",
+    "_upsert_pending_send",
     "forget_device_vocabulary", "get_device_sync_history",
     "_get_owned_device_book", "acknowledge_book_removal",
     "cancel_pending_book_action", "pair_device_book",

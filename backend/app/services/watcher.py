@@ -14,16 +14,28 @@ from watchdog.observers import Observer
 
 from .. import config, models, database
 from ..logging_utils import log_message
-from . import metadata_parser, qualita_job
+from . import ingest_folders, metadata_parser, qualita_job
 
 # Give a copy-in-progress file a moment to finish writing before we read it.
 DEBOUNCE_SECONDS = 2.0
+
+# Gli stati in cui una riga di staging "occupa" ancora il suo percorso: il
+# file e' in attesa o sta venendo importato proprio adesso. SOLO questi
+# bloccano una nuova messa in attesa dello stesso percorso. Una riga
+# "confirmed" invece e' storia: il suo file e' stato spostato in biblioteca,
+# e se allo stesso percorso c'e' DI NUOVO un file, e' un file nuovo — va
+# rimesso in attesa, non ignorato. (22/11/2026: otto EPUB rimessi in ingest
+# coi nomi di importazioni di settembre erano invisibili da giorni, perche'
+# il controllo era "esiste una riga qualsiasi per questo percorso".)
+ACTIVE_INGEST_STATUSES = ("pending", "importing")
 
 
 def stage_ingest_file(db, file_path: str) -> bool:
     """
     Parses a file sitting in the ingest folder and inserts an IngestedBook
-    staging row for it, unless one already exists for this exact path.
+    staging row for it, unless an ACTIVE one (pending/importing) already
+    exists for this exact path — a confirmed row from a past import does not
+    hide a file dropped in again with the same name (see ACTIVE_INGEST_STATUSES).
     Shared by the real-time watcher below and by the plain poll-on-request
     fallback in api/ingest.py (which still matters for files already present
     before the watcher started, or if it was ever restarted mid-copy).
@@ -32,8 +44,25 @@ def stage_ingest_file(db, file_path: str) -> bool:
     file_path = os.path.abspath(file_path)
     if not os.path.isfile(file_path) or os.path.basename(file_path).startswith('.'):
         return False
-    if db.query(models.IngestedBook).filter(models.IngestedBook.file_path == file_path).first():
+    # Con le sottocartelle per utente (21/11/2026) la sorveglianza e'
+    # ricorsiva, e in vista entrano anche le cartelle di servizio dei
+    # sincronizzatori (.stfolder, .stversions): niente di nascosto si stagia.
+    if ingest_folders.is_hidden_ingest_path(file_path):
         return False
+    if db.query(models.IngestedBook).filter(
+        models.IngestedBook.file_path == file_path,
+        models.IngestedBook.status.in_(ACTIVE_INGEST_STATUSES),
+    ).first():
+        return False
+
+    # Il proprietario, dichiarato dal percorso (21/11/2026): un file in
+    # `ingest/<id>-<utente>/` appartiene a quell'utente. L'id si accetta
+    # solo se l'utente esiste davvero: una cartella `99-fantasma/` non
+    # inventa un proprietario, il file resta «di nessuno» (NULL) e lo vede
+    # l'amministratore — mai perso, mai attribuito per deduzione.
+    owner_id = ingest_folders.owner_id_from_path(file_path)
+    if owner_id is not None and not db.query(models.User.id).filter(models.User.id == owner_id).first():
+        owner_id = None
 
     ext = os.path.splitext(file_path)[1].lower()
     filename = os.path.basename(file_path)
@@ -44,6 +73,7 @@ def stage_ingest_file(db, file_path: str) -> bool:
         meta = metadata_parser.parse_pdf_metadata(file_path)
 
     item = models.IngestedBook(
+        user_id=owner_id,
         file_path=file_path,
         filename=filename,
         file_format=ext.upper().replace('.', ''),
@@ -135,7 +165,11 @@ def start_watcher() -> None:
         return
     os.makedirs(config.INGEST_DIR, exist_ok=True)
     _observer = Observer()
-    _observer.schedule(_IngestEventHandler(), config.INGEST_DIR, recursive=False)
+    # recursive=True dal 21/11/2026: dentro ingest c'e' una sottocartella
+    # per utente (services/ingest_folders.py) e i file arrivano li'. Le
+    # cartelle nuove — un utente creato a server acceso — entrano da sole
+    # nella sorveglianza, e' il funzionamento normale di watchdog.
+    _observer.schedule(_IngestEventHandler(), config.INGEST_DIR, recursive=True)
     _observer.start()
     log_message("info", "ingest", f"Watcher started on {config.INGEST_DIR}")
 

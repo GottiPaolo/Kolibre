@@ -22,7 +22,7 @@ differenza e' che lei non mente sul conto — i lettori mostrano solo i
 `synced` — ma e' comunque una riga da chiudere, e per lei «toglilo dal
 lettore» vuol dire richiedere quello che era stato rifiutato.
 
-Misurato sull'impianto reale il 04/11/2026, dispositivo `kindle_af`: 215
+Misurato sull'impianto reale il 04/11/2026, su un Kindle vero: 215
 righe `synced` su 213 percorsi distinti, piu' 1 `delete_declined` e 2
 `removed_by_device`. Le tre righe senza libro sono quelle: calibre 721 e
 1186, che rivendicano il percorso di due libri vivi (1033 e 1218 — il file

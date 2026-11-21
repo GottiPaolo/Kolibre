@@ -10,7 +10,7 @@ import { api, withBackendUrl } from './api'
 import { ensureAuthToken } from './auth'
 import { messaggioErrore } from './messaggiErrore'
 import { scaricaIndirizzo } from './scarica'
-import type { DeviceNudo, EsitoAzioneDaRivedere } from '@/types/device'
+import type { DeviceNudo, EsitoAzioneDaRivedere, EsitoInvioMultiplo } from '@/types/device'
 
 // Questi endpoint accettano un dict libero lato backend (nessun modello
 // Pydantic sul corpo della richiesta — la **risposta** invece la dichiarano
@@ -126,6 +126,31 @@ export async function queueBookForDevice(deviceId: number, payload: QueueBookFor
     body: payload,
   })
   if (error) throw error
+}
+
+export interface QueueBooksBulkPayload {
+  library: string
+  action: 'queued_download'
+  books: { calibre_book_id: number; format?: string }[]
+  // Stessa ragione dell'interfaccia qui sopra: il body di /queue/bulk è un
+  // dict libero lato backend, e la firma OpenAPI generata è
+  // { [key: string]: unknown }.
+  [key: string]: unknown
+}
+
+// «Manda questi N libri a questo lettore», in UNA chiamata (21/11/2026).
+// Il server accoda SOLO i libri che sul dispositivo mancano e risponde
+// libro per libro cosa è partito e cosa ha saltato, con un codice motivo.
+// Prima erano N chiamate a /queue in parallelo, e un libro già a bordo
+// tornava «in coda» come se niente fosse: la clessidra di Paolo, senza un
+// invio vero dietro.
+export async function queueBooksForDevice(deviceId: number, payload: QueueBooksBulkPayload): Promise<EsitoInvioMultiplo> {
+  const { data, error } = await api.POST('/api/devices/{device_id}/queue/bulk', {
+    params: { path: { device_id: deviceId } },
+    body: payload,
+  })
+  if (error) throw error
+  return data
 }
 
 export async function cancelDeviceBookAction(deviceId: number, rowId: number): Promise<void> {

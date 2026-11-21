@@ -3,10 +3,9 @@ Il protocollo di sincronizzazione col plugin KOReader.
 
 Il mestiere: la conversazione periodica tra il lettore e il server — chi
 sei, cosa hai a bordo, cosa ti mando, cosa togli — autenticata SEMPRE col
-token di dispositivo (mai col JWT di una persona). Il disegno d'insieme,
-raccontato da zero, sta in docs/storico/come-un-dispositivo-parla-con-il-
-server.md: questo modulo e' la sua implementazione lato server. (Trasloco
-del 20/11/2026: prima era tutto in api/devices.py.)
+token di dispositivo (mai col JWT di una persona). Questo modulo e'
+l'implementazione lato server di quel dialogo. (Trasloco del 20/11/2026:
+prima era tutto in api/devices.py.)
 
 Le rotte:
 * POST /api/kolibre/devices/sync — l'handshake: v2 apre una sessione

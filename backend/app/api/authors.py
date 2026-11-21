@@ -409,7 +409,7 @@ def get_author_books(
     if not os.path.exists(config.LIBRARIES_DIR):
         return results
     # Il nome VISUALIZZATO di ogni biblioteca, dal registro: la cartella e'
-    # un dettaglio del disco, e "anarcobiblioteca" non e' un titolo di
+    # un dettaglio del disco, e "biblioteca_2" non e' un titolo di
     # sezione. Senza riga nel registro si ripiega sul nome della cartella,
     # che e' meglio di una sezione senza nome.
     # Nome mostrato e POSTO nell'ordine scelto, dalla stessa riga di

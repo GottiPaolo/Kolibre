@@ -8,6 +8,7 @@ import type { Library } from '@/types/library'
 import { LibraryPickerButton } from '@/components/LibraryPickerButton'
 import type { IngestDuplicato } from '@/lib/ingestQueries'
 import { useLingua } from '@/lib/i18n'
+import { useMe } from '@/lib/settingsActions'
 import { DettaglioQualita, PunteggioQualita } from '@/components/Qualita'
 import type { RisultatoQualita } from '@/lib/qualitaActions'
 
@@ -48,6 +49,10 @@ export function IngestCard({
   duplicati,
 }: IngestCardProps) {
   const { t } = useLingua()
+  // Il proprietario del file si mostra solo all'amministratore (21/11/2026):
+  // è l'unico che vede le righe di tutti, quindi l'unico per cui la
+  // distinzione dice qualcosa — un utente normale vede già solo le sue.
+  const { data: me } = useMe()
   // Il dettaglio della qualità si apre su richiesta: qui si sta scegliendo
   // se importare un file, e il numero basta per quasi tutti. Chi deve
   // scegliere fra due versioni dello stesso libro apre e guarda da dove
@@ -77,6 +82,19 @@ export function IngestCard({
             </span>
           ))}
           <span>{formatBytes(item.size)}</span>
+          {/* Proprietario (solo per l'admin): «senza proprietario» sono le
+              righe di prima della colonna, o i file messi a mano nella
+              radice di ingest — mai attribuiti per deduzione. */}
+          {me?.is_admin && (
+            <>
+              <span className="text-muted-foreground/60">·</span>
+              <span>
+                {item.owner_username
+                  ? t('ingest.card.ownerLabel', { owner: item.owner_username })
+                  : t('ingest.card.ownerNone')}
+              </span>
+            </>
+          )}
           {/* La qualità del file, misurata appena il file è arrivato. Per un
               PDF non c'è e non ci sarà: si misurano solo gli EPUB. */}
           {item.qualita_punteggio != null && (

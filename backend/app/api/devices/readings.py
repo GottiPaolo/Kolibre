@@ -5,10 +5,9 @@ Il mestiere: quanto e dove l'utente ha letto, raccontato dal dispositivo
 al server. Due famiglie: la POSIZIONE di lettura (il segnalibro, per
 riprendere da un altro dispositivo o dal lettore web) e le LETTURE MISURATE
 IN CARATTERI — una riga per pagina visitata: quando, per quanto, da quale
-carattere a quale. Il perche' dei caratteri come unita' di misura, e come
-l'intero dialogo si incastra nel protocollo, sta in
-docs/storico/come-un-dispositivo-parla-con-il-server.md. (Trasloco del
-20/11/2026: prima era tutto in api/devices.py.)
+carattere a quale. I caratteri sono l'unita' di misura perche' sono
+l'unica stabile: le pagine cambiano con font e margini, i caratteri no.
+(Trasloco del 20/11/2026: prima era tutto in api/devices.py.)
 
 Le rotte (tutte del plugin, col token di dispositivo):
 * PUT /api/kolibre/devices/progress — il push della posizione;

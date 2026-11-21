@@ -73,3 +73,11 @@ export type DeviceBackup = components['schemas']['FileDiBackup']
 export type EsitoAzioneDaRivedere =
   | components['schemas']['AzioneAccodata']
   | components['schemas']['OrfaneMigrate']
+
+/**
+ * L'esito dell'invio multiplo (21/11/2026): il server accoda SOLO i libri
+ * che sul dispositivo mancano, e dice libro per libro cosa è partito
+ * (`queued`) e cosa ha saltato e perché (`skipped`, con un codice motivo
+ * da tradurre nel browser — vedi sendSkipReasonLabel).
+ */
+export type EsitoInvioMultiplo = components['schemas']['InviiAccodati']
