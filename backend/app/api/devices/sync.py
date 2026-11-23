@@ -510,6 +510,15 @@ def koreader_sync_handshake(
     # diversa da «non lo ha detto», e sarebbe falsa. Vedi
     # models.Device.patch_installate.
     patch_riportate = payload.get("patches")
+    # **Un oggetto vuoto e' la lista vuota** (24/11/2026). Il plugin manda la
+    # lista come tabella Lua, e una tabella Lua vuota non sa se e' una lista
+    # o un oggetto: il codificatore JSON di KOReader (`json` e `rapidjson`,
+    # verificato sul KOReader vero) la scrive `{}`. Accettando solo `[]`, un
+    # lettore che toglieva la sua ultima patch restava per sempre «con la
+    # patch»: e' successo su tutti e quattro i lettori di Paolo il 23/11.
+    # Un campo ASSENTE resta «non l'ha detto», e non si tocca.
+    if patch_riportate == {}:
+        patch_riportate = []
     if isinstance(patch_riportate, list):
         pulite = [
             {"file": str(v.get("file")), "sha256": str(v.get("sha256") or "")}

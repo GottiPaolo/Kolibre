@@ -772,6 +772,38 @@ class ReadingSession(Base):
     #: colonna 0/1 e non uno stato a parole, per scelta di Paolo (20/11/2026).
     exact = Column(Integer, nullable=False, default=0)
 
+    # ── I valori RIPULITI, accanto ai grezzi (D4a, decisioni di Paolo del
+    # 23/11/2026). Tutte ammesse vuote: NULL = non calcolabile per questa
+    # sessione (niente righe esatte nella finestra), e i pannelli ricadono
+    # sulla stima come hanno sempre fatto. Le scrive derive_reading_sessions,
+    # ricalcolandole DA ZERO a ogni giro: cambiare una soglia e rigirare la
+    # derivazione riscrive tutto lo storico, perche' il grezzo resta. ──────
+    #: I caratteri della sessione DOPO la pulizia: sfoglio scartato (velocita'
+    #: oltre la soglia, o durata <=2s), intervalli UNITI invece che sommati
+    #: (ogni tratto di testo conta una volta, anche riletto con un altro
+    #: corpo del carattere), finestra allungata (regola 1) e ultima pagina
+    #: chiusa alla fine del libro (regola 4). Puo' essere 0: una sessione di
+    #: solo sfoglio ha caratteri puliti zero, ed e' un'informazione vera.
+    chars_read_clean = Column(Integer, nullable=True)
+    #: La parte di chars_read_clean MAI coperta dalle sessioni precedenti
+    #: dello stesso libro (cronologia per utente+libro, unione cumulativa in
+    #: caratteri assoluti). Il riletto non si salva: e' la differenza
+    #: chars_read_clean - chars_new. Distinguibile solo dal 19/11/2026, da
+    #: quando esistono le righe in caratteri.
+    chars_new = Column(Integer, nullable=True)
+    #: Secondi passati nei popup di nota dentro la finestra della sessione.
+    #: Il canale del tempo di KOReader quel tempo lo somma alla pagina ferma
+    #: sotto: qui diventa una voce sua (D5), SOLO nei valori ripuliti — la
+    #: colonna duration resta quella di sempre.
+    note_time = Column(Integer, nullable=True)
+    #: La durata ripulita, costruita dalle righe del canale dei caratteri:
+    #: per ogni pagina, durata meno il tempo dei popup sopra di lei, poi il
+    #: tetto (larghezza / velocita' lenta, mai sotto 120 s). E' la misura di
+    #: tempo DELLO STESSO canale di chars_read_clean: i due si dividono per
+    #: una velocita' onesta. NON sostituisce duration nei totali di tempo —
+    #: i due canali misurano con tagli diversi e non si mescolano.
+    duration_clean = Column(Integer, nullable=True)
+
     user = relationship("User", back_populates="reading_sessions")
 
 
@@ -1358,14 +1390,14 @@ class BookReadingCoverage(Base):
     Quella misura e' la stessa sotto qualunque impaginazione, quindi le
     letture fatte con impostazioni diverse si sommano correttamente.
 
-    `bins` e' quella mappa: 1000 bit, 125 byte per libro. Si conserva (invece
+    `bins` e' quella mappa: 1024 bit, 128 byte per libro. Si conserva (invece
     del solo totale) perche' l'unione va fatta con le letture future, e da un
     numero solo non si puo' riottenere.
     """
     __tablename__ = "book_reading_coverage"
     __table_args__ = (UniqueConstraint("user_id", "library", "calibre_book_id"),)
 
-    BINS = 1000
+    BINS = 1024  # deve dire il vero: la costante che lavora e' stats_service._BINS
 
     id = Column(Integer, primary_key=True, index=True)
     # Per utente per la stessa ragione di ReadingPosition: quanta parte di un

@@ -16,8 +16,8 @@ from .calibre.library import purge_expired_book_lists
 from .calibre.write_queue import CalibreWriteQueue, WriteJob, retry_one_pending, serialize_pending
 from .services.watcher import start_watcher, stop_watcher
 from .services import (author_stats_service, highlight_position, identita_durevole,
-                       ingest_folders, qualita_job, stardict_service, stats_service,
-                       widowed_highlights)
+                       ingest_folders, letture_service, qualita_job, reading_thresholds,
+                       stardict_service, stats_service, widowed_highlights)
 from .api import auth as auth_router
 from .api import users as users_router
 from .api import libraries as libraries_router
@@ -181,7 +181,18 @@ async def _refresh_stats_loop() -> None:
     while True:
         db = database.SessionLocal()
         try:
+            # Le conversioni in caratteri rimaste indietro ripartono da sole
+            # (D8 + il caso delle 89 righe ferme, 23/11/2026): prima si
+            # rimettono in coda le `failed` vecchie di un giorno, poi si
+            # smaltisce TUTTO l'arretrato, e solo dopo si rielabora e si
+            # deriva — cosi' le righe appena risolte arricchiscono le
+            # sessioni nello stesso giro invece che al prossimo.
+            letture_service.ritenta_fallite(db)
+            letture_service.smaltisci_conversioni(db)
             stats_service.reprocess_all_device_backups(db)
+            # Le soglie si rivedono PRIMA della derivazione, che le usa.
+            reading_thresholds.refresh(db)
+            letture_service.derive_reading_sessions(db)
             stats_service.refresh_stats_cache(db)
         except Exception as exc:
             log_message("warning", "stats", f"Periodic statistics refresh failed: {exc}")

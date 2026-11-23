@@ -14,6 +14,7 @@ from ..calibre.connection import PAGE_COUNT_COLUMN_LABEL, READ_FLAG_COLUMN_LABEL
 from ..logging_utils import log_message
 from . import book_hash_service
 from . import app_settings
+from . import reading_thresholds
 
 # Same threshold an earlier, unpublished project of mine used (its
 # processor.py) to group KOReader's raw page_stat_data rows into logical
@@ -199,6 +200,20 @@ def process_statistics_db(db_path: str, user_id: int, device_id, db: Session) ->
                 models.StatsHashDiscard.md5.in_(set(local_id_to_md5.values()))
             ).all()
         }
+        # **Uno scarto vince anche su un'impronta che RISOLVE** (23/11/2026).
+        # Prima valeva solo per le impronte sconosciute: un file che
+        # book_hash_history riconduceva a un libro vero tornava a produrre
+        # sessioni e mappa a ogni rielaborazione, scarto o no. Il caso vero:
+        # due file `calibre_bookmarks` aperti sul macOS, ricondotti ai libri
+        # 1082 e 1113, che una «lettura» di una pagina su un totale di una
+        # copriva al 100%. Qui l'impronta scartata perde le sue identita'
+        # PRIMA di ogni uso — mappa, posizione, sessioni — e le sessioni gia'
+        # nate da lei si tolgono piu' sotto.
+        identita_scartate = {}
+        for local_id, md5 in local_id_to_md5.items():
+            if md5 in discarded_md5s and identities_by_local_id.get(local_id):
+                identita_scartate[local_id] = identities_by_local_id[local_id]
+                identities_by_local_id[local_id] = []
 
         # `total_pages` e' il totale di pagine di QUEL momento, e KOReader lo
         # registra riga per riga: 1/total_pages e' quindi la frazione di libro
@@ -312,6 +327,14 @@ def process_statistics_db(db_path: str, user_id: int, device_id, db: Session) ->
                     # (see StatsHashDiscard's own docstring) — skip silently,
                     # not even counted as unresolved, so a discarded book
                     # doesn't keep nagging in logs on every future sync.
+                    # E se l'impronta risolveva, la sessione che aveva gia'
+                    # fatto nascere si toglie: lo scarto e' una decisione su
+                    # quei dati, non solo su quelli futuri.
+                    for library, calibre_book_id in identita_scartate.get(s["local_book_id"], []):
+                        vecchia = gia_presenti.pop((library, calibre_book_id, s["start_time"]), None)
+                        if vecchia is not None and vecchia.source == "koreader":
+                            db.delete(vecchia)
+                            biblioteche_toccate.add(library)
                     continue
                 summary["sessions_skipped_unresolved"] += 1
                 unresolved_titles.add(local_id_to_title.get(s["local_book_id"]) or f"id_book={s['local_book_id']}")
@@ -503,6 +526,9 @@ def pair_orphan_sessions(db: Session, user_id, md5: str, library: str, calibre_b
                 user_id=orphan.user_id, library=library, calibre_book_id=calibre_book_id,
                 device_id=orphan.device_id, source="koreader", start_time=orphan.start_time,
                 duration=orphan.duration, pages_read=orphan.pages_read,
+                # La frazione viaggia col riaggancio (D8, 23/11/2026): senza,
+                # la sessione riagganciata valeva zero caratteri stimati.
+                fraction_read=orphan.fraction_read,
             ))
             migrated += 1
         db.delete(orphan)
@@ -880,6 +906,8 @@ def compute_summary(db: Session, library: str, user_id: int) -> dict:
         return {
             "total_time_seconds": 0, "total_books": 0, "total_pages": 0,
             "total_chars": 0, "chars_time_seconds": 0,
+            "note_time_seconds": 0, "chars_new": 0, "chars_reread": 0,
+            "thresholds": reading_thresholds.current(db),
             "total_books_completed": _quanti_letti(db, library),
             "year_time_seconds": 0, "year_books": 0, "year_pages": 0,
             "best_day_seconds": 0, "longest_session_seconds": 0,
@@ -1025,17 +1053,26 @@ def compute_summary(db: Session, library: str, user_id: int) -> dict:
             caratteri_per_libro[(folder, book_id)] = n
     total_chars = 0
     chars_time_seconds = 0
+    # Le voci nuove del 23/11/2026: il tempo nei popup di nota e il testo
+    # nuovo/riletto. Esistono solo dove la derivazione ha potuto calcolarle
+    # (righe in caratteri, dal 19/11/2026): sono totali PARZIALI dichiarati,
+    # non stime spalmate sullo storico.
+    note_time_seconds = 0
+    chars_new_total = 0
+    chars_reread_total = 0
     for s in sessions:
-        # La misura vera dove c'e' (passo 4, 20/11/2026), la stima altrove:
-        # stessa regola di compute_raw, cosi' il totale «di sempre» e la
-        # somma delle sessioni filtrate per periodo non divergono mai.
-        if s.exact and s.chars_read is not None:
-            c = s.chars_read
-        else:
-            c = _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id)))
+        # La regola unica di ogni pannello: pulito, poi exact, poi stima —
+        # vedi caratteri_di_sessione. Cosi' il totale «di sempre» e la somma
+        # delle sessioni filtrate per periodo non divergono mai.
+        c = caratteri_di_sessione(s, caratteri_per_libro.get((s.library, s.calibre_book_id)))
         if c:
             total_chars += c
             chars_time_seconds += s.duration
+        if s.note_time:
+            note_time_seconds += s.note_time
+        if s.chars_read_clean is not None and s.chars_new is not None:
+            chars_new_total += s.chars_new
+            chars_reread_total += s.chars_read_clean - s.chars_new
 
     return {
         "total_time_seconds": sum(s.duration for s in sessions) + sum(o.duration for o in orphans),
@@ -1043,6 +1080,10 @@ def compute_summary(db: Session, library: str, user_id: int) -> dict:
         "total_pages": sum(s.pages_read or 0 for s in sessions) + sum(o.pages_read or 0 for o in orphans),
         "total_chars": total_chars,
         "chars_time_seconds": chars_time_seconds,
+        "note_time_seconds": note_time_seconds,
+        "chars_new": chars_new_total,
+        "chars_reread": chars_reread_total,
+        "thresholds": reading_thresholds.current(db),
         "total_books_completed": total_books_completed,
         "year_time_seconds": sum(s.duration for s in year_sessions) + sum(o.duration for o in year_orphans),
         # I libri davvero FINITI quest'anno, non quelli soltanto aperti —
@@ -1129,13 +1170,20 @@ def compute_raw(db: Session, library: str, user_id: int) -> list:
             # denominatori diversi (il 4% misurato) e qui convivono come
             # CONTEGGI assoluti, mai come percentuali: `exact` dice quale
             # delle due stai guardando.
-            "chars_read": (s.chars_read if s.exact and s.chars_read is not None
-                           else _chars_read(s.fraction_read, caratteri_per_libro.get((s.library, s.calibre_book_id)))),
+            "chars_read": caratteri_di_sessione(
+                s, caratteri_per_libro.get((s.library, s.calibre_book_id))),
             # Le colonne nuove del passo 4, esposte cosi' come sono: vuote
             # sulle sessioni stimate.
             "char_start": s.char_start,
             "char_end": s.char_end,
             "exact": bool(s.exact),
+            # Le colonne ripulite del 23/11/2026, cosi' come sono: vuote
+            # dove la derivazione non ha potuto calcolarle. `chars_read`
+            # qui sopra le usa gia' (regola unica), queste servono al
+            # costruttore di grafici e a chi vuole vedere il dettaglio.
+            "chars_new": s.chars_new,
+            "note_time": s.note_time,
+            "duration_clean": s.duration_clean,
             # I metadati del libro viaggiano con la sessione: sono quello che
             # permette di incrociare "quanto ho letto" con "cosa possiedo".
             # None dove il metadato non c'e' (la meta' dei libri non ha tag),
@@ -1171,6 +1219,9 @@ def compute_raw(db: Session, library: str, user_id: int) -> list:
             "char_start": None,
             "char_end": None,
             "exact": False,
+            "chars_new": None,
+            "note_time": None,
+            "duration_clean": None,
             # Stessi campi delle righe risolte, perche' il costruttore di
             # grafici pivota su una forma sola: gli orfani non hanno una
             # biblioteca in cui cercare i metadati, quindi restano vuoti —
@@ -1356,6 +1407,25 @@ def _chars_read(fraction, chars) -> int:
     if not fraction or not chars:
         return 0
     return round(fraction * chars)
+
+
+def caratteri_di_sessione(sessione, caratteri_libro) -> int:
+    """
+    La regola UNICA dei caratteri di una sessione, per OGNI pannello
+    (decisione di Paolo, 23/11/2026: Statistiche, scheda del libro e scheda
+    dell'autore devono dire gli stessi numeri — era il difetto 8c).
+
+    In ordine: il valore RIPULITO dove c'e' (unione degli intervalli,
+    sfoglio scartato — vedi derive_reading_sessions), la misura grezza
+    `exact` dove la pulizia non e' stata calcolata, la stima
+    frazione x lunghezza del libro in ultima istanza. Chi mostra il numero
+    puo' dire la qualita' guardando `exact`.
+    """
+    if getattr(sessione, "chars_read_clean", None) is not None:
+        return sessione.chars_read_clean
+    if sessione.exact and sessione.chars_read is not None:
+        return sessione.chars_read
+    return _chars_read(sessione.fraction_read, caratteri_libro)
 
 
 # ── Copertura: quanta parte del libro e' stata vista ──────────────────────

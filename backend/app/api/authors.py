@@ -552,8 +552,10 @@ def get_author_reading_stats(
             tempo += s.duration or 0
             sessioni += 1
             letti.add((folder, s.calibre_book_id))
-            caratteri += stats_service._chars_read(
-                s.fraction_read, caratteri_per_libro.get(s.calibre_book_id)
+            # La regola unica di ogni pannello (23/11/2026): stessi
+            # numeri della pagina Statistiche — era il difetto 8c.
+            caratteri += stats_service.caratteri_di_sessione(
+                s, caratteri_per_libro.get(s.calibre_book_id)
             )
             if primo is None or s.start_time < primo:
                 primo = s.start_time

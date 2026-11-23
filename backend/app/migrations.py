@@ -840,6 +840,171 @@ def drop_google_books_api_key_setting() -> None:
         conn.commit()
 
 
+def add_clean_columns_to_reading_sessions() -> None:
+    """
+    Le quattro colonne dei valori RIPULITI su `reading_sessions`
+    (23/11/2026, decisioni di Paolo sul lavoro delle statistiche).
+
+    **Il contesto.** I grezzi restano grezzi; la pulizia (sfoglio scartato,
+    intervalli uniti, delta delle note, tetto della pagina aperta) vive in
+    colonne accanto, ricalcolate da zero dalla derivazione. NULL = non
+    calcolabile: i pannelli ricadono sulla stima come hanno sempre fatto.
+
+    **Idempotente per controllo preventivo**: su un database nuovo le
+    colonne nascono da create_all col modello di oggi — fresh == migrated.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(reading_sessions)")}
+        if not colonne:
+            return
+        for nome in ("chars_read_clean", "chars_new", "note_time", "duration_clean"):
+            if nome not in colonne:
+                conn.exec_driver_sql(f"ALTER TABLE reading_sessions ADD COLUMN {nome} INTEGER")
+                log_message("info", "system",
+                            f"Migrated reading_sessions: added missing '{nome}' column.")
+        conn.commit()
+
+
+def reset_reading_coverage_for_clean_rebuild() -> None:
+    """
+    Svuota le mappe di copertura, per la ricostruzione pulita
+    (23/11/2026, decisione esplicita di Paolo: scelta (a) — «pazienza se
+    perdiamo vecchi dati, soprattutto quelli del web reader»).
+
+    **Il contesto.** Le mappe erano state accese anche dallo sfoglio (che
+    da oggi non conta piu') e la mappa e' un OR che non si spegne mai:
+    l'unico modo di toglierlo e' ricostruire da zero. Il giro quotidiano,
+    che parte all'avvio del server, le ricostruisce subito dai grezzi
+    conservati (i backup statistics.sqlite3 e le righe in caratteri). Si
+    perdono SOLO i segni del lettore web, che un grezzo non ce l'hanno —
+    canale spento di serie, perdita accettata da Paolo.
+
+    **Idempotente per natura**: un DELETE su una tabella gia' vuota e' un
+    no-op, e su un database nuovo non c'e' niente da svuotare.
+    """
+    with database.engine.connect() as conn:
+        tabelle = {row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='book_reading_coverage'")}
+        if not tabelle:
+            return
+        esito = conn.exec_driver_sql("DELETE FROM book_reading_coverage")
+        if esito.rowcount:
+            log_message("info", "system",
+                        f"Migrated book_reading_coverage: cleared {esito.rowcount} map(s) "
+                        "for the clean rebuild (skim marks removed; web marks lost by decision).")
+        conn.commit()
+
+
+#: Le due impronte da scartare: due file `calibre_bookmarks` aperti sul
+#: KOReader del macOS, che book_hash_history riconduce a due libri veri e
+#: che una «lettura» di una pagina su un totale di una copriva al 100%.
+_IMPRONTE_CALIBRE_BOOKMARKS = (
+    "c21c87ed931ae5202a8183c7c3c7b0d4",
+    "df5830a45a827427a716c2e38fd3ef2c",
+)
+
+
+def discard_calibre_bookmarks_hashes() -> None:
+    """
+    Scarta le due impronte `calibre_bookmarks` (23/11/2026, Paolo: «scarta
+    pure»), e toglie le mappe dei libri a cui risolvevano.
+
+    **Il contesto.** Non sono libri: sono due file di appoggio aperti sul
+    lettore del computer. Risolvevano ai libri 1082 e 1113 tramite lo
+    storico delle impronte e li davano letti al 100%. Lo scarto da solo non
+    bastava — valeva solo per le impronte sconosciute — e
+    `process_statistics_db` adesso lo fa vincere anche su quelle che
+    risolvono: al primo giro le due sessioni nate da loro si cancellano, e
+    le mappe si ricostruiscono senza di loro. Qui si toglie anche la
+    `coverage_percent` delle due posizioni, che ne era la copia; la
+    `percentage` della posizione e' un altro dato (dove il lettore dice di
+    essere) e resta com'e'.
+
+    **Idempotente, e un no-op altrove**: le impronte si scartano solo se
+    questa istanza le conosce davvero (book_hashes o book_hash_history), e
+    un INSERT gia' fatto non si ripete. Su un database nuovo non c'e'
+    niente — fresh == migrated. Niente nomi di biblioteca: le identita' si
+    leggono dalle tabelle.
+    """
+    with database.engine.connect() as conn:
+        tabelle = {row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        richieste = {"stats_hash_discards", "book_hash_history", "book_hashes"}
+        if not richieste <= tabelle:
+            return
+        scartate = 0
+        for md5 in _IMPRONTE_CALIBRE_BOOKMARKS:
+            identita = conn.exec_driver_sql(
+                "SELECT library, calibre_book_id FROM book_hash_history WHERE file_hash = ? "
+                "UNION SELECT library, calibre_book_id FROM book_hashes WHERE file_hash = ?",
+                (md5, md5)).fetchall()
+            if not identita:
+                continue
+            gia = conn.exec_driver_sql(
+                "SELECT 1 FROM stats_hash_discards WHERE md5 = ?", (md5,)).fetchone()
+            if not gia:
+                conn.exec_driver_sql(
+                    "INSERT INTO stats_hash_discards (md5, created_at) VALUES (?, datetime('now'))",
+                    (md5,))
+                scartate += 1
+            for library, calibre_book_id in identita:
+                conn.exec_driver_sql(
+                    "DELETE FROM book_reading_coverage WHERE library = ? AND calibre_book_id = ?",
+                    (library, calibre_book_id))
+                if "reading_positions" in tabelle:
+                    conn.exec_driver_sql(
+                        "UPDATE reading_positions SET coverage_percent = NULL "
+                        "WHERE library = ? AND calibre_book_id = ?",
+                        (library, calibre_book_id))
+        if scartate:
+            log_message("info", "system",
+                        f"Migrated stats_hash_discards: discarded {scartate} calibre_bookmarks "
+                        "hash(es); their coverage maps will be rebuilt without them.")
+        conn.commit()
+
+
+def drop_positions_of_discarded_calibre_bookmarks() -> None:
+    """
+    Toglie le posizioni di lettura dei due libri a cui risolvevano i file
+    `calibre_bookmarks` scartati (24/11/2026, Paolo: «togli pure la
+    posizione»).
+
+    **Il contesto.** La migrazione 13 aveva tolto copertura e sessioni, e
+    lasciato la `percentage` delle due posizioni (100%: dove il lettore del
+    Mac diceva di essere, cioe' alla fine di un file di una pagina). Quelle
+    posizioni non hanno un'altra fonte: si tolgono. Non rinascono perche'
+    `push_reading_progress` ora ignora le impronte scartate.
+
+    **Idempotente, e un no-op altrove**: si agisce solo sulle identita' che
+    questa istanza ricollega alle due impronte, e solo se le impronte sono
+    davvero scartate. Niente nomi di biblioteca: si leggono dalle tabelle.
+    """
+    with database.engine.connect() as conn:
+        tabelle = {row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table'")}
+        richieste = {"stats_hash_discards", "book_hash_history", "book_hashes", "reading_positions"}
+        if not richieste <= tabelle:
+            return
+        tolte = 0
+        for md5 in _IMPRONTE_CALIBRE_BOOKMARKS:
+            if not conn.exec_driver_sql(
+                    "SELECT 1 FROM stats_hash_discards WHERE md5 = ?", (md5,)).fetchone():
+                continue
+            identita = conn.exec_driver_sql(
+                "SELECT library, calibre_book_id FROM book_hash_history WHERE file_hash = ? "
+                "UNION SELECT library, calibre_book_id FROM book_hashes WHERE file_hash = ?",
+                (md5, md5)).fetchall()
+            for library, calibre_book_id in identita:
+                tolte += conn.exec_driver_sql(
+                    "DELETE FROM reading_positions WHERE library = ? AND calibre_book_id = ?",
+                    (library, calibre_book_id)).rowcount
+        if tolte:
+            log_message("info", "system",
+                        f"Migrated reading_positions: removed {tolte} position(s) of the "
+                        "discarded calibre_bookmarks files.")
+        conn.commit()
+
+
 # ── Come si aggiunge la prossima migrazione ──────────────────────────────
 # 1. Scrivi qui sopra una funzione idempotente (controlla prima di alterare;
 #    su un database nuovo deve essere un no-op o produrre lo stesso schema
@@ -862,6 +1027,10 @@ MIGRATIONS = [
     (8, "pages column on ingested_books", add_pages_to_ingested_books),
     (9, "record_only and pubdate columns on ingested_books", add_record_only_to_ingested_books),
     (10, "drop the stored Google Books API key", drop_google_books_api_key_setting),
+    (11, "clean-value columns on reading_sessions", add_clean_columns_to_reading_sessions),
+    (12, "clear coverage maps for the clean rebuild", reset_reading_coverage_for_clean_rebuild),
+    (13, "discard the two calibre_bookmarks hashes", discard_calibre_bookmarks_hashes),
+    (14, "drop positions of the discarded calibre_bookmarks", drop_positions_of_discarded_calibre_bookmarks),
 ]
 
 

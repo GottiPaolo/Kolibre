@@ -17,7 +17,7 @@ function formatDurationHuman(seconds: number): string {
   return `${minutes}m`
 }
 
-export function StatsPanel({ stats }: { stats: BookStats }) {
+export function StatsPanel({ stats, soloPdf = false }: { stats: BookStats; soloPdf?: boolean }) {
   const { t } = useLingua()
   // Tempo di lettura cumulativo giorno per giorno — non il tempo letto
   // quel giorno isolato, ma il totale progressivo, come nella vista
@@ -71,6 +71,10 @@ export function StatsPanel({ stats }: { stats: BookStats }) {
           <Kpi label={t('library.statsPanel.pagesRead')} value={String(stats.total_pages_read)} />
         )}
       </div>
+      {/* D6 (23/11/2026): un PDF non ha indirizzi nel testo, quindi per lui
+          si misura il tempo e non la quantita'. Lo si dice invece di
+          lasciare che un «quanto libro» vuoto o stimato sembri un dato. */}
+      {soloPdf && <p className="text-[12px] text-muted-foreground">{t('library.statsPanel.pdfTimeOnly')}</p>}
       <p className="text-[12px] text-muted-foreground">
         {t('library.statsPanel.readRange', {
           first: formatDate(stats.first_read?.slice(0, 10)) ?? '',

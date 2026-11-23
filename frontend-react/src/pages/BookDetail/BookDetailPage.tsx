@@ -332,7 +332,10 @@ export function BookDetailPage() {
         <div>
           <h3 className="mb-2 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{t('library.detail.readingStats')}</h3>
           {stats ? (
-            <StatsPanel stats={stats} />
+            <StatsPanel
+              stats={stats}
+              soloPdf={book.formats.includes('PDF') && !book.formats.some((f) => f === 'EPUB' || f === 'TXT')}
+            />
           ) : (
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-[var(--warning)]/40 px-3 py-2 text-[12.5px] text-[var(--warning)]">
               <span>{t('library.detail.statsLoadFailed')}</span>

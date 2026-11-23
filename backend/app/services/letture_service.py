@@ -364,6 +364,15 @@ def _converti_una(riga, offsets, totale, documenti) -> str:
             fine = xpointer_al_carattere(documenti[capitolo_fine], riga.xp_fine, fine=True)
             if fine is not None:
                 riga.carattere_fine = offsets[capitolo_fine] + fine
+    else:
+        # Regola 4, corretta (decisione di Paolo, 23/11/2026): l'ultima
+        # pagina di un libro non ha «l'inizio della pagina dopo», ma la sua
+        # fine non e' ignota — e' la fine del libro. Il numero giusto e' il
+        # totale dell'indice del server, la STESSA misura di
+        # carattere_inizio: mai book_text_stats.chars, che e' l'altra misura
+        # (scarto 0,3-5,6% per libro, misurato il 23/11). Cosi' il tempo sul
+        # finale di ogni libro finito entra nei caratteri e nella copertura.
+        riga.carattere_fine = totale
     return "exact"
 
 
@@ -389,10 +398,25 @@ def converti_le_letture(db: Session, limite: int = LOTTO_DI_CONVERSIONE) -> dict
         potra' riprovare quando l'indice migliora, ed e' il motivo per cui le
         posizioni restano scritte sulla riga.
     """
+    from sqlalchemy import and_, or_
     righe = (
         db.query(models.LetturaDiPagina)
         .filter(
-            models.LetturaDiPagina.stato_conversione.is_(None),
+            or_(
+                models.LetturaDiPagina.stato_conversione.is_(None),
+                # Le righe d'ultima pagina convertite PRIMA della regola 4
+                # (23/11/2026): exact con l'inizio noto ma la fine mai
+                # scritta, perche' xp_fine non esiste sull'ultima pagina.
+                # Si riprendono qui, una volta: appena la conversione
+                # scrive carattere_fine = caratteri_del_libro smettono di
+                # corrispondere al filtro. Il caso vero: «Fini e inizi»
+                # p. 206, exact dal 22/11 ma senza fine.
+                and_(
+                    models.LetturaDiPagina.stato_conversione == "exact",
+                    models.LetturaDiPagina.xp_fine.is_(None),
+                    models.LetturaDiPagina.carattere_fine.is_(None),
+                ),
+            ),
             models.LetturaDiPagina.xp_inizio.isnot(None),
             models.LetturaDiPagina.library.isnot(None),
             models.LetturaDiPagina.calibre_book_id.isnot(None),
@@ -455,6 +479,65 @@ def converti_le_letture(db: Session, limite: int = LOTTO_DI_CONVERSIONE) -> dict
     return esito
 
 
+def smaltisci_conversioni(db: Session) -> dict:
+    """
+    Converte TUTTO l'arretrato, un lotto dopo l'altro, finche' ce n'e'.
+
+    Nata dal caso vero delle 89 righe ferme (trovato il 23/11/2026): le 489
+    righe di un backup arrivate in un colpo solo, il lotto da 400, e il
+    resto mai ripreso — perche' la conversione partiva SOLO quando
+    arrivavano righe nuove, e il giro successivo convertiva le nuove
+    lasciando indietro l'eventuale nuovo resto. Qui si gira a lotti (cosi'
+    il commit resta frequente e un libro storto non blocca niente) finche'
+    la coda non e' vuota.
+
+    La guardia sui giri e' un paracadute, non un limite di progetto: 50
+    lotti sono 20.000 righe in una passata, piu' di un mese di letture.
+    Se mai scattasse, il giro periodico riprende da dove si e' fermato.
+    """
+    totale = {"convertite": 0, "fallite": 0, "senza_testo": 0,
+              "libro_assente": 0, "giri": 0}
+    while totale["giri"] < 50:
+        esito = converti_le_letture(db, LOTTO_DI_CONVERSIONE)
+        lavorate = (esito["convertite"] + esito["fallite"]
+                    + esito["senza_testo"] + esito["libro_assente"])
+        for chiave in ("convertite", "fallite", "senza_testo", "libro_assente"):
+            totale[chiave] += esito[chiave]
+        if lavorate == 0:
+            break
+        totale["giri"] += 1
+    return totale
+
+
+def ritenta_fallite(db: Session, eta_ore: int = 24) -> dict:
+    """
+    Rimette in coda le righe `failed` tentate piu' di `eta_ore` fa.
+
+    Il contratto dichiarato di `failed` e' sempre stato «si potra'
+    riprovare quando l'indice migliora» — ma nessuno riprovava mai (difetto
+    D8, confermato da Paolo il 23/11/2026). Ora il giro quotidiano le
+    rimette a NULL e `smaltisci_conversioni` le riprende: se falliscono di
+    nuovo tornano `failed` con una `convertita_il` fresca, quindi si
+    ritenta al massimo una volta al giorno, non in eterno a vuoto.
+
+    `senza_testo` e `libro_assente` restano fuori DI PROPOSITO: la prima
+    non e' un fallimento (la pagina e' una copertina: i caratteri sono
+    zero), la seconda si risolve solo se il libro ricompare — e in quel
+    caso e' la rielaborazione completa a riportarlo dentro, non un
+    ritentativo cieco ogni giorno su libri che non ci sono piu'.
+    """
+    soglia = datetime.utcnow() - timedelta(hours=eta_ore)
+    rimesse = (
+        db.query(models.LetturaDiPagina)
+        .filter(models.LetturaDiPagina.stato_conversione == "failed",
+                models.LetturaDiPagina.convertita_il < soglia)
+        .update({models.LetturaDiPagina.stato_conversione: None},
+                synchronize_session=False)
+    )
+    db.commit()
+    return {"rimesse_in_coda": rimesse}
+
+
 # ── Dal dato grezzo alle sessioni e alla copertura (passo 4) ────────────
 #
 # Le sessioni (`ReadingSession`) continuano a NASCERE dal canale statistiche
@@ -486,86 +569,93 @@ def _segna_intervallo_esatto(mappa: bytearray, bins: int,
     return True
 
 
+#: Regola 1, il limite della finestra allungata (decisione di Paolo,
+#: 23/11/2026, «si potra' riprendere»). La finestra di una sessione si
+#: allunga fino all'inizio della successiva dello stesso libro — ma al
+#: massimo questi secondi dopo la propria fine naturale, che e' la stessa
+#: pausa che separa due sessioni (stats_service._SESSION_GAP_SECONDS).
+#:
+#: **Il caso che l'ha resa necessaria**: con la regola letterale, fra due
+#: sessioni lontane la finestra della prima copre settimane. Su «Un
+#: rivoluzionario chiamato Pancho», una sessione del 6/10 si prendeva le
+#: girate fatte il 22/11 pochi secondi prima dell'inizio della sessione di
+#: quel giorno (5.238 caratteri grezzi). Con il limite, una riga misurata
+#: in una pausa breve entra ancora nella sessione giusta; una riga lontana
+#: resta in attesa della sua.
+WINDOW_EXTENSION_MAX_SECONDS = 900
+
+
+def _unisci_intervalli(intervalli) -> tuple:
+    """Unione di intervalli [a, b) di caratteri assoluti: (lista fusa,
+    totale coperto). E' il cuore della D1: lo stesso tratto di testo, anche
+    visto da pagine di impaginazioni diverse (oggi 104-532, domani 455-600),
+    conta una volta — ci si sovrappongono i CARATTERI, non le pagine."""
+    fusi = []
+    for a, b in sorted((int(a), int(b)) for a, b in intervalli if b > a):
+        if fusi and a <= fusi[-1][1]:
+            if b > fusi[-1][1]:
+                fusi[-1][1] = b
+        else:
+            fusi.append([a, b])
+    return fusi, sum(b - a for a, b in fusi)
+
+
 def derive_reading_sessions(db: Session) -> dict:
     """
-    Arricchisce sessioni e copertura con le righe risolte in caratteri.
+    Arricchisce sessioni e copertura con le righe risolte in caratteri — e
+    da fase 3 (decisioni di Paolo del 23/11/2026) scrive anche i valori
+    RIPULITI, nelle colonne accanto ai grezzi.
 
-    **Cosa fa, per ogni libro/utente che ha righe `exact`:**
+    **I grezzi restano come sono sempre stati**: `chars_read` e' la somma
+    degli intervalli esatti nella finestra, `char_start`/`char_end` i loro
+    estremi, `exact` il distintivo. Niente di cio' che c'era cambia.
 
-      1. **Sessioni.** Ogni riga di PAGINA esatta cade (o no) nella finestra
-         temporale di una sessione KOReader dello stesso utente e libro —
-         `start_time <= istante <= start_time + duration`. Sulle sessioni
-         che hanno almeno una riga si scrive: `chars_read` (somma degli
-         intervalli carattere_fine - carattere_inizio), `char_start`/
-         `char_end` (min/max assoluti) e `exact` = 1. Le sessioni senza
-         righe NON si toccano: restano stimate, `exact` = 0.
-      2. **Copertura.** I bin del bitmap (`BookReadingCoverage`) si marcano
-         dagli intervalli veri, normalizzati col `caratteri_del_libro`
-         DELLA RIGA, e si uniscono alla mappa esistente con la stessa
-         unione di `stats_service.aggiorna_copertura`.
+    **La pulizia, nell'ordine deciso:**
 
-    **Le decisioni dichiarate, e il loro perche':**
+      1. **Finestra allungata (regola 1).** La finestra di una sessione
+         arriva all'INIZIO della sessione successiva dello stesso libro, ma
+         al massimo WINDOW_EXTENSION_MAX_SECONDS (15 minuti) dopo la sua
+         fine naturale: la durata non comprende le pause, e una riga
+         misurata in una pausa breve non deve restare orfana per sempre.
+      2. **Sfoglio (D2).** Una pagina con velocita' oltre la soglia (3x la
+         tipica, da reading_thresholds) — o con durata <= 2 s, sfoglio per
+         definizione — NON conta nei caratteri puliti ne' nella mappa di
+         copertura. Il suo tempo resta.
+      3. **Delta delle note (D5).** Il tempo dei popup si sposta dalla
+         pagina alla voce `note_time`; il canale del tempo non si tocca.
+      4. **Tetto (D3).** Il tempo contato di una pagina non supera
+         larghezza/velocita' lenta, mai sotto i 120 s. Si applica DOPO il
+         delta, e solo ai valori ripuliti (`duration_clean`).
+      5. **Unione degli intervalli (D1).** I caratteri puliti della
+         sessione sono l'UNIONE degli intervalli delle pagine buone, in
+         caratteri assoluti: ogni tratto una volta, pagina spezzata dalla
+         sospensione compresa (e' lo stesso intervallo due volte).
+      6. **Nuovo e riletto.** In ordine di tempo, per libro: la parte di
+         unione mai coperta dalle sessioni precedenti e' `chars_new`; il
+         riletto e' la differenza. Distinguibile dal 19/11/2026, da quando
+         il grezzo esiste.
 
-      * **Le righe di NOTA (genere 'n') non si sommano ai caratteri di
-        pagina.** Il tempo su un popup di nota e' gia' separato alla fonte
-        proprio perche' KOReader lo attribuiva alla pagina ferma sotto, e
-        rimetterlo dentro qui rifarebbe lo stesso errore sui caratteri: i
-        caratteri della nota sono un dato SUO, che restera' leggibile dalle
-        righe grezze quando si decidera' come mostrarlo. Per lo stesso
-        motivo le note non marcano la copertura: l'apparato non e' il corpo
-        del libro percorso.
-      * **La finestra e' [inizio, inizio + durata] inclusivo**, su istanti
-        UTC (lo stesso orologio: entrambe le tabelle convertono l'epoch del
-        lettore con utcfromtimestamp). Una riga che non cade in nessuna
-        finestra — la sessione arrivera' col prossimo backup delle
-        statistiche — resta in attesa: questo passo e' rieseguibile e la
-        riprende al giro dopo.
-      * **Il dispositivo NON fa parte dell'aggancio**, di proposito: le
-        sessioni si fondono fra dispositivi della stessa persona (il caso
-        Syncthing: 737 doppioni su 743, misurato) e `device_id` resta al
-        primo che ha sincronizzato, mentre le righe portano il dispositivo
-        che le ha misurate. Pretendere l'uguaglianza mancherebbe proprio le
-        sessioni fuse. L'utente, il libro e la finestra bastano.
-      * **Solo sessioni `source` = 'koreader'**: le righe vengono dal
-        lettore; una sessione del lettore web nello stesso momento e' una
-        lettura diversa e non va rietichettata.
-      * **Una riga senza `carattere_fine`** (l'ultima pagina del libro, che
-        non ha «l'inizio della pagina dopo») non entra ne' nella somma ne'
-        nella copertura: di quel tratto si sa dove comincia ma non quanto e'
-        lungo, e inventare una fine sarebbe un numero falso.
-      * **Idempotente per ricalcolo da zero**: ogni giro RICALCOLA i valori
-        dalla totalita' delle righe esatte invece di accumulare sul valore
-        precedente, quindi due giri danno lo stesso risultato, e un giro
-        dopo che l'indice e' migliorato (righe `failed` diventate `exact`)
-        aggiorna tutto lo storico — e' il principio «si conserva la prova».
-        La copertura e' un OR di bit: rimarcarla non cambia niente.
-      * **Niente soglie e niente pulizia degli outlier** (Paolo, 20/11/2026,
-        punto F2): una pagina lasciata aperta la notte conta per la sua
-        durata vera. La soglia si decidera' guardando i dati grezzi, che
-        restano — non qui.
+    `duration_clean` e' la misura di tempo DELLO STESSO canale dei
+    caratteri (righe di pagina della finestra, delta e tetto applicati):
+    serve alle velocita' oneste, NON sostituisce `duration` nei totali —
+    i due canali tagliano in modo diverso e non si mescolano.
 
-    **Esatto e stimato sullo stesso libro convivono cosi':** sulla singola
-    sessione vince una misura sola, dichiarata da `exact`; sul bitmap di
-    copertura le due si UNISCONO (OR), perche' la copertura risponde a «cosa
-    ho visto almeno una volta» e un millesimo visto resta visto con
-    qualunque misura lo si sia guardato.
-
-    Il costo: oggi ricalcola su TUTTE le righe esatte a ogni giro — che al
-    20/11/2026 sono decine, non migliaia. Limitarlo ai libri toccati
-    dall'ultimo lotto e' l'ottimizzazione successiva, quando servira'.
-
-    Commit alla fine, come `converti_le_letture`. Non solleva per un libro
-    storto: ogni gruppo e' indipendente.
+    Le altre decisioni dichiarate (il dispositivo non fa parte
+    dell'aggancio; solo sessioni koreader; niente ritocchi ai grezzi;
+    idempotente per ricalcolo da zero) restano quelle di sempre — vedi la
+    storia di questo file.
     """
-    from . import stats_service  # qui e non in testa: nessun giro di import
+    from . import reading_thresholds, stats_service  # qui: nessun giro di import
+
+    soglie = reading_thresholds.current(db)
+    sfoglio_cps = soglie.get("skim_threshold_cps")
+    lenta_cps = soglie.get("slow_speed_cps")
+    tetto_minimo = reading_thresholds.PAGE_TIME_FLOOR_SECONDS
+    sfoglio_durata = reading_thresholds.SKIM_MIN_DURATION_SECONDS
 
     righe = (
         db.query(models.LetturaDiPagina)
         .filter(
-            models.LetturaDiPagina.stato_conversione == "exact",
-            models.LetturaDiPagina.genere == models.LetturaDiPagina.PAGINA,
-            models.LetturaDiPagina.carattere_inizio.isnot(None),
-            models.LetturaDiPagina.carattere_fine.isnot(None),
             models.LetturaDiPagina.library.isnot(None),
             models.LetturaDiPagina.calibre_book_id.isnot(None),
         )
@@ -576,10 +666,34 @@ def derive_reading_sessions(db: Session) -> dict:
         )
         .all()
     )
-    esito = {"sessioni_arricchite": 0, "righe_esatte": len(righe),
+    esito = {"sessioni_arricchite": 0, "righe_esatte": 0,
              "libri": 0, "biblioteche": [], "copertura_aggiornata": 0}
     if not righe:
         return esito
+
+    def e_esatta(riga):
+        return (riga.genere == models.LetturaDiPagina.PAGINA
+                and riga.stato_conversione == "exact"
+                and riga.carattere_inizio is not None
+                and riga.carattere_fine is not None
+                and riga.carattere_fine > riga.carattere_inizio)
+
+    def e_sfoglio(riga):
+        # Solo per righe esatte: senza larghezza la velocita' non esiste.
+        if riga.durata <= sfoglio_durata:
+            return True
+        if not sfoglio_cps:
+            return False
+        larghezza = riga.carattere_fine - riga.carattere_inizio
+        return (larghezza / riga.durata) > sfoglio_cps
+
+    def tetto_di(riga):
+        if e_esatta(riga) and lenta_cps:
+            larghezza = riga.carattere_fine - riga.carattere_inizio
+            return max(larghezza / lenta_cps, tetto_minimo)
+        # Senza larghezza (copertine, righe non convertite) vale il minimo
+        # fisso: non dipende dai dati.
+        return tetto_minimo
 
     gruppi: dict = {}
     for riga in righe:
@@ -587,9 +701,14 @@ def derive_reading_sessions(db: Session) -> dict:
 
     biblioteche = set()
     for (user_id, library, calibre_book_id), del_libro in gruppi.items():
+        pagine = [r for r in del_libro if r.genere == models.LetturaDiPagina.PAGINA]
+        note = [r for r in del_libro if r.genere == models.LetturaDiPagina.NOTA]
+        esatte = [r for r in pagine if e_esatta(r)]
+        esito["righe_esatte"] += len(esatte)
+        if not pagine and not note:
+            continue
         esito["libri"] += 1
 
-        # ── 1. Le sessioni di questo libro, arricchite dalla finestra ──
         sessioni = (
             db.query(models.ReadingSession)
             .filter(
@@ -601,37 +720,96 @@ def derive_reading_sessions(db: Session) -> dict:
             .order_by(models.ReadingSession.start_time)
             .all()
         )
-        for sessione in sessioni:
-            inizio_finestra = sessione.start_time
-            fine_finestra = sessione.start_time + timedelta(seconds=sessione.duration or 0)
-            somma, char_start, char_end, quante = 0, None, None, 0
-            for riga in del_libro:
-                if riga.istante < inizio_finestra or riga.istante > fine_finestra:
-                    continue
+        if not sessioni:
+            # Niente sessioni ancora (arriveranno col prossimo backup): le
+            # righe aspettano, ma la copertura si marca comunque, sotto.
+            pass
+
+        # Le finestre, con la regola 1 allungata e il suo limite
+        # (WINDOW_EXTENSION_MAX_SECONDS: il perche' sta li').
+        finestre = []
+        allungamento = timedelta(seconds=WINDOW_EXTENSION_MAX_SECONDS)
+        for i, sessione in enumerate(sessioni):
+            inizio = sessione.start_time
+            fine_naturale = inizio + timedelta(seconds=sessione.duration or 0)
+            fine = fine_naturale + allungamento
+            if i + 1 < len(sessioni):
+                fine = min(fine, sessioni[i + 1].start_time - timedelta(seconds=1))
+            finestre.append((inizio, max(fine, fine_naturale)))
+
+        # Un giro per sessione, in ordine di tempo: prima i valori grezzi
+        # (identici a prima), poi i puliti, poi la cronologia nuovo/riletto.
+        coperti_prima = []   # unione cumulativa delle sessioni precedenti
+        for sessione, (inizio, fine) in zip(sessioni, finestre):
+            in_pagine = [r for r in pagine if inizio <= r.istante <= fine]
+            in_note = [r for r in note if inizio <= r.istante <= fine]
+            in_esatte = [r for r in in_pagine if e_esatta(r)]
+
+            # ── I grezzi, come sono sempre stati ──
+            somma, char_start, char_end = 0, None, None
+            for riga in in_esatte:
                 larghezza = riga.carattere_fine - riga.carattere_inizio
-                if larghezza <= 0:
-                    continue
-                quante += 1
                 somma += larghezza
                 if char_start is None or riga.carattere_inizio < char_start:
                     char_start = riga.carattere_inizio
                 if char_end is None or riga.carattere_fine > char_end:
                     char_end = riga.carattere_fine
-            if not quante:
-                continue  # nessuna riga: la sessione resta stimata, intatta
-            if (sessione.chars_read != somma or sessione.char_start != char_start
-                    or sessione.char_end != char_end or not sessione.exact):
-                sessione.chars_read = somma
-                sessione.char_start = char_start
-                sessione.char_end = char_end
-                sessione.exact = 1
+
+            # ── I puliti ──
+            buone = [r for r in in_esatte if not e_sfoglio(r)]
+            intervalli_buoni, unione = _unisci_intervalli(
+                (r.carattere_inizio, r.carattere_fine) for r in buone)
+
+            tempo_note = sum(n.durata or 0 for n in in_note) if in_note else None
+            durata_pulita = None
+            if in_pagine:
+                durata_pulita = 0
+                for riga in in_pagine:
+                    sovrapposte = sum(
+                        n.durata or 0 for n in in_note
+                        if riga.istante <= n.istante
+                        <= riga.istante + timedelta(seconds=riga.durata or 0))
+                    netta = max((riga.durata or 0) - sovrapposte, 0)
+                    durata_pulita += int(min(netta, tetto_di(riga)))
+
+            chars_clean = unione if in_esatte else None
+            nuovi = None
+            if chars_clean is not None:
+                prima = sum(b - a for a, b in coperti_prima)
+                dopo, totale_dopo = _unisci_intervalli(
+                    [tuple(iv) for iv in coperti_prima]
+                    + [tuple(iv) for iv in intervalli_buoni])
+                nuovi = totale_dopo - prima
+                coperti_prima = dopo
+
+            cambiata = False
+            if in_esatte:
+                if (sessione.chars_read != somma or sessione.char_start != char_start
+                        or sessione.char_end != char_end or not sessione.exact):
+                    sessione.chars_read = somma
+                    sessione.char_start = char_start
+                    sessione.char_end = char_end
+                    sessione.exact = 1
+                    cambiata = True
+            if (sessione.chars_read_clean != chars_clean
+                    or sessione.chars_new != nuovi
+                    or sessione.note_time != tempo_note
+                    or sessione.duration_clean != durata_pulita):
+                sessione.chars_read_clean = chars_clean
+                sessione.chars_new = nuovi
+                sessione.note_time = tempo_note
+                sessione.duration_clean = durata_pulita
+                cambiata = True
+            if cambiata:
                 esito["sessioni_arricchite"] += 1
                 biblioteche.add(library)
 
-        # ── 2. La copertura, dagli intervalli veri ─────────────────────
+        # ── La copertura, dagli intervalli veri, sfoglio escluso (D2) ──
         mappa = bytearray(stats_service._BINS // 8)
         segnato = False
-        for riga in del_libro:
+        for riga in esatte:
+            if e_sfoglio(riga):
+                continue
             if _segna_intervallo_esatto(mappa, stats_service._BINS,
                                         riga.carattere_inizio, riga.carattere_fine,
                                         riga.caratteri_del_libro):

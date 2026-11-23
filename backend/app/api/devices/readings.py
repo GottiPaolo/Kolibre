@@ -34,7 +34,8 @@ from ... import models, database, auth
 from ...istanti import quando
 
 from ...logging_utils import log_message
-from ...services import book_hash_service, letture_service, stats_service
+from ...services import (book_hash_service, letture_service, reading_thresholds,
+                          stats_service)
 from ...schemas_risposte import (
     Esito, PosizionePerIlDispositivo, LettureCucite, StatoDelleLetture,
 )
@@ -86,6 +87,18 @@ def push_reading_progress(
         raise HTTPException(status_code=400, detail="percentage and progress are required")
     if not payload.get("hash") and payload.get("calibre_book_id") is None:
         raise HTTPException(status_code=400, detail="the book's identity or its fingerprint is required")
+
+    # **Un'impronta scartata non scrive posizioni** (24/11/2026, Paolo:
+    # «togli pure la posizione»). Lo scarto (stats_hash_discards) e' una
+    # decisione umana: «questo file non e' un libro da seguire». Il caso
+    # vero: due file `calibre_bookmarks` aperti sul Mac, che lo storico
+    # delle impronte riconduce a due libri veri e li dava letti al 100%.
+    # Si risponde «ok» e non si scrive niente: un errore farebbe ritentare
+    # il lettore a ogni sincronizzazione, per un dato che non si vuole.
+    impronta = payload.get("hash")
+    if impronta and db.query(models.StatsHashDiscard).filter(
+            models.StatsHashDiscard.md5 == impronta).first():
+        return {"status": "ok"}
 
     matches = book_hash_service.resolve_identities_from_item(db, payload, device_id=current_device.id)
     if not matches:
@@ -259,7 +272,10 @@ def upload_letture_incremental(
         current_device.last_backup_at = datetime.utcnow()
         db.commit()
         try:
-            conversione = letture_service.converti_le_letture(db)
+            # Tutto l'arretrato, non un lotto solo: il caso vero delle 89
+            # righe ferme (23/11/2026) nasceva proprio qui, da un lotto da
+            # 400 su 489 righe e nessun giro che riprendesse il resto.
+            conversione = letture_service.smaltisci_conversioni(db)
             log_message(
                 "info", "backup",
                 f"Reading rows from '{current_device.name}': "
@@ -275,6 +291,8 @@ def upload_letture_incremental(
         # fallire una consegna riuscita, e il passo e' idempotente — il giro
         # successivo riprende tutto.
         try:
+            # Le soglie si rivedono prima della derivazione, che le usa.
+            reading_thresholds.refresh(db)
             derivazione = letture_service.derive_reading_sessions(db)
             if derivazione["sessioni_arricchite"] or derivazione["copertura_aggiornata"]:
                 log_message(

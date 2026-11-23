@@ -1115,6 +1115,21 @@ class PosizioniDaRitentare(Esito):
 
 # ── Statistiche di lettura ───────────────────────────────────────────────
 
+class SoglieDiLettura(Permissivo):
+    """
+    Le soglie della pulizia delle statistiche (23/11/2026), ricalcolate da
+    sole sui dati e conservate in un posto solo — qui si LEGGONO soltanto.
+    Vuote (`null`) quando i dati non bastano ancora a tararle.
+    """
+    typical_speed_cps: Optional[float]
+    slow_speed_cps: Optional[float]
+    skim_threshold_cps: Optional[float]
+    rows_used: int
+    #: `null` = tutta la storia (i dati recenti non bastavano).
+    window_days: Optional[int]
+    computed_at: Optional[str]
+
+
 class RiassuntoLetture(Permissivo):
     """
     I numeri grandi della pagina Statistiche.
@@ -1137,6 +1152,17 @@ class RiassuntoLetture(Permissivo):
     #: Il tempo delle sole sessioni per cui si sa quanti caratteri sono
     #: stati letti: e' il denominatore giusto per una velocita' di lettura.
     chars_time_seconds: int
+    #: Secondi passati nei popup di nota (voce del 23/11/2026). Totale
+    #: PARZIALE dichiarato: esiste solo dove la misura in caratteri c'e'.
+    #: I default coprono la finestra fra il deploy e il primo refresh della
+    #: cache: un summary_json vecchio non ha questi campi, e non deve
+    #: diventare un 500 di validazione.
+    note_time_seconds: int = 0
+    #: Testo mai letto prima / testo riletto, in caratteri puliti. Anche
+    #: questi esistono solo dal 19/11/2026, da quando il grezzo esiste.
+    chars_new: int = 0
+    chars_reread: int = 0
+    thresholds: Optional[SoglieDiLettura] = None
     total_books_completed: int
     year_time_seconds: int
     year_books: int
@@ -1196,6 +1222,12 @@ class SessioneDiLettura(Permissivo):
     char_end: Optional[int]
     #: Il distintivo binario del passo 4: falso = stimata, vero = esatta.
     exact: bool
+    #: Le colonne ripulite (23/11/2026), vuote dove non calcolabili.
+    #: `chars_read` qui sopra usa gia' il valore pulito quando esiste.
+    #: Default per le righe di una cache scritta prima del 23/11.
+    chars_new: Optional[int] = None
+    note_time: Optional[int] = None
+    duration_clean: Optional[int] = None
     series: Optional[str]
     tags: list[str]
     language: Optional[str]

@@ -10799,6 +10799,22 @@ export interface components {
             total_chars: number;
             /** Chars Time Seconds */
             chars_time_seconds: number;
+            /**
+             * Note Time Seconds
+             * @default 0
+             */
+            note_time_seconds: number;
+            /**
+             * Chars New
+             * @default 0
+             */
+            chars_new: number;
+            /**
+             * Chars Reread
+             * @default 0
+             */
+            chars_reread: number;
+            thresholds?: components["schemas"]["SoglieDiLettura"] | null;
             /** Total Books Completed */
             total_books_completed: number;
             /** Year Time Seconds */
@@ -11359,6 +11375,12 @@ export interface components {
             char_end: number | null;
             /** Exact */
             exact: boolean;
+            /** Chars New */
+            chars_new?: number | null;
+            /** Note Time */
+            note_time?: number | null;
+            /** Duration Clean */
+            duration_clean?: number | null;
             /** Series */
             series: string | null;
             /** Tags */
@@ -11531,6 +11553,28 @@ export interface components {
         SogliaDelleSessioni: {
             /** Seconds */
             seconds: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SoglieDiLettura
+         * @description Le soglie della pulizia delle statistiche (23/11/2026), ricalcolate da
+         *     sole sui dati e conservate in un posto solo — qui si LEGGONO soltanto.
+         *     Vuote (`null`) quando i dati non bastano ancora a tararle.
+         */
+        SoglieDiLettura: {
+            /** Typical Speed Cps */
+            typical_speed_cps: number | null;
+            /** Slow Speed Cps */
+            slow_speed_cps: number | null;
+            /** Skim Threshold Cps */
+            skim_threshold_cps: number | null;
+            /** Rows Used */
+            rows_used: number;
+            /** Window Days */
+            window_days: number | null;
+            /** Computed At */
+            computed_at: string | null;
         } & {
             [key: string]: unknown;
         };

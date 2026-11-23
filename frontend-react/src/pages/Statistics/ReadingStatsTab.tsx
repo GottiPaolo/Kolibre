@@ -211,6 +211,26 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
   // finché non esiste nemmeno una sessione esatta, cioè su tutto lo storico
   // raccolto prima del 19/11/2026.
   const quotaEsatta = useMemo(() => quotaTempoEsatto(rawPeriodo), [rawPeriodo])
+  // Le due voci nuove del 23/11/2026, dal periodo filtrato come le altre:
+  // il tempo passato nei popup delle note, e quanta parte del testo misurato
+  // era gia' stata letta (riletto). Esistono solo dove la derivazione le ha
+  // calcolate, cioe' dalle letture in caratteri (dal 19/11/2026): per questo
+  // la riga del riletto dice «dal 19/11» in piccolo.
+  const voci = useMemo(() => {
+    let note = 0
+    let misurati = 0
+    let nuovi = 0
+    for (const s of rawPeriodo) {
+      if (s.note_time) note += s.note_time
+      if (s.chars_new != null) {
+        misurati += s.chars_read || 0
+        nuovi += s.chars_new
+      }
+    }
+    const riletto = misurati > 0 ? Math.round(((misurati - nuovi) / misurati) * 100) : null
+    return { note, riletto }
+  }, [rawPeriodo])
+  const soglie = summary?.thresholds
   const peakHours = useMemo(() => peakHoursBuckets(rawPeriodo, t), [rawPeriodo, t])
   const streak = useMemo(() => currentStreakDays(raw), [raw])
   const speed = useMemo(() => readingSpeedPagesPerHour(summary), [summary])
@@ -282,7 +302,28 @@ export function ReadingStatsTab({ libraryFolder, visibility }: ReadingStatsTabPr
               <span className="tabular-nums text-foreground">{quotaEsatta}%</span> {t('stats.reading.exactShareSuffix')}
             </span>
           )}
+          {voci.note > 0 && (
+            <span>
+              <span className="tabular-nums text-foreground">{formatDurationHuman(voci.note)}</span>{' '}
+              {t('stats.reading.noteTimeSuffix')}
+            </span>
+          )}
+          {voci.riletto != null && (
+            <span>
+              <span className="tabular-nums text-foreground">{voci.riletto}%</span> {t('stats.reading.rereadSuffix')}
+            </span>
+          )}
         </p>
+        {/* Le soglie della pulizia: si ricalcolano da sole sui dati, e si
+            leggono qui invece che nel database. */}
+        {soglie?.typical_speed_cps != null && soglie.skim_threshold_cps != null && (
+          <p className="mt-1 text-[11px] text-muted-foreground/80">
+            {t('stats.reading.thresholdsLine', {
+              tipica: Math.round(soglie.typical_speed_cps),
+              sfoglio: Math.round(soglie.skim_threshold_cps),
+            })}
+          </p>
+        )}
       </div>
 
       {isVisible('readingRecords') && summary && tuttoIlTempo && (

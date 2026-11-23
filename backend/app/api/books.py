@@ -699,7 +699,15 @@ def get_book_stats(
         models.BookTextStats.library == library,
         models.BookTextStats.calibre_book_id == id,
     ).first()
-    caratteri = round(frazione * testo.chars) if (frazione is not None and testo) else None
+    # La regola unica di ogni pannello (23/11/2026): pulito dove c'e',
+    # misura exact altrimenti, stima in ultima istanza — era il difetto 8c,
+    # questo pannello diceva numeri diversi dalla pagina Statistiche.
+    per_sessione = [
+        stats_service.caratteri_di_sessione(s, testo.chars if testo else None)
+        for s in sessions
+    ]
+    caratteri = sum(per_sessione) if any(per_sessione) else (
+        round(frazione * testo.chars) if (frazione is not None and testo) else None)
     # Quanta PARTE del libro e' stata vista, che e' un'altra domanda rispetto
     # a quanto si e' letto: rileggendo, la seconda supera il 100% e la prima
     # no. Vedi models.BookReadingCoverage.
