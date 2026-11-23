@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Loader2, Trash2, Upload, X } from 'lucide-react'
+import { AlertTriangle, BookPlus, Loader2, Trash2, Upload, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useLibraries } from '@/lib/queries'
 import {
@@ -16,6 +16,7 @@ import { INGEST_ACCEPT, type IngestedBook, type IngestRejectedFile } from '@/typ
 import { LibraryPickerButton } from '@/components/LibraryPickerButton'
 import { IngestCard } from './IngestCard'
 import { EditIngestMetadataDialog, type IngestMetadataEdits } from './EditIngestMetadataDialog'
+import { IsbnImportDialog } from './IsbnImportDialog'
 import { numero, useLingua } from '@/lib/i18n'
 
 function errorDetail(err: unknown, fallback: string): string {
@@ -77,6 +78,10 @@ export function ImportTab() {
   const { data: duplicatiPerItem = {} } = useIngestDuplicati(destLibrary?.folder_name)
 
   const [uploading, setUploading] = useState(false)
+  // Le schede da ISBN (22/11/2026): nessun file, l'inventario di una
+  // libreria fisica. Vive qui perche' Paolo l'ha voluta NELLA pagina
+  // Ingest, accanto al caricamento dei file.
+  const [isbnAperto, setIsbnAperto] = useState(false)
   const [rejected, setRejected] = useState<IngestRejectedFile[]>([])
   const [dragOver, setDragOver] = useState(false)
   const [message, setMessage] = useState<{ kind: 'success' | 'error'; text: string } | null>(null)
@@ -198,6 +203,11 @@ export function ImportTab() {
       queryClient.invalidateQueries({ queryKey: INGEST_QUERY_KEY }),
       queryClient.invalidateQueries({ queryKey: ['ingest-page'] }),
       queryClient.invalidateQueries({ queryKey: ['ingest-pagination'] }),
+      // Anche le somiglianze (22/11/2026, spunto di Paolo): il libro appena
+      // importato ORA è in biblioteca, e un altro file in attesa che gli
+      // somiglia deve ricevere l'avviso «forse ce l'hai già» adesso, non al
+      // prossimo giro della pagina.
+      queryClient.invalidateQueries({ queryKey: ['ingest-duplicati'] }),
     ])
   }
 
@@ -267,6 +277,10 @@ export function ImportTab() {
         queryClient.invalidateQueries({ queryKey: INGEST_QUERY_KEY }),
         queryClient.invalidateQueries({ queryKey: ['books', target.folder_name] }),
         queryClient.invalidateQueries({ queryKey: ['libraries'] }),
+        // Il libro appena importato ora è in biblioteca: le somiglianze
+        // dei file ancora in attesa vanno riconsiderate contro di lui
+        // (22/11/2026, spunto di Paolo).
+        queryClient.invalidateQueries({ queryKey: ['ingest-duplicati'] }),
       ])
     } else {
       setMessage({ kind: 'error', text: result.error })
@@ -403,6 +417,10 @@ export function ImportTab() {
             <Upload className="size-3.5" />
             {t('ingest.importTab.uploadButton')}
           </Button>
+          <Button variant="outline" size="sm" onClick={() => setIsbnAperto(true)} disabled={!destLibrary}>
+            <BookPlus className="size-3.5" />
+            {t('ingest.isbn.button')}
+          </Button>
           <Button variant="outline" size="sm" onClick={() => void discardAll()} disabled={totaleInStaging === 0}>
             <Trash2 className="size-3.5" />
             {t('ingest.importTab.discardAllButton')}
@@ -414,7 +432,7 @@ export function ImportTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void handleBulkImport(ingestBooks)}
+              onClick={() => void handleBulkImport(ingestBooks.filter((i) => i.supported))}
               disabled={importazioneInCorso || ingestBooks.length === 0}
             >
               {t('ingest.importTab.importPageButton', { n: ingestBooks.length })}
@@ -606,6 +624,9 @@ export function ImportTab() {
           onClose={() => setEditingItem(null)}
           onSave={(edits) => handleSaveMetadata(editingItem, edits)}
         />
+      )}
+      {isbnAperto && (
+        <IsbnImportDialog destLibrary={destLibrary} onClose={() => setIsbnAperto(false)} />
       )}
     </div>
   )

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { AlertTriangle, BookOpen, Download, ExternalLink, Loader2, Pencil, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { formatBytes } from '@/lib/format'
@@ -76,12 +77,40 @@ export function IngestCard({
         <div className="truncate font-serif text-[15px] font-semibold">{item.title}</div>
         <div className="truncate text-[13px] text-muted-foreground">{t('ingest.card.byAuthor', { author: item.author })}</div>
         <div className="flex flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
-          {item.formats.map((fmt) => (
-            <span key={fmt} className="rounded border border-border px-1 py-0.5 font-medium">
-              {fmt}
+          {/* La voce senza file dice cos'è, al posto di formato e peso:
+              «0 B» sembrerebbe un file rotto, e non lo è. */}
+          {item.record_only ? (
+            <span className="rounded border border-border px-1 py-0.5 font-medium italic">
+              {t('library.card.soloScheda')}
             </span>
-          ))}
-          <span>{formatBytes(item.size)}</span>
+          ) : (
+            <>
+              {item.formats.map((fmt) => (
+                <span key={fmt} className="rounded border border-border px-1 py-0.5 font-medium">
+                  {fmt}
+                </span>
+              ))}
+              <span>{formatBytes(item.size)}</span>
+              {/* Formato fuori dalla lista di Kolibre (23/11/2026): la voce
+                  compare apposta — così la si vede e la si scarta dal sito —
+                  ma non si può importare. */}
+              {!item.supported && (
+                <span className="rounded border border-destructive/50 px-1 py-0.5 font-medium text-destructive">
+                  {t('ingest.card.unsupportedBadge')}
+                </span>
+              )}
+            </>
+          )}
+          {/* Le pagine, contate in sottofondo appena il file è arrivato
+              (come la qualità): servono a scegliere fra due copie simili
+              prima di importare. Per un formato che non si sa leggere non
+              ci saranno mai. */}
+          {item.pages != null && (
+            <>
+              <span className="text-muted-foreground/60">·</span>
+              <span>{t('ingest.card.pagesN', { n: item.pages })}</span>
+            </>
+          )}
           {/* Proprietario (solo per l'admin): «senza proprietario» sono le
               righe di prima della colonna, o i file messi a mano nella
               radice di ingest — mai attribuiti per deduzione. */}
@@ -123,7 +152,33 @@ export function IngestCard({
             <span className="text-muted-foreground">
               {t('ingest.card.maybeAlreadyHave')}{' '}
               <span className="text-foreground">
-                {duplicati.map((d) => `${d.title}${d.formats.length ? ` (${d.formats.join(', ')})` : ''}`).join(' · ')}
+                {/* Formati, pagine e qualità del libro già in casa:
+                    accostati al file qui sopra sono il metro per scegliere
+                    quale copia tenere. Il titolo si APRE (22/11/2026,
+                    spunto di Paolo): porta al dettaglio del doppione, dove
+                    la sua qualità si guarda per intero nel pannello. */}
+                {duplicati.map((d, i) => {
+                  const dentro = [
+                    d.formats.length ? d.formats.join(', ') : null,
+                    d.pages != null ? t('ingest.card.pagesN', { n: d.pages }) : null,
+                    d.qualita_punteggio != null
+                      ? `${t('ingest.card.qualitaLabel')} ${d.qualita_punteggio}`
+                      : null,
+                  ].filter(Boolean).join(', ')
+                  return (
+                    <Fragment key={d.id}>
+                      {i > 0 && ' · '}
+                      <Link
+                        to={`/libri/${d.id}?library=${encodeURIComponent(destLibrary?.folder_name ?? '')}`}
+                        className="underline decoration-dotted underline-offset-2 hover:text-primary"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {d.title}
+                      </Link>
+                      {dentro ? ` (${dentro})` : ''}
+                    </Fragment>
+                  )
+                })}
               </span>
               {t('ingest.card.importAnywayHint')}
             </span>
@@ -137,14 +192,20 @@ export function IngestCard({
       </div>
 
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        <Button variant="outline" size="sm" onClick={onOpenFile} title={t('ingest.card.openFileTitle')}>
-          <ExternalLink className="size-3.5" />
-          {t('ingest.card.openFileButton')}
-        </Button>
-        <Button variant="outline" size="sm" onClick={onDownloadFile} title={t('ingest.card.downloadTitle')}>
-          <Download className="size-3.5" />
-          {t('ingest.card.downloadButton')}
-        </Button>
+        {/* Una voce senza file (record_only) non ha niente da aprire o
+            scaricare: i due bottoni non ci sono, invece di fallire. */}
+        {!item.record_only && (
+          <>
+            <Button variant="outline" size="sm" onClick={onOpenFile} title={t('ingest.card.openFileTitle')}>
+              <ExternalLink className="size-3.5" />
+              {t('ingest.card.openFileButton')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={onDownloadFile} title={t('ingest.card.downloadTitle')}>
+              <Download className="size-3.5" />
+              {t('ingest.card.downloadButton')}
+            </Button>
+          </>
+        )}
         <Button variant="outline" size="sm" onClick={onEditMetadata}>
           <Pencil className="size-3.5" />
           {t('ingest.card.metadataButton')}
@@ -160,10 +221,15 @@ export function IngestCard({
           {discarding ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
           {t('ingest.card.discardButton')}
         </Button>
-        <Button size="sm" onClick={onImport} disabled={importing || !destLibrary}>
-          {importing ? <Loader2 className="size-3.5 animate-spin" /> : null}
-          {t('ingest.card.importButton')}
-        </Button>
+        {/* Un formato fuori lista non si importa: il bottone lo dice al
+            passaggio del mouse invece di sparire — il divieto si capisce
+            solo se si vede. Il rifiuto vero sta comunque sul server. */}
+        <div title={!item.supported ? t('ingest.card.unsupportedHint') : undefined}>
+          <Button size="sm" onClick={onImport} disabled={importing || !destLibrary || !item.supported}>
+            {importing ? <Loader2 className="size-3.5 animate-spin" /> : null}
+            {t('ingest.card.importButton')}
+          </Button>
+        </div>
       </div>
     </div>
   )

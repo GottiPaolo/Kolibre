@@ -23,6 +23,7 @@ from ..schemas_risposte import (
     ManifestDiBiblioteca,
 )
 from ..services import app_settings, fulltext_index, author_ingest_hook, book_hash_service, book_records, page_counter, author_stats_service, permessi, stats_service
+from ..services.library_scanner import EBOOK_EXTENSIONS, formato_ammesso
 from .libraries import (
     sync_library_registry, _library_stats,
     esigi_biblioteca_leggibile, esigi_biblioteca_scrivibile,
@@ -326,7 +327,10 @@ async def upload_library_fulltext_db(
 async def upload_library_book(
     folder: str,
     metadata: str = Form(...),
-    files: List[UploadFile] = File(...),
+    # default=[] e non File(...): dal 23/11/2026 un libro puo' arrivare
+    # SENZA formati — e' la scheda solo-record del plugin Calibre, vedi il
+    # commento dentro la funzione.
+    files: List[UploadFile] = File(default=[]),
     cover: Optional[UploadFile] = File(None),
     write_queue: CalibreWriteQueue = Depends(get_write_queue),
     db: Session = Depends(database.get_db),
@@ -368,15 +372,34 @@ async def upload_library_book(
     author = (meta.get("author") or "Unknown Author").strip()
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
-    if not files:
-        raise HTTPException(status_code=400, detail="At least one format file is required")
+    # ZERO file e' uno stato legittimo dal 23/11/2026 (scelta di Paolo: «il
+    # plugin di Calibre deve poter inviare anche libri che sono solo
+    # record»): un libro senza formati in Calibre e' una scheda
+    # d'inventario, e qui diventa la stessa scheda — riga in `books`,
+    # niente righe in `data`, metadati e copertina al loro posto.
     # Checked BEFORE insert_book, not after: this used to run only once
     # every upload_file had already been saved, so a request whose files all
     # lacked a recognizable extension still left an orphan `books` row
     # behind (insert_book already committed, nothing here ever rolled it
     # back or cleaned it up).
-    if not any(os.path.splitext(f.filename or "")[1].lstrip(".") for f in files):
+    if files and not any(os.path.splitext(f.filename or "")[1].lstrip(".") for f in files):
         raise HTTPException(status_code=400, detail="None of the uploaded files has a recognisable extension")
+    # Il cancello dei formati (scelta di Paolo, 23/11/2026): qui — upload
+    # diretto in biblioteca, plugin Calibre compreso — un formato fuori
+    # lista si RIFIUTA col motivo in chiaro, tutto il lotto insieme:
+    # accettarne meta' lascerebbe un libro diverso da quello inviato.
+    fuori_lista = sorted({
+        (os.path.splitext(f.filename or "")[1].lstrip(".").upper() or "(none)")
+        for f in files
+        if os.path.splitext(f.filename or "")[1].lstrip(".")
+        and not formato_ammesso(os.path.splitext(f.filename or "")[1].lstrip("."))
+    })
+    if fuori_lista:
+        allowed = ", ".join(sorted(e.lstrip(".") for e in EBOOK_EXTENSIONS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Formats not accepted: {', '.join(fuori_lista)}. Accepted formats: {allowed}",
+        )
 
     insert_payload = {"title": title, "author": author}
     if meta.get("timestamp"):

@@ -76,6 +76,12 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
   const actions = useBookActions()
   const queryClient = useQueryClient()
   const folder = actions.resolveFolder(book)
+  // Una scheda fantasma (soli metadati, nessun file — l'inventario di una
+  // libreria fisica, 22/11/2026): Leggi, Scarica e Invia non hanno niente
+  // su cui lavorare. Le voci restano visibili ma spente, col motivo nel
+  // tooltip — una voce che sparisce non spiega niente (stessa regola del
+  // blocco invio qui sotto).
+  const soloScheda = !book.formats || book.formats.length === 0
   const libraries = queryClient.getQueryData<Library[]>(['libraries']) ?? []
   // Si confronta la CARTELLA e non il nome mostrato: vedi
   // `resolveBookLibraryFolder`. Col ripiego sul nome per una risposta
@@ -171,9 +177,13 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
     <ContextMenu>
       <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
       <ContextMenuContent>
-        <ContextMenuItem onSelect={() => actions.readBook(book)}>
-          <BookOpen /> {t('library.contextMenu.read')}
-        </ContextMenuItem>
+        {/* Il div attorno serve al tooltip: la voce disabilitata ha
+            pointer-events-none, e un title su di lei non comparirebbe. */}
+        <div title={soloScheda ? t('library.contextMenu.soloSchedaHint') : undefined}>
+          <ContextMenuItem disabled={soloScheda} onSelect={() => actions.readBook(book)}>
+            <BookOpen /> {t('library.contextMenu.read')}
+          </ContextMenuItem>
+        </div>
 
         <ContextMenuSub>
           <ContextMenuSubTrigger>
@@ -189,9 +199,11 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
           </ContextMenuSubContent>
         </ContextMenuSub>
 
-        <ContextMenuItem onSelect={() => actions.downloadFormat(book)}>
-          <Download /> {t('library.formatPicker.download')}
-        </ContextMenuItem>
+        <div title={soloScheda ? t('library.contextMenu.soloSchedaHint') : undefined}>
+          <ContextMenuItem disabled={soloScheda} onSelect={() => actions.downloadFormat(book)}>
+            <Download /> {t('library.formatPicker.download')}
+          </ContextMenuItem>
+        </div>
         <ContextMenuItem onSelect={() => actions.convert(book)}>
           <RefreshCw /> {t('library.contextMenu.convertFormat')}
         </ContextMenuItem>
@@ -260,9 +272,11 @@ export function BookContextMenu({ book, children }: BookContextMenuProps) {
 
         {devices.length > 0 && (
           <ContextMenuSub>
-            <ContextMenuSubTrigger>
-              <Send /> {t('library.contextMenu.sendToDevice')}
-            </ContextMenuSubTrigger>
+            <div title={soloScheda ? t('library.contextMenu.soloSchedaHint') : undefined}>
+              <ContextMenuSubTrigger disabled={soloScheda}>
+                <Send /> {t('library.contextMenu.sendToDevice')}
+              </ContextMenuSubTrigger>
+            </div>
             <ContextMenuSubContent>
               {devices.map((d) => {
                 const block = sendBlockById.get(d.id) ?? null

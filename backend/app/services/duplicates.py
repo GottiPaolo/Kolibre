@@ -74,10 +74,21 @@ def _normalizza(testo: str) -> str:
     return re.sub(r"\s+", " ", t).strip()
 
 
+# I segnaposto di «autore ignoto» non sono un autore (22/11/2026, scelta di
+# Paolo). Il parser dei metadati scrive la STRINGA «Unknown Author» quando
+# l'EPUB non dichiara un creatore, e Calibre usa «Unknown»: trattarli come
+# cognomi veri creava un blocco fantasma in cui nessun libro reale abita —
+# e nel controllo doppioni dell'ingest un file senza autore non veniva MAI
+# accostato a niente, mentre la regola e' l'opposto: senza autore si
+# confronta con tutto.
+_PLACEHOLDER_AUTHORS = {"unknown author", "unknown", "sconosciuto", "autore sconosciuto"}
+
+
 def _chiave_autore(autore: str) -> str:
     """
     I cognomi degli autori, ordinati: l'insieme dentro cui cercare
-    affinita' di titolo.
+    affinita' di titolo. Un segnaposto di «autore ignoto» torna chiave
+    vuota, come un autore assente (vedi _PLACEHOLDER_AUTHORS).
 
     I cognomi e non i nomi interi perche' "Fedor Dostoevskij" e "F.
     Dostoevskij" sono la stessa persona e devono finire nello stesso
@@ -88,6 +99,8 @@ def _chiave_autore(autore: str) -> str:
     ogni titolo con ogni altro su 5.843 libri sarebbe diciassette milioni
     di confronti; dentro l'opera di un autore sono qualche decina.
     """
+    if (autore or "").strip().lower() in _PLACEHOLDER_AUTHORS:
+        return ""
     cognomi = sorted(
         filter(None, (_cognome(a) for a in string_to_authors(autore or "")))
     )

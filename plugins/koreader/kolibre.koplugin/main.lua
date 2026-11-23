@@ -655,7 +655,7 @@ local KolibreAccoppiamento = require("kolibre_accoppiamento")
 -- calcoli il server e non noi.
 local KolibreLetture = require("kolibre_letture")
 
-local VERSION = "0.26.0"
+local VERSION = "0.27.0"
 
 -- La versione la dichiara questo file (la legge anche il server, vedi
 -- backend/app/api/tools.py); i moduli che la usano la ricevono qui.

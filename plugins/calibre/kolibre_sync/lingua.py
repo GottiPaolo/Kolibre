@@ -203,7 +203,7 @@ _it = {
     'calibre.main.choose_local_library_label': 'Libreria locale da caricare sul server:',
     'calibre.main.open_local_library_failed': 'Impossibile aprire la libreria locale scelta: {error}',
     'calibre.main.empty_library_name': 'Il nome della libreria non può essere vuoto.',
-    'calibre.main.no_uploadable_books': 'La libreria scelta non contiene libri con formati da caricare.',
+    'calibre.main.no_uploadable_books': 'La libreria scelta non contiene libri da caricare.',
     'calibre.main.create_library_failed': 'Impossibile creare la libreria sul server: {error}',
     'calibre.main.library_not_found_after_create': 'Libreria creata sul server ma non trovata di nuovo nell\'elenco.',
     'calibre.main.column_not_created': (
@@ -390,7 +390,7 @@ _en = {
     'calibre.main.choose_local_library_label': 'Local library to upload to the server:',
     'calibre.main.open_local_library_failed': 'Could not open the chosen local library: {error}',
     'calibre.main.empty_library_name': 'The library name cannot be empty.',
-    'calibre.main.no_uploadable_books': 'The chosen library has no books with formats to upload.',
+    'calibre.main.no_uploadable_books': 'The chosen library has no books to upload.',
     'calibre.main.create_library_failed': 'Could not create the library on the server: {error}',
     'calibre.main.library_not_found_after_create': 'Library created on the server but not found again in the list.',
     'calibre.main.column_not_created': (

@@ -14,8 +14,10 @@ non è esplicitamente permesso cade. Nessuna dipendenza nuova: il parser è
 aperto sulle versioni dei requisiti e non si aggiunge nulla finché non si
 chiude).
 
-**La lista bianca** — proposta del 20/11/2026, in attesa del giudizio di
-Paolo, rivedibile voce per voce:
+**La lista bianca** — proposta del 20/11/2026, **ratificata da Paolo il
+22/11/2026** (niente immagini; un link senza href valido resta solo testo).
+Resta aperta solo la questione descrizione intera vs estratto da 400
+caratteri nell'elenco:
 
 - **Tag permessi**: `p`, `br`, `b`, `strong`, `i`, `em`, `u`, `s`, `sub`,
   `sup`, `blockquote`, `ul`, `ol`, `li`, `hr`, `h1`-`h4`, `a`. Sono i tag

@@ -77,6 +77,10 @@ interface LibraryTableProps {
   // dispositivo che ha scritto, stile kosync). Nessuna combinazione da fare
   // qui: un libro assente dalla mappa è semplicemente "non ancora iniziato".
   progressByBookId?: Record<number, number>
+  // La qualita' (0-100) per libro, dal servizio qualita_libri: non e' un
+  // campo di Book, arriva da una mappa a parte come l'avanzamento qui
+  // sopra. Solo i libri misurati hanno una voce.
+  qualitaByBookId?: Record<number, number>
   // Stato per le colonne dinamiche "Su: <dispositivo>" (una per device
   // registrato, colId `device-<id>`) — vedi LibraryPage per il calcolo.
   deviceStatusByBookId?: Record<number, Record<number, DeviceBookColumnState>>
@@ -102,6 +106,7 @@ function specialCell(
   book: Book,
   colId: string,
   progressPercent: number | undefined,
+  qualitaPunteggio: number | undefined,
   deviceStatus: Record<number, DeviceBookColumnState> | undefined,
   customColumns: CustomColumn[],
   t: (chiave: string, valori?: Record<string, string | number>) => string
@@ -148,6 +153,14 @@ function specialCell(
         ))}
       </div>
     )
+  }
+  if (colId === 'qualita') {
+    // Solo il numero, senza colori ne' barre: decisione di Paolo del 17/11
+    // («la qualita' si mostra come numero da 0 a 100») — un numero si
+    // confronta, un semaforo giudica. Vuoto = mai misurato (un PDF, o la
+    // coda non e' ancora passata su questo libro).
+    if (qualitaPunteggio == null) return <span className="text-muted-foreground">—</span>
+    return <span className="tabular-nums">{qualitaPunteggio}</span>
   }
   if (colId === 'progress') {
     if (progressPercent == null) return <span className="text-muted-foreground">—</span>
@@ -545,6 +558,7 @@ const LibraryRow = memo(function LibraryRow({
   rowH,
   interactive,
   progressPercent,
+  qualitaPunteggio,
   deviceStatus,
   onSelectBook,
   editingField,
@@ -577,6 +591,7 @@ const LibraryRow = memo(function LibraryRow({
   totalWidth: number
   interactive: boolean
   progressPercent: number | undefined
+  qualitaPunteggio: number | undefined
   deviceStatus: Record<number, DeviceBookColumnState> | undefined
   onSelectBook: (book: Book, modifiers?: SelectModifiers) => void
   // null per ogni riga tranne quella selezionata durante un editing attivo
@@ -629,7 +644,7 @@ const LibraryRow = memo(function LibraryRow({
       {columns.map((col) => {
         const customCol = col.id.startsWith('#') ? customColumns.find((c) => c.label === col.id.slice(1)) : undefined
         const editable = isFocused && selectionSize <= 1 && interactive && (col.id === 'rating' || col.id === 'author' || !!customCol)
-        const content = specialCell(book, col.id, progressPercent, deviceStatus, customColumns, t) ?? renderCellValue(book, col.id, customColumns)
+        const content = specialCell(book, col.id, progressPercent, qualitaPunteggio, deviceStatus, customColumns, t) ?? renderCellValue(book, col.id, customColumns)
 
         let cellBody = content
         if (editable && editingField === col.id) {
@@ -777,12 +792,14 @@ export function LibraryTable({
   onToggleColumn,
   interactive = true,
   progressByBookId = {},
+  qualitaByBookId = {},
   deviceStatusByBookId = {},
 }: LibraryTableProps) {
   const { t } = useLingua()
   const [draggedColId, setDraggedColId] = useState<string | null>(null)
   const [dragOverColId, setDragOverColId] = useState<string | null>(null)
   const [colonnaDelMenu, setColonnaDelMenu] = useState<string | null>(null)
+  const [filtroColonne, setFiltroColonne] = useState('')
   const resizeRef = useRef<{ colId: string; startX: number; startWidth: number } | null>(null)
   const justResizedRef = useRef(false)
   const headerRef = useRef<HTMLDivElement>(null)
@@ -1226,10 +1243,26 @@ export function LibraryTable({
               })}
             </div>
           </ContextMenuTrigger>
-          <ContextMenuContent>
+          <ContextMenuContent onCloseAutoFocus={() => setFiltroColonne('')}>
             <ContextMenuLabel>{t('library.columns.visible')}</ContextMenuLabel>
+            {/* Il cerca-colonne (22/11/2026, richiesta di Paolo): con
+                tante colonne — le fisse, le personalizzate, una per
+                dispositivo — scrivere «qual» deve filtrare le voci.
+                stopPropagation sui tasti: il menu Radix naviga per
+                lettera, e senza scrivere nel campo salterebbe fra le
+                voci invece di filtrare. */}
+            <input
+              value={filtroColonne}
+              onChange={(e) => setFiltroColonne(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={t('library.columns.searchPlaceholder')}
+              className="mx-2 my-1 w-[calc(100%-1rem)] rounded border border-border bg-background px-2 py-1 text-[12px] outline-none focus:border-primary"
+            />
             <ContextMenuSeparator />
-            {allColumns.map((col) => (
+            {allColumns.filter((col) =>
+              !filtroColonne.trim()
+              || col.label.toLowerCase().includes(filtroColonne.trim().toLowerCase())
+            ).map((col) => (
               <ContextMenuCheckboxItem
                 key={col.id}
                 checked={visibleColumnIds.includes(col.id)}
@@ -1276,6 +1309,7 @@ export function LibraryTable({
                     rowH={rowH}
                     interactive={interactive}
                     progressPercent={progressByBookId[book.id]}
+                    qualitaPunteggio={qualitaByBookId[book.id]}
                     deviceStatus={deviceStatusByBookId[book.id]}
                     onSelectBook={handleRowSelect}
                     editingField={selectedBookId === book.id && editingCell?.bookId === book.id ? editingCell.field : null}

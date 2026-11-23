@@ -753,6 +753,93 @@ def add_owner_to_ingested_books() -> None:
         conn.commit()
 
 
+def add_pages_to_ingested_books() -> None:
+    """
+    La colonna `pages` su `ingested_books` (22/11/2026, richiesta di Paolo:
+    «nell'ingest deve caricare anche le pagine di lunghezza del libro»).
+
+    **Il contesto.** Le pagine si contavano solo all'importazione, quando il
+    file entra in biblioteca. Ma il numero serve PRIMA: molto spesso si
+    scaricano due copie simili dello stesso libro per tenerne una, e la
+    lunghezza e' uno dei criteri per scegliere. Da oggi il conteggio parte
+    in sottofondo appena il file e' in attesa (services/ingest_pages.py) e
+    si salva qui; le righe esistenti restano NULL e si contano al primo
+    caricamento della pagina Ingest (il ripasso in api/ingest.py).
+
+    **Idempotente per controllo preventivo**: su un database nuovo la
+    colonna nasce gia' da create_all col modello di oggi e il giro e' un
+    no-op — fresh == migrated. Niente indice: non si filtra mai per pagine.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ingested_books)")}
+        if not colonne:
+            return
+        if "pages" not in colonne:
+            conn.exec_driver_sql("ALTER TABLE ingested_books ADD COLUMN pages INTEGER")
+            log_message("info", "system", "Migrated ingested_books: added missing 'pages' column.")
+        conn.commit()
+
+
+def add_record_only_to_ingested_books() -> None:
+    """
+    Le colonne `record_only` e `pubdate` su `ingested_books` (23/11/2026:
+    la scheda fantasma passa da Ingest, scelta di Paolo).
+
+    **Il contesto.** L'importazione per ISBN creava la scheda direttamente
+    in biblioteca; Paolo ha voluto che creasse invece una voce di Ingest
+    come per i file, da importare dopo. Una voce cosi' non ha un file:
+    `record_only=1` lo dichiara (file_path resta la stringa vuota), e
+    `pubdate` tiene la data trovata dalle fonti fino all'importazione.
+
+    **Idempotente per controllo preventivo**: su un database nuovo le
+    colonne nascono da create_all col modello di oggi e il giro e' un
+    no-op — fresh == migrated. Le righe esistenti sono tutte file veri:
+    il DEFAULT 0 dice esattamente quello.
+    """
+    with database.engine.connect() as conn:
+        colonne = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(ingested_books)")}
+        if not colonne:
+            return
+        if "record_only" not in colonne:
+            conn.exec_driver_sql(
+                "ALTER TABLE ingested_books ADD COLUMN record_only BOOLEAN NOT NULL DEFAULT 0"
+            )
+            log_message("info", "system", "Migrated ingested_books: added missing 'record_only' column.")
+        if "pubdate" not in colonne:
+            conn.exec_driver_sql("ALTER TABLE ingested_books ADD COLUMN pubdate VARCHAR")
+            log_message("info", "system", "Migrated ingested_books: added missing 'pubdate' column.")
+        conn.commit()
+
+
+def drop_google_books_api_key_setting() -> None:
+    """
+    Cancella l'impostazione `google_books_api_key` da `app_settings`
+    (23/11/2026, scelta di Paolo).
+
+    **Il contesto.** La chiave API di Google Books era stata aggiunta la
+    mattina stessa per rianimare il cercametadati (l'API ufficiale senza
+    chiave risponde 429 in permanenza); Paolo ha deciso di toglierla —
+    basta il ripiego sul vecchio feeds di Google, il trucco di Calibre —
+    e una chiave eventualmente gia' incollata e' un segreto che non deve
+    restare orfano nel database. «Da rivalutare in futuro» (ROADMAP).
+
+    **Idempotente per natura**: un DELETE su una riga che non c'e' e' un
+    no-op, e su un database nuovo la tabella e' vuota — fresh == migrated.
+    Nel log finisce solo il fatto, mai il valore.
+    """
+    with database.engine.connect() as conn:
+        tabelle = {row[0] for row in conn.exec_driver_sql(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'")}
+        if not tabelle:
+            return
+        esito = conn.exec_driver_sql(
+            "DELETE FROM app_settings WHERE key = 'google_books_api_key'")
+        if esito.rowcount:
+            log_message("info", "system",
+                        "Migrated app_settings: removed the stored Google Books API key.")
+        conn.commit()
+
+
 # ── Come si aggiunge la prossima migrazione ──────────────────────────────
 # 1. Scrivi qui sopra una funzione idempotente (controlla prima di alterare;
 #    su un database nuovo deve essere un no-op o produrre lo stesso schema
@@ -772,6 +859,9 @@ MIGRATIONS = [
     (5, "drop devices.folder_layout (the option is gone)", drop_device_folder_layout),
     (6, "exact character columns on reading_sessions", add_exact_chars_to_reading_sessions),
     (7, "owner column on ingested_books", add_owner_to_ingested_books),
+    (8, "pages column on ingested_books", add_pages_to_ingested_books),
+    (9, "record_only and pubdate columns on ingested_books", add_record_only_to_ingested_books),
+    (10, "drop the stored Google Books API key", drop_google_books_api_key_setting),
 ]
 
 

@@ -24,6 +24,7 @@ import {
   type LibraryViewMode,
 } from '@/lib/libraryColumns'
 import { applySortClick, compareBooks, type SortCriterion } from './sort'
+import { useQualitaLibri } from '@/lib/qualitaActions'
 import { useRowSelection } from '@/lib/useRowSelection'
 import { LibraryTable, type SelectModifiers } from './LibraryTable'
 import { LibraryCards } from './LibraryCards'
@@ -86,6 +87,21 @@ export function LibraryPage() {
   const progressByBookId = useMemo(
     () => Object.fromEntries(readingProgress.map((p) => [p.calibre_book_id, Math.round(p.percentage * 100)])),
     [readingProgress]
+  )
+
+  // La qualita' per libro (0-100, servizio qualita_libri), per la colonna
+  // «Qualita'» della tabella (22/11/2026, richiesta di Paolo). Come
+  // l'avanzamento qui sopra: non e' un campo di Book, e' un giudizio di
+  // Kolibre sul file, e viaggia in una mappa a parte. Solo i misurati con
+  // esito buono hanno una voce — un errore d'analisi non e' uno zero.
+  const { data: qualitaElenco } = useQualitaLibri(activeLibrary?.folder_name)
+  const qualitaByBookId = useMemo(
+    () => Object.fromEntries(
+      (qualitaElenco?.libri ?? [])
+        .filter((r) => r.stato === 'ok' && r.punteggio != null)
+        .map((r) => [r.id, r.punteggio as number])
+    ),
+    [qualitaElenco]
   )
 
   // Colonna dinamica per dispositivo ("Su: <nome>") — porting delle
@@ -308,8 +324,8 @@ export function LibraryPage() {
     () =>
       impaginata
         ? filteredBooks
-        : [...filteredBooks].sort((a, b) => compareBooks(a, b, sortCriteria, progressByBookId, deviceStatusByBookId)),
-    [impaginata, filteredBooks, sortCriteria, progressByBookId, deviceStatusByBookId]
+        : [...filteredBooks].sort((a, b) => compareBooks(a, b, sortCriteria, progressByBookId, deviceStatusByBookId, qualitaByBookId)),
+    [impaginata, filteredBooks, sortCriteria, progressByBookId, deviceStatusByBookId, qualitaByBookId]
   )
 
   // La casella di ricerca pilota il server, con una pausa: una query per
@@ -573,6 +589,7 @@ export function LibraryPage() {
               onResizeColumn={(colId, width) => setColumnWidths((prev) => ({ ...prev, [colId]: width }))}
               onToggleColumn={toggleColumn}
               progressByBookId={progressByBookId}
+              qualitaByBookId={qualitaByBookId}
               deviceStatusByBookId={deviceStatusByBookId}
             />
           ) : (

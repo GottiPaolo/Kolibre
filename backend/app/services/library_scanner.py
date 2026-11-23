@@ -2,7 +2,20 @@ import os
 
 from . import metadata_parser
 
-EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".azw", ".fb2", ".txt"}
+# I formati che Kolibre accetta IN INGRESSO (scelta di Paolo, 23/11/2026).
+# La lista e' dichiaratamente indicativa («poi vedremo bene quali formati
+# Kolibre dovrebbe leggere»): per questo vive in UN posto solo, qui, e tutti
+# i cancelli la importano — upload web verso l'arretrato, importazione
+# dall'arretrato, upload in biblioteca (anche dal plugin Calibre) e
+# riscansione. Governa la PORTA, non il patrimonio: un formato gia' in
+# biblioteca resta leggibile, scaricabile e inviabile.
+EBOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".txt", ".md"}
+
+
+def formato_ammesso(file_format: str) -> bool:
+    """True se un formato dichiarato come lo scrive il database ("EPUB",
+    "md", "") sta fra quelli che Kolibre accetta in ingresso."""
+    return f".{(file_format or '').lower().lstrip('.')}" in EBOOK_EXTENSIONS
 
 
 def find_unindexed_book_folders(library_path: str, already_indexed_paths: set) -> list:

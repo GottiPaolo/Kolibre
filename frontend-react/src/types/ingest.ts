@@ -5,11 +5,11 @@
 // non dichiaravano niente e `schema.d.ts` li tipizzava `unknown`.
 import type { components } from '@/api/schema'
 
-// Formati ebook accettati sia dal watcher (services/watcher.py) sia dal
-// gate più stretto dell'upload web (EBOOK_EXTENSIONS in
-// services/library_scanner.py) — letterale qui come nel Vue esistente
-// (INGEST_ACCEPT), usato solo per l'hint dell'<input accept="...">.
-export const INGEST_ACCEPT = '.epub,.pdf,.mobi,.azw3,.azw,.fb2,.txt'
+// I sei formati che Kolibre accetta (EBOOK_EXTENSIONS in
+// services/library_scanner.py, lista indicativa di Paolo del 23/11/2026):
+// letterale copiato a mano, da tenere allineato. Usato solo per l'hint
+// dell'<input accept="...">: il cancello vero sta sul server.
+export const INGEST_ACCEPT = '.epub,.pdf,.mobi,.azw3,.txt,.md'
 
 /**
  * Un file in attesa di essere importato, coi metadati letti dal file stesso.

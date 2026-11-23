@@ -14,7 +14,7 @@ from watchdog.observers import Observer
 
 from .. import config, models, database
 from ..logging_utils import log_message
-from . import ingest_folders, metadata_parser, qualita_job
+from . import ingest_folders, ingest_pages, metadata_parser, qualita_job
 
 # Give a copy-in-progress file a moment to finish writing before we read it.
 DEBOUNCE_SECONDS = 2.0
@@ -113,6 +113,11 @@ def stage_ingest_file(db, file_path: str) -> bool:
     # intanto ha altri file da mettere in lista.
     if ext == '.epub':
         qualita_job.analizza_ingest(item.id)
+    # E per lo stesso motivo si contano adesso anche le pagine (22/11/2026,
+    # richiesta di Paolo): la lunghezza e' uno dei criteri per scegliere fra
+    # due copie simili prima di importarne una. Decide da se' se il formato
+    # si sa leggere.
+    ingest_pages.count_in_background(item.id)
     return True
 
 

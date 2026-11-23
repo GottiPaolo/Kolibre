@@ -15,6 +15,10 @@ export const FIXED_COLUMNS = [
   'size',
   'date_added',
   'rating',
+  // La qualita' dell'EPUB (0-100, servizio qualita_libri), in tabella dal
+  // 22/11/2026 su richiesta di Paolo. Solo il numero, senza colori: e' la
+  // decisione del 17/11 — un numero si confronta, un semaforo giudica.
+  'qualita',
   'identifiers',
   'progress',
 ] as const
@@ -41,6 +45,7 @@ export function fixedColumnLabels(t: (chiave: string) => string): Record<FixedCo
     // aveva una colonna per mostrarli. Non e' fra quelle visibili di
     // preimpostazione — e' informazione da catalogo, che si accende quando
     // serve — ma ora esiste e si puo' ordinare.
+    qualita: t('library.field.qualita'),
     identifiers: t('library.field.identifiers'),
     progress: t('library.field.progress'),
   }

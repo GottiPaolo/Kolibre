@@ -44,6 +44,7 @@ const LibraryCard = memo(function LibraryCard({
   riga: number
   onSelectBook: (book: Book) => void
 }) {
+  const { t } = useLingua()
   return (
     <div
       role="row"
@@ -71,7 +72,12 @@ const LibraryCard = memo(function LibraryCard({
             </span>
           )}
           {book.rating != null && <span className="shrink-0 text-[var(--warning)]">{ratingStars(book.rating)}</span>}
-          {book.formats?.length > 0 && <span className="shrink-0">{book.formats.join(' · ')}</span>}
+          {/* Senza formati e' una scheda fantasma (soli metadati, nessun
+              file — l'inventario di una libreria fisica, 22/11/2026): al
+              posto dei formati si dice cos'e'. */}
+          {book.formats?.length > 0
+            ? <span className="shrink-0">{book.formats.join(' · ')}</span>
+            : <span className="shrink-0 italic">{t('library.card.soloScheda')}</span>}
         </div>
         {progressPercent != null && (
           <div className="mt-1 flex items-center gap-1.5">
@@ -102,6 +108,7 @@ const LibraryGridCard = memo(function LibraryGridCard({
   progressPercent: number | undefined
   onSelectBook: (book: Book) => void
 }) {
+  const { t } = useLingua()
   return (
     <div
       role="row"
@@ -112,8 +119,16 @@ const LibraryGridCard = memo(function LibraryGridCard({
         isSelected && 'bg-primary/10 hover:bg-primary/10'
       )}
     >
-      <div className="aspect-[2/3] w-full overflow-hidden rounded-sm bg-muted shadow-sm">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-sm bg-muted shadow-sm">
         {book.cover_url && <img src={withBackendUrl(book.cover_url)} alt="" loading="lazy" className="h-full w-full object-cover" />}
+        {/* Il distintivo della scheda fantasma: qui la copertina e' tutto
+            cio' che si vede, e senza questo una scheda con la copertina
+            vera di Open Library sarebbe indistinguibile da un libro. */}
+        {(!book.formats || book.formats.length === 0) && (
+          <span className="absolute bottom-1 left-1 rounded bg-background/85 px-1 py-0.5 text-[9.5px] font-medium text-muted-foreground">
+            {t('library.card.soloScheda')}
+          </span>
+        )}
       </div>
       <div className="min-w-0">
         <p className="truncate font-serif text-[13px] font-medium">{book.title}</p>

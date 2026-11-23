@@ -21,6 +21,10 @@
     "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
   ],
   "plugin": {
+    "0.27.0": {
+      "it": "Il lettore riconosce i formati giusti. La lista dei formati che il plugin cerca fra i tuoi file e riporta al server e' ora la stessa del server: epub, pdf, mobi, azw3, txt e md. Entrano i file Markdown (md), escono gli fb2: un fb2 gia' sul lettore resta leggibile, semplicemente non viene piu' censito dalla sincronizzazione.",
+      "en": "The reader recognises the right formats. The list of formats the plugin looks for among your files and reports to the server now matches the server's: epub, pdf, mobi, azw3, txt and md. Markdown files (md) are in, fb2 is out: an fb2 already on the reader stays readable, it is simply no longer inventoried by sync."
+    },
     "0.26.0": {
       "it": "Il lettore non resta piu' imbambolato senza dire niente. Ogni volta che il plugin parla col server — prova di connessione, apertura del catalogo, controllo aggiornamenti, scarico di un libro, invio del registro — sullo schermo compare un segno d'attesa PRIMA che la rete parta, cosi' sai che sta lavorando e non che si e' bloccato. E i tempi d'attesa massimi sono giusti per ogni cosa: un controllo piccolo si arrende dopo pochi secondi invece di mezzo minuto, mentre lo scarico di un libro grosso ha piu' tempo e non viene piu' troncato sul WiFi lento.",
       "en": "The reader no longer freezes without saying anything. Whenever the plugin talks to the server — connection test, opening the catalogue, update check, downloading a book, sending the log — a waiting sign appears on screen BEFORE the network call starts, so you know it is working rather than stuck. Timeouts now fit each job: a small check gives up after a few seconds instead of half a minute, while a large book download gets more time and is no longer cut short on slow WiFi."

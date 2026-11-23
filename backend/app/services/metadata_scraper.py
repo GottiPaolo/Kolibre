@@ -17,6 +17,7 @@ keyless, AND have a real supported JSON API.
 import re
 import ssl
 import time
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, wait as futures_wait
 
 import httpx
@@ -160,18 +161,126 @@ def _search_open_library(title: str, author: str) -> list:
         return []
 
 
+# ── Il ripiego «feeds» di Google Books (23/11/2026) ──────────────────────
+#
+# E' COSI' che Calibre scarica i metadati senza chiave (domanda di Paolo):
+# non l'API ufficiale (googleapis.com/books/v1, che senza chiave risponde
+# 429 in permanenza) ma il vecchio endpoint GData, deprecato da piu' di un
+# decennio e tenuto in vita di fatto — Calibre ci si appoggia da sempre, e
+# l'altra sua arma e' lo scraping delle pagine di Amazon, che qui NON si
+# imita (un inseguimento continuo del loro HTML). Misurato sul campione
+# della biblioteca vera: 16/20 ISBN trovati, 11/11 fra gli italiani —
+# contro i 3/20 di Open Library.
+#
+# E' un ripiego DICHIARATO: campi piu' poveri (la descrizione spesso manca)
+# e nessuna garanzia di futuro. La chiave API resta la strada solida: con
+# la chiave questo codice non viene nemmeno interpellato.
+_FEEDS_URL = "https://books.google.com/books/feeds/volumes"
+_FEEDS_NS = {"a": "http://www.w3.org/2005/Atom", "dc": "http://purl.org/dc/terms"}
+
+
+def _google_feeds_entries(query: str, max_results: int = 5) -> list:
+    r = _get_with_retry(_FEEDS_URL, {"q": query, "max-results": max_results})
+    r.raise_for_status()
+    return ET.fromstring(r.content).findall("a:entry", _FEEDS_NS)
+
+
+def _meta_from_feeds_entry(entry) -> dict:
+    autori = [x.text for x in entry.findall("dc:creator", _FEEDS_NS) if x.text]
+    isbn = None
+    for ident in entry.findall("dc:identifier", _FEEDS_NS):
+        v = valid_isbn((ident.text or "").replace("ISBN:", ""))
+        if v:
+            isbn = v
+            if len(v) == 13:
+                break  # si preferisce il 13, quando la entry porta entrambi
+    thumb = None
+    for link in entry.findall("a:link", _FEEDS_NS):
+        if "thumbnail" in (link.get("rel") or ""):
+            thumb = _https(link.get("href"))
+            break
+    return {
+        "title": entry.findtext("a:title", namespaces=_FEEDS_NS),
+        "author": " & ".join(autori) or None,
+        "pubdate": _normalize_pubdate(entry.findtext("dc:date", namespaces=_FEEDS_NS)),
+        "description": entry.findtext("dc:description", namespaces=_FEEDS_NS),
+        "cover_url": thumb,
+        "isbn": isbn,
+        "tags": [x.text for x in entry.findall("dc:subject", _FEEDS_NS) if x.text][:5],
+        "publisher": entry.findtext("dc:publisher", namespaces=_FEEDS_NS),
+    }
+
+
+def _google_feeds_by_isbn(isbn: str):
+    """Un ISBN sul vecchio feeds, senza chiave. None se non lo conosce o
+    non risponde: mai un motivo per non creare la voce vuota."""
+    try:
+        entries = _google_feeds_entries(f"isbn:{isbn}", max_results=1)
+        if not entries:
+            return None
+        meta = _meta_from_feeds_entry(entries[0])
+        return meta if meta.get("title") else None
+    except Exception as e:
+        log_message("warning", "metadata", f"Google feeds ISBN lookup failed ({isbn}): {e}")
+        return None
+
+
+def _search_google_feeds(title: str, author: str) -> list:
+    """La ricerca titolo+autore sul vecchio feeds, nella stessa forma dei
+    candidati dell'API ufficiale: e' il ramo che parte quando la v1
+    risponde 429 e una chiave non c'e'."""
+    try:
+        q = f"intitle:{title}"
+        if author:
+            q += f" inauthor:{author}"
+        results = []
+        for entry in _google_feeds_entries(q, max_results=5):
+            m = _meta_from_feeds_entry(entry)
+            if not m.get("title"):
+                continue
+            identifiers = {"isbn": m["isbn"]} if m.get("isbn") else {}
+            results.append({
+                "source": "Google Books",
+                "title": m["title"],
+                "author": (m.get("author") or "").replace(" & ", ", "),
+                "isbn": m.get("isbn"),
+                "identifiers": identifiers,
+                "description": m.get("description"),
+                "tags": m.get("tags") or [],
+                "publisher": m.get("publisher"),
+                "language": None,
+                "pubdate": m.get("pubdate"),
+                "cover_url": m.get("cover_url"),
+            })
+        return results
+    except Exception as e:
+        log_message("warning", "metadata", f"Google feeds search failed: {e}")
+        return []
+
+
 def _search_google_books(title: str, author: str) -> list:
     try:
         q = f"intitle:{title}"
         if author:
             q += f"+inauthor:{author}"
-        resp = _get_with_retry("https://www.googleapis.com/books/v1/volumes", {"q": q, "maxResults": 5})
+        params = {"q": q, "maxResults": 5}
+        resp = _get_with_retry("https://www.googleapis.com/books/v1/volumes", params)
         if resp.status_code == 429:
-            # La quota anonima di Google Books e' per indirizzo IP e si
-            # esaurisce per l'intera giornata: senza una chiave API questa
-            # fonte sparisce, e va detto invece di farla sembrare vuota.
+            # Il trucco di Calibre (23/11/2026): la quota anonima dell'API
+            # ufficiale e' condivisa a livello mondiale ed esaurita in
+            # permanenza, quindi sul 429 si ripiega sul vecchio endpoint
+            # feeds, che la quota non la conosce. Vedi _FEEDS_URL. (La
+            # chiave API personale e' stata provata e poi tolta lo stesso
+            # 23/11 su scelta di Paolo: il ripiego basta; «da rivalutare
+            # in futuro» sta nella ROADMAP.)
+            ripiego = _search_google_feeds(title, author)
+            if ripiego:
+                _segna("Google Books", "ok", "via the legacy feeds endpoint (no API key)")
+                return ripiego
+            # Se anche il ripiego non da' niente va detto, invece di far
+            # sembrare la fonte vuota.
             _segna("Google Books", "quota",
-                   "the daily quota is used up: an API key is needed to keep using this source")
+                   "the anonymous daily quota is used up and the legacy feeds found nothing")
             return []
         if resp.status_code != 200:
             _segna("Google Books", "errore", f"answered {resp.status_code}")
@@ -515,3 +624,117 @@ def cerca_metadati_con_esito(title: str, author: str = "", limite: int = 5) -> d
         for nome, dati in _esito.items()
     ]
     return {"candidates": candidati[:limite], "fonti": fonti}
+
+
+# ── Ricerca per ISBN (22/11/2026: le schede fantasma) ────────────────────
+#
+# Serve all'importazione per ISBN della pagina Ingest: una o piu' schede
+# SENZA file, coi metadati scaricati da Open Library. Solo Open Library, per
+# scelta di Paolo: Google Books senza chiave API risponde 429 «quota del
+# giorno esaurita» sia da casa sia dal server (misurato il 22/11), e
+# Wikidata e' cronicamente oltre i 15 secondi. L'endpoint usato e'
+# `api/books` con `jscmd=data`: accetta un LOTTO di ISBN in una chiamata
+# sola e torna gli autori gia' risolti in nomi.
+
+# Quanti ISBN per chiamata. Open Library non dichiara un limite; 20 tiene
+# l'indirizzo corto e una risposta di dimensione prevedibile.
+_ISBN_BATCH_SIZE = 20
+
+
+def valid_isbn(isbn: str | None) -> str | None:
+    """L'ISBN normalizzato (solo cifre, X finale ammessa) se la cifra di
+    controllo torna, altrimenti None. Si accettano ISBN-10 e ISBN-13.
+
+    Il controllo non e' pignoleria: l'ISBN diventa un identificatore della
+    scheda e il criterio del «ce l'hai gia'» — una stringa qualsiasi li'
+    dentro inquinerebbe entrambi. Chi vuole una scheda su cui l'ISBN non
+    torna la crea senza ISBN e la compila a mano.
+    """
+    normalizzato = _normalize_isbn(isbn)
+    if not normalizzato:
+        return None
+    if len(normalizzato) == 13 and normalizzato.isdigit():
+        somma = sum(int(c) * (1 if i % 2 == 0 else 3) for i, c in enumerate(normalizzato))
+        return normalizzato if somma % 10 == 0 else None
+    if len(normalizzato) == 10 and normalizzato[:9].isdigit():
+        somma = sum((10 - i) * (10 if c == "X" else int(c)) for i, c in enumerate(normalizzato))
+        return normalizzato if somma % 11 == 0 else None
+    return None
+
+
+def _pubdate_from_open_library(raw: str | None) -> str | None:
+    """Open Library scrive date umane («October 1, 1988», «1988»): si tiene
+    l'anno, che e' l'unica parte sempre affidabile, nel formato pieno che
+    la colonna pubdate di Calibre vuole."""
+    if not raw:
+        return None
+    anno = re.search(r"\b(\d{4})\b", raw)
+    return f"{anno.group(1)}-01-01" if anno else None
+
+
+def fetch_metadata_by_isbn(isbns: list) -> dict:
+    """I metadati di uno o piu' ISBN: Open Library in lotti, poi — per i
+    suoi buchi — il vecchio feeds di Google (il trucco di Calibre).
+
+    L'ordine non e' estetico (23/11/2026, misurato sulla biblioteca vera):
+    Open Library conosce 3 ISBN su 20 del campione (2/11 italiani), il
+    feeds 16/20 (11/11 italiani), e l'API ufficiale senza chiave risponde
+    429 in permanenza. Quindi: prima la fonte libera e documentata, poi il
+    ripiego che non promette niente ma trova quasi tutto. (La chiave API
+    personale e' stata provata e tolta lo stesso 23/11, scelta di Paolo.)
+
+    Torna {isbn normalizzato: dict | None}: None vuol dire «nessuna fonte
+    lo conosce» (il chiamante crea comunque la voce vuota, per scelta di
+    Paolo del 22/11). Il dict porta title, author (piu' autori uniti con
+    ' & ', come li vuole Calibre), pubdate, description (da Google quando
+    c'e': Open Library non la da') e cover_url, quando ci sono.
+    """
+    esiti = {}
+    lista = list(isbns)
+    for inizio in range(0, len(lista), _ISBN_BATCH_SIZE):
+        lotto = lista[inizio:inizio + _ISBN_BATCH_SIZE]
+        chiavi = {f"ISBN:{i}": i for i in lotto}
+        try:
+            r = _get_with_retry("https://openlibrary.org/api/books",
+                                {"bibkeys": ",".join(chiavi), "jscmd": "data", "format": "json"})
+            r.raise_for_status()
+            dati = r.json()
+        except Exception as e:
+            log_message("warning", "metadata", f"Open Library ISBN lookup failed: {e}")
+            for isbn in lotto:
+                esiti[isbn] = None
+            continue
+        for bibkey, isbn in chiavi.items():
+            d = dati.get(bibkey)
+            if not isinstance(d, dict) or not d.get("title"):
+                esiti[isbn] = None
+                continue
+            autori = [a.get("name") for a in d.get("authors") or [] if isinstance(a, dict) and a.get("name")]
+            cover = d.get("cover") or {}
+            esiti[isbn] = {
+                "title": d.get("title"),
+                "author": " & ".join(autori) or None,
+                "pubdate": _pubdate_from_open_library(d.get("publish_date")),
+                "description": None,
+                "cover_url": _https(cover.get("large") or cover.get("medium") or cover.get("small")),
+            }
+    # I buchi di Open Library li colma il vecchio feeds, il trucco di
+    # Calibre: e' l'unica strada verso Google rimasta senza chiave.
+    for isbn in lista:
+        if esiti.get(isbn) is None:
+            esiti[isbn] = _google_feeds_by_isbn(isbn)
+    return esiti
+
+
+def download_cover(url: str | None):
+    """La copertina come bytes, o None: per una scheda senza file la
+    copertina e' un di piu', mai un motivo per far fallire la creazione."""
+    if not url:
+        return None
+    try:
+        r = _get_with_retry(url, {})
+        r.raise_for_status()
+        return r.content if r.content else None
+    except Exception as e:
+        log_message("warning", "metadata", f"Cover download failed ({url}): {e}")
+        return None

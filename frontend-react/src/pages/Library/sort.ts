@@ -22,7 +22,8 @@ export function getSortValue(
   book: Book,
   colId: string,
   progressByBookId?: Record<number, number>,
-  deviceStatusByBookId?: Record<number, Record<number, DeviceBookColumnState>>
+  deviceStatusByBookId?: Record<number, Record<number, DeviceBookColumnState>>,
+  qualitaByBookId?: Record<number, number>
 ): string | number | null {
   switch (colId) {
     case 'title':
@@ -53,6 +54,11 @@ export function getSortValue(
       // LibraryPage.tsx, useReadingProgress) perché calcolata da
       // ReadingPosition, non dai metadati Calibre.
       return progressByBookId?.[book.id] ?? null
+    case 'qualita':
+      // Stessa famiglia di 'progress': un giudizio di Kolibre sul file
+      // (qualita_libri), non un metadato Calibre — arriva da una mappa a
+      // parte (LibraryPage, useQualitaLibri). Mai misurato = vuoto.
+      return qualitaByBookId?.[book.id] ?? null
     default: {
       if (colId.startsWith('device-')) {
         // Colonna dinamica "Su: <dispositivo>" (vedi LibraryPage.tsx,
@@ -89,11 +95,12 @@ export function compareBooks(
   b: Book,
   criteria: SortCriterion[],
   progressByBookId?: Record<number, number>,
-  deviceStatusByBookId?: Record<number, Record<number, DeviceBookColumnState>>
+  deviceStatusByBookId?: Record<number, Record<number, DeviceBookColumnState>>,
+  qualitaByBookId?: Record<number, number>
 ): number {
   for (const { key, order } of criteria) {
-    const av = getSortValue(a, key, progressByBookId, deviceStatusByBookId)
-    const bv = getSortValue(b, key, progressByBookId, deviceStatusByBookId)
+    const av = getSortValue(a, key, progressByBookId, deviceStatusByBookId, qualitaByBookId)
+    const bv = getSortValue(b, key, progressByBookId, deviceStatusByBookId, qualitaByBookId)
     const aEmpty = isEmpty(av)
     const bEmpty = isEmpty(bv)
     if (aEmpty && bEmpty) continue

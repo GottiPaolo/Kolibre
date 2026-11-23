@@ -43,7 +43,10 @@ class KolibreSyncPlugin(InterfaceActionBase):
     # «sincronizzare» — la sync con Calibre e' deprecata dal 14/11, il plugin
     # manda. Solo testo, ma e' il testo con cui il plugin si presenta: senza
     # il numero nuovo, chi ce l'ha installato resterebbe con quello vecchio.
-    version = (2, 1, 1)
+    # 2.2.0 (23/11/2026): si caricano anche i libri SOLO-RECORD, senza
+    # formati — l'inventario di una libreria fisica fatto in Calibre
+    # («Aggiungi libro vuoto», «Add from ISBN») arriva sul server com'e'.
+    version = (2, 3, 0)  # 23/11/2026: si inviano solo i formati ammessi da Kolibre
     minimum_calibre_version = (5, 0, 0)
 
     # module:ClassName resolved lazily by load_actual_plugin(gui) — see

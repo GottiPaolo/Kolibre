@@ -1011,13 +1011,19 @@ async def delete_book(
 
 
 @router.get("/{id}/metadata-search", responses={200: {"model": MetadatiTrovati}})
-def search_book_metadata_online(id: int, library: str = Depends(default_library_param)):
+def search_book_metadata_online(
+    id: int,
+    library: str = Depends(default_library_param),
+):
     """Cerca su Open Library, Google Books e Wikidata, dal titolo e
     dall'autore che il libro ha adesso.
 
     Torna anche com'e' andata ogni fonte: una lista corta puo' voler dire
     "questo libro non e' nei cataloghi" oppure "una delle tre oggi non
-    risponde", e dai risultati le due cose sono indistinguibili."""
+    risponde", e dai risultati le due cose sono indistinguibili. La fonte
+    Google passa dal vecchio feeds quando l'API ufficiale risponde 429
+    (23/11/2026, il trucco di Calibre): la chiave API personale e' stata
+    provata e tolta lo stesso giorno, scelta di Paolo."""
     lib = CalibreLibrary(config.library_path(library))
     book = next((b for b in lib.list_books() if b["id"] == id), None)
     if not book:

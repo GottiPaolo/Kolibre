@@ -37,13 +37,12 @@ _KNOWN_LOCATIONS = (
 )
 
 # Supported targets → output file extension handed to ebook-convert (which
-# infers the output format from it). `html` maps to `.htmlz` on purpose:
-# ebook-convert's "web page" output is HTMLZ, a zip archive containing
-# index.html + images/styles — Calibre's standard single-file web format.
-# Plain `.html` output would scatter loose asset files around the output
-# dir; HTMLZ keeps the "send the book as a web page" use case one-file.
+# infers the output format from it). La destinazione `html` (che produceva
+# HTMLZ, lo zip «pagina web» di Calibre) e' stata tolta il 23/11/2026:
+# HTMLZ non e' fra i formati che Kolibre accetta (library_scanner.
+# EBOOK_EXTENSIONS) e una conversione non deve creare cio' che la porta
+# rifiuterebbe. Le destinazioni restano dentro quella lista.
 TARGET_EXTENSIONS = {
-    "html": "htmlz",
     "mobi": "mobi",
     "pdf": "pdf",
     "txt": "txt",

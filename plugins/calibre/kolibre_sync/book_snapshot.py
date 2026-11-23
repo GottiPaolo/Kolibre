@@ -125,21 +125,37 @@ def calibre_annotations_for_book(db, book_id: int):
     return annotations
 
 
+# Specchio di library_scanner.EBOOK_EXTENSIONS sul server (lista indicativa
+# di Paolo, 23/11/2026): se cambia la', va cambiata anche qui.
+FORMATI_AMMESSI = {"epub", "pdf", "mobi", "azw3", "txt", "md"}
+
+
 def snapshot_book_for_upload(db, book_id: int, selected_columns=None, pages_column: str = None):
     """
-    Returns the upload-ready dict for one book, or None if it has no format
-    on disk (Kolibre requires at least one, see the "libri senza file"
-    checkbox in dialogs.py::UploadOptionsDialog for why that's a real
-    limitation, not an oversight here).
+    Returns the upload-ready dict for one book.
+
+    Un libro SENZA formati non viene piu' scartato (23/11/2026, scelta di
+    Paolo: «il plugin di Calibre deve poter inviare anche libri che sono
+    solo record»): e' una scheda d'inventario — in Calibre si crea con
+    «Aggiungi libro vuoto» o «Add from ISBN» — e sul server diventa la
+    stessa scheda, metadati e copertina compresi, senza file. Il limite
+    storico stava QUI (format_paths vuoto → None) e nel 400 del server
+    (`library_transfer.upload_library_book`), tolti insieme.
     """
     mi = db.get_metadata(book_id)
     format_paths = {}
     for fmt in db.formats(book_id) or []:
+        # Il cancello dei formati (23/11/2026, scelta di Paolo): si inviano
+        # solo i formati che Kolibre accetta — la stessa lista di
+        # backend/app/services/library_scanner.EBOOK_EXTENSIONS, che sul
+        # server rifiuta comunque il lotto se ne arriva uno fuori. Un libro
+        # i cui formati sono TUTTI fuori lista parte come sola scheda,
+        # come un libro senza formati.
+        if (fmt or "").lower() not in FORMATI_AMMESSI:
+            continue
         path = db.format_abspath(book_id, fmt)
         if path:
             format_paths[fmt] = path
-    if not format_paths:
-        return None
 
     custom_values = {}
     for col in selected_columns or []:

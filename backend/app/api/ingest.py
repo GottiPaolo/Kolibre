@@ -15,14 +15,14 @@ from ..logging_utils import log_message
 from ..schemas_risposte import (
     ArretratiCaricati, DoppioniInArrivo, Esito, ImportazioneAvviata,
     ImportazioneDaFermare, LibroImportato, LibroInArretrato, ModoPaginazione,
-    PaginaDiArretrati, StatoImportazione,
+    PaginaDiArretrati, SchedeDaIsbn, StatoImportazione,
 )
-from ..services import duplicates, ingest_folders, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
-from ..services.library_scanner import EBOOK_EXTENSIONS
+from ..services import duplicates, ingest_folders, ingest_pages, metadata_scraper, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
+from ..services.library_scanner import EBOOK_EXTENSIONS, formato_ammesso
 from ..services.watcher import ACTIVE_INGEST_STATUSES, stage_ingest_file
 from ..calibre import calibre_naming
 from ..calibre.library import CalibreLibrary
-from ..calibre.connection import page_count_fields
+from ..calibre.connection import PAGE_COUNT_COLUMN_LABEL, page_count_fields
 from ..calibre.functions import string_to_authors
 from ..calibre.write_queue import CalibreWriteQueue
 from ..deps import get_write_queue
@@ -80,7 +80,9 @@ def _serialize_ingest_item(item: models.IngestedBook, usernames: dict = None) ->
         "owner_username": (usernames or {}).get(item.user_id),
         "title": item.title,
         "author": item.author or "Unknown Author",
-        "formats": [item.file_format],
+        # Una voce senza file (record_only) non ha formati: la scheda la
+        # racconta come «solo scheda», non come un file di formato vuoto.
+        "formats": [] if item.record_only else [item.file_format],
         "size": item.file_size_bytes or 0,
         "path": item.file_path,
         "date_added": item.detected_at.strftime('%Y-%m-%d'),
@@ -98,6 +100,19 @@ def _serialize_ingest_item(item: models.IngestedBook, usernames: dict = None) ->
         # dimensioni e difetti da li', senza elenchi scritti nel frontend.
         "qualita_punteggio": item.qualita_punteggio,
         "qualita": json.loads(item.qualita_json) if item.qualita_json else None,
+        # Le pagine, contate in sottofondo appena il file e' arrivato
+        # (services/ingest_pages.py; 22/11/2026). `None` finche' non ci
+        # sono, e per sempre per un formato che non si sa leggere.
+        "pages": item.pages,
+        # La voce senza file (23/11/2026): nata da un ISBN o dal plugin
+        # Calibre per un libro solo-record. All'importazione diventa una
+        # scheda Calibre senza formati.
+        "record_only": item.record_only,
+        # Il formato e' fra quelli che Kolibre accetta? (scelta di Paolo,
+        # 23/11/2026): un file fuori lista COMPARE in arretrato — cosi' lo
+        # si vede e lo si scarta dal sito — ma non si puo' importare. Una
+        # scheda senza file e' sempre importabile: non ha formato.
+        "supported": True if item.record_only else formato_ammesso(item.file_format),
     }
 
 
@@ -155,6 +170,21 @@ def _scan_ingest_folder(db: Session) -> None:
                 percorso = os.path.abspath(os.path.join(dirpath, f))
                 if percorso not in noti:
                     stage_ingest_file(db, percorso)
+        # Il ripasso delle pagine (22/11/2026): le righe rimaste senza
+        # conteggio — nate prima della colonna, o il cui thread e' morto
+        # con un riavvio del server — si contano al primo sguardo. Il
+        # servizio scarta da se' i doppioni e i gia' falliti.
+        da_contare = (
+            db.query(models.IngestedBook.id)
+            .filter(
+                models.IngestedBook.status == "pending",
+                models.IngestedBook.pages.is_(None),
+                models.IngestedBook.file_format.in_(ingest_pages.COUNTABLE_FORMATS),
+            )
+            .all()
+        )
+        for (item_id,) in da_contare:
+            ingest_pages.count_in_background(item_id)
 
 
 @router.get(
@@ -234,12 +264,17 @@ async def start_ingest_import_job(
         # "Tutte le voci in attesa" significa tutte quelle che QUESTO utente
         # vede (21/11/2026): per l'amministratore e' tutto come ieri, per un
         # utente sono le sue — mai quelle degli altri.
+        # I formati fuori lista si saltano QUI: «tutte le voci in attesa»
+        # significa tutte le importabili — una voce che esiste solo per
+        # essere scartata non deve far fallire il giro (23/11/2026).
         ids = [
             r[0] for r in _visible_to(
-                db.query(models.IngestedBook.id)
+                db.query(models.IngestedBook.id, models.IngestedBook.file_format,
+                         models.IngestedBook.record_only)
                 .filter(models.IngestedBook.status == "pending"),
                 current_user,
             ).order_by(models.IngestedBook.id).all()
+            if r[2] or formato_ammesso(r[1])
         ]
     else:
         # Ids espliciti: un utente normale puo' nominare solo righe sue. Un
@@ -376,15 +411,156 @@ def ingest_duplicati(
         if not chiave:
             candidati = libri
         simili = [
+            # Le pagine del libro gia' in casa (la colonna #pages, quando
+            # c'e') viaggiano con l'avviso: accostate a quelle del file in
+            # attesa — contate con le stesse impostazioni — sono il metro
+            # per scegliere quale copia tenere (22/11/2026).
             {"id": libro["id"], "title": libro["title"], "author": libro.get("author"),
-             "formats": libro.get("formats") or []}
+             "formats": libro.get("formats") or [],
+             "pages": libro.get(f"#{PAGE_COUNT_COLUMN_LABEL}")}
             for libro in candidati
             if duplicates.affinita_titoli(item.title or "", libro.get("title") or "")
             >= duplicates.SOGLIA_AFFINITA
         ]
         if simili:
             duplicati[str(item.id)] = simili[:5]
+
+    # E la qualita' del libro gia' in casa (22/11/2026, spunto di Paolo:
+    # «dovrei poter aprire anche il doppione in libreria e vederne la
+    # qualita'») — accostata a quella del file in attesa e' l'altro metro,
+    # con le pagine, per decidere se importare il nuovo e sostituire. Una
+    # interrogazione sola per tutti i segnalati; chi non e' mai stato
+    # misurato (un PDF, o la coda non e' ancora passata) resta None.
+    ids_simili = {s["id"] for simili in duplicati.values() for s in simili}
+    if ids_simili:
+        punteggi = dict(
+            db.query(models.QualitaLibro.calibre_book_id, models.QualitaLibro.punteggio)
+            .filter(models.QualitaLibro.library == folder,
+                    models.QualitaLibro.calibre_book_id.in_(ids_simili),
+                    models.QualitaLibro.stato == "ok")
+            .all()
+        )
+        for simili in duplicati.values():
+            for s in simili:
+                s["qualita_punteggio"] = punteggi.get(s["id"])
     return {"library": folder, "duplicati": duplicati}
+
+
+@router.post("/isbn", responses={200: {"model": SchedeDaIsbn}})
+def stage_books_by_isbn(
+    payload: schemas.IsbnImportRequest,
+    db: Session = Depends(database.get_db),
+    current_user: models.User = Depends(auth.get_current_user_flexible),
+):
+    """
+    Voci di Ingest SENZA file da uno o piu' ISBN: l'inventario digitale di
+    una libreria fisica (richiesta di Paolo del 22/11; il flusso a due
+    tempi e' la sua finezza del 23/11 — «non deve essere importata subito:
+    si crea una voce in ingest come per gli altri libri e dopo la si
+    importa»).
+
+    Ogni ISBN valido diventa una voce in attesa (`record_only`), coi
+    metadati e la copertina delle fonti (Open Library, e Google Books con
+    la chiave di Paolo per i buchi — vedi fetch_metadata_by_isbn). La voce
+    si rivede, si corregge con l'editor dei metadati e SOLO all'importazione
+    diventa una scheda Calibre senza formati — la convenzione di Calibre:
+    riga in `books`, niente righe in `data`.
+
+    Un ISBN che nessuna fonte conosce crea COMUNQUE la voce, vuota e col
+    titolo uguale all'ISBN («se uno vuole forzatamente mettere qualcosa
+    puo' farlo»); uno gia' negli identificatori della biblioteca scelta
+    viene messo in attesa LO STESSO, con l'avviso del libro che lo occupa
+    — come un file doppione: si avvisa, e si decide davanti alla scheda.
+    Solo la cifra di controllo sbagliata rifiuta (`non_valido`): l'ISBN
+    diventa un identificatore, e una stringa qualsiasi lo inquinerebbe.
+    """
+    library_name = resolve_folder_name(db, payload.library) if payload.library else resolve_default_library_folder(db)
+    if not library_name:
+        raise HTTPException(status_code=404, detail="No library is configured. Create one first.")
+
+    # Gli ISBN che la biblioteca scelta ha gia', per l'avviso.
+    esistenti = {}
+    for libro in CalibreLibrary(config.library_path(library_name)).list_books():
+        gia = metadata_scraper.valid_isbn((libro.get("identifiers") or {}).get("isbn"))
+        if gia:
+            esistenti.setdefault(gia, libro)
+
+    rows = []
+    visti = set()
+    da_mettere = []
+    for grezzo in payload.isbns:
+        grezzo = (grezzo or "").strip()
+        if not grezzo:
+            continue
+        isbn = metadata_scraper.valid_isbn(grezzo)
+        if not isbn:
+            rows.append({"isbn": grezzo, "esito": "non_valido", "staged_id": None,
+                         "title": None, "author": None, "cover": False,
+                         "existing_book_id": None, "existing_title": None})
+            continue
+        if isbn in visti:
+            rows.append({"isbn": isbn, "esito": "ripetuto", "staged_id": None,
+                         "title": None, "author": None, "cover": False,
+                         "existing_book_id": None, "existing_title": None})
+            continue
+        visti.add(isbn)
+        occupante = esistenti.get(isbn)
+        # La riga della risposta nasce ORA, cosi' gli esiti restano
+        # nell'ordine della richiesta; i campi veri li riempie il giro
+        # sotto, a voce creata.
+        rows.append({"isbn": isbn, "esito": "in_corso", "staged_id": None,
+                     "title": None, "author": None, "cover": False,
+                     "existing_book_id": occupante["id"] if occupante else None,
+                     "existing_title": occupante["title"] if occupante else None})
+        da_mettere.append((isbn, rows[-1]))
+
+    trovati = metadata_scraper.fetch_metadata_by_isbn(
+        [i for i, _ in da_mettere]) if da_mettere else {}
+
+    for isbn, riga in da_mettere:
+        meta = trovati.get(isbn)
+        title = (meta or {}).get("title") or isbn
+        item = models.IngestedBook(
+            # La voce e' di chi la crea, come un file caricato dal web.
+            user_id=current_user.id,
+            # Nessun file: file_path vuoto e' lo stato dichiarato da
+            # record_only — tutto cio' che presuppone un file salta.
+            record_only=True,
+            file_path="", filename=title, file_format="", file_size_bytes=0,
+            title=title,
+            author=(meta or {}).get("author"),
+            description=(meta or {}).get("description") or "",
+            pubdate=(meta or {}).get("pubdate"),
+            isbn=isbn,
+            status="pending",
+        )
+        db.add(item)
+        db.flush()
+        # La copertina vera delle fonti va nella stessa cache delle
+        # copertine di staging (il nome e' l'id della riga, come per gli
+        # EPUB): all'importazione diventera' la copertina della scheda.
+        cover_ok = False
+        if meta and meta.get("cover_url"):
+            immagine = metadata_scraper.download_cover(meta["cover_url"])
+            if immagine:
+                os.makedirs(config.INGEST_COVERS_DIR, exist_ok=True)
+                cover_path = os.path.join(config.INGEST_COVERS_DIR, f"{item.id}.jpg")
+                try:
+                    with open(cover_path, "wb") as f:
+                        f.write(immagine)
+                    item.cover_path = cover_path
+                    cover_ok = True
+                except OSError as e:
+                    log_message("warning", "ingest", f"Saving the cover failed for ISBN {isbn}: {e}")
+        riga.update({"esito": "in_attesa" if meta else "in_attesa_vuota",
+                     "staged_id": item.id, "title": title,
+                     "author": item.author, "cover": cover_ok})
+        log_message("info", "ingest",
+                    f"Voce da ISBN {isbn} in attesa: "
+                    + ("metadati dalle fonti" if meta else "vuota, da compilare a mano"))
+    db.commit()
+
+    return {"library": library_name, "rows": rows}
 
 
 # No shared mimetype helper exists elsewhere in the backend — books.py's own
@@ -399,6 +575,7 @@ _INGEST_MIME_TYPES = {
     ".azw": "application/vnd.amazon.ebook",
     ".fb2": "application/x-fictionbook+xml",
     ".txt": "text/plain",
+    ".md": "text/markdown",
 }
 
 
@@ -422,6 +599,10 @@ def get_ingest_file(
     # 404 e non 403 per la riga di un altro (21/11/2026): per un utente
     # normale quella riga non esiste, e dirgli «esiste ma non e' tua»
     # racconterebbe gia' qualcosa che non deve vedere.
+    if item and item.record_only:
+        # La voce senza file (23/11/2026): non c'e' niente da aprire, e il
+        # motivo va detto — un 404 qui sembrerebbe un file sparito.
+        raise HTTPException(status_code=409, detail="This is a record-only entry: there is no file to open")
     if not item or not os.path.exists(item.file_path):
         raise HTTPException(status_code=404, detail="File not found in the staging folder")
     ext = os.path.splitext(item.file_path)[1].lower()
@@ -607,6 +788,93 @@ async def upload_ingest_files(
     return {"staged": staged, "rejected": rejected}
 
 
+async def _import_record_only_item(payload, db, write_queue, item):
+    """
+    La voce SENZA file diventa una scheda Calibre senza formati
+    (23/11/2026, scelta di Paolo: il fantasma «si crea una voce in ingest
+    come per gli altri libri e dopo la si importa»).
+
+    E' il gemello corto dell'importazione vera qui sotto: niente file da
+    spostare, niente pagine, niente impronta, niente qualita' — solo i
+    metadati (con gli stessi fallback della richiesta: l'editor rimanda
+    solo cio' che l'utente ha toccato), l'ISBN come identificatore e la
+    copertina scaricata in staging, che diventa la copertina della scheda.
+    La compensazione sul fallimento e' la stessa: si disfa cio' che si era
+    fatto e la voce torna in attesa.
+    """
+    book_id = None
+    library_path = None
+    try:
+        library_name = resolve_folder_name(db, payload.library) if payload.library else resolve_default_library_folder(db)
+        if not library_name:
+            raise HTTPException(status_code=404, detail="No library is configured. Create one first.")
+        library_path = config.library_path(library_name)
+        title = payload.title or item.title
+        author = payload.author or item.author or "Sconosciuto"
+
+        book_id = await write_queue.submit("insert_book", {"title": title, "author": author}, library_path)
+        # Cartella e percorso come per un libro vero: dentro non c'e'
+        # (ancora) nessun file, ma e' li' che finiranno copertina e
+        # formati futuri.
+        rel = calibre_naming.percorso_per_libro(book_id, title, author)
+        os.makedirs(os.path.join(library_path, rel), exist_ok=True)
+        fields = {"path": rel}
+        if item.pubdate:
+            fields["pubdate"] = item.pubdate
+        await write_queue.submit("update_book", {"book_id": book_id, "fields": fields}, library_path)
+
+        isbn = payload.isbn or item.isbn
+        if isbn:
+            await write_queue.submit("set_identifiers", {"book_id": book_id, "identifiers": {"isbn": isbn}}, library_path)
+        description = payload.description if payload.description is not None else item.description
+        if description:
+            await write_queue.submit("set_comments", {"book_id": book_id, "text": description}, library_path)
+        tags = payload.tags if payload.tags is not None else [t for t in (item.tags or "").split(",") if t]
+        if tags:
+            await write_queue.submit("set_book_tags", {"book_id": book_id, "tags": tags}, library_path)
+        series = payload.series if payload.series is not None else item.series
+        if series:
+            await write_queue.submit(
+                "set_book_series",
+                {"book_id": book_id, "series_name": series,
+                 "series_index": payload.series_index if payload.series_index is not None else item.series_index},
+                library_path,
+            )
+        language = payload.language if payload.language is not None else item.language
+        if language:
+            await write_queue.submit("set_language", {"book_id": book_id, "lang_code": language}, library_path)
+
+        if item.cover_path and os.path.exists(item.cover_path):
+            try:
+                with open(item.cover_path, "rb") as f:
+                    image_b64 = base64.b64encode(f.read()).decode("ascii")
+                await write_queue.submit("set_cover", {"book_id": book_id, "image_b64": image_b64}, library_path)
+            except Exception as e:
+                log_message("warning", "ingest", f"Setting the cover failed for '{title}': {e}")
+            try:
+                os.remove(item.cover_path)
+            except OSError:
+                pass
+
+        item.status = "confirmed"
+        item.processed_at = datetime.utcnow()
+        db.commit()
+    except Exception:
+        if book_id is not None:
+            try:
+                await write_queue.submit("delete_book", {"book_id": book_id}, library_path)
+            except Exception as e:
+                log_message("warning", "ingest", f"Rollback: Calibre book {book_id} not removed: {e}")
+        item.status = "pending"
+        db.commit()
+        raise
+
+    author_stats_service.safe_mark_author_pages_dirty(db)
+    author_ingest_hook.maybe_trigger_wiki_scrape(string_to_authors(author))
+    log_message("info", "ingest", f"Imported record-only entry '{title}' into library '{library_name}'")
+    return {"status": "ok", "book_id": book_id}
+
+
 @router.post(
     "/import-book",
     responses={200: {"model": LibroImportato}},
@@ -636,6 +904,25 @@ async def import_book_from_ingest(
         raise HTTPException(status_code=409, detail="This staged item is already being imported, or is no longer available")
 
     item = db.query(models.IngestedBook).filter(models.IngestedBook.id == payload.id).first()
+    # La voce senza file prende la sua strada corta (23/11/2026): niente
+    # file da spostare, niente pagine ne' impronta ne' qualita'. Tutto il
+    # resto di questa funzione presuppone un file sul disco.
+    if item.record_only:
+        return await _import_record_only_item(payload, db, write_queue, item)
+    # Il cancello dei formati (scelta di Paolo, 23/11/2026): un file fuori
+    # lista sta in arretrato solo per essere visto e scartato. Il rifiuto
+    # sta QUI e non solo nel browser; la riga torna "pending" perche' il
+    # claim qui sopra l'aveva gia' marcata "importing".
+    if not formato_ammesso(item.file_format):
+        item.status = "pending"
+        db.commit()
+        allowed = ", ".join(sorted(e.lstrip(".") for e in EBOOK_EXTENSIONS))
+        raise HTTPException(
+            status_code=409,
+            detail=f"Format '{item.file_format or '(none)'}' is not an accepted format "
+                   f"(accepted: {allowed}). This entry can only be discarded.",
+        )
+
     # Compensation state for the `except` below: an import that fails halfway
     # used to leave BOTH a half-built Calibre book (a row with no path and no
     # format — unreachable from every UI, undeletable from the library view)

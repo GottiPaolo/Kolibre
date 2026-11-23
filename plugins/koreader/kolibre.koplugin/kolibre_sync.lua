@@ -66,7 +66,10 @@ local KolibreSync = {}
 local VERSION = nil
 function KolibreSync.impostaVersione(v) VERSION = v end
 
-KolibreSync.EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, fb2 = true, txt = true }
+-- Specchio di library_scanner.EBOOK_EXTENSIONS sul server (lista indicativa
+-- di Paolo, 23/11/2026): fb2 esce, md entra. Decide quali file locali del
+-- lettore vengono riconosciuti e riportati al server.
+KolibreSync.EBOOK_EXTENSIONS = { epub = true, pdf = true, mobi = true, azw3 = true, txt = true, md = true }
 local EBOOK_EXTENSIONS = KolibreSync.EBOOK_EXTENSIONS
 
 -- ── Local library scan ──

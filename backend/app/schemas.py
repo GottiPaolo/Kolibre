@@ -169,6 +169,15 @@ class LibraryResponse(BaseModel):
     size_bytes: int = 0
 
 
+class IsbnImportRequest(BaseModel):
+    """Voci di Ingest senza file da uno o più ISBN (22-23/11/2026): ogni
+    ISBN valido va in attesa coi metadati delle fonti, e si importa dopo,
+    come un file. `library` serve solo all'avviso «ce l'hai già»: la
+    biblioteca di destinazione vera si sceglie all'importazione."""
+    isbns: List[str]
+    library: Optional[str] = None
+
+
 class IngestImportRequest(BaseModel):
     id: int
     library: Optional[str] = None

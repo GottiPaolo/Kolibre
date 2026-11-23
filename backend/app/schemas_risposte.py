@@ -3147,6 +3147,21 @@ class LibroInArretrato(Permissivo):
     #: lo apre cosi' com'e'. Volutamente non descritto campo per campo, vedi
     #: `QualitaDettaglio`.
     qualita: Optional[dict]
+    #: Le pagine del file, contate in sottofondo appena e' arrivato — con le
+    #: stesse impostazioni della biblioteca, cosi' il numero si confronta
+    #: alla pari con la colonna #pages dei libri gia' in casa. `null`
+    #: finche' il conteggio non c'e', e per sempre per un formato che non
+    #: si sa leggere (si contano EPUB, PDF e TXT). Serve a scegliere fra
+    #: due copie simili prima di importarne una (22/11/2026).
+    pages: Optional[int]
+    #: Una voce SENZA file (23/11/2026): nata da un ISBN o da un libro
+    #: solo-record del plugin Calibre. `formats` e' vuota, `size` e' zero,
+    #: aprire/scaricare non esistono, e all'importazione diventa una
+    #: scheda Calibre senza formati.
+    record_only: bool = False
+    # Formato fra quelli ammessi? False = la voce compare solo per essere
+    # vista e scartata: non si puo' importare (scelta di Paolo, 23/11/2026).
+    supported: bool = True
 
 
 class PaginaDiArretrati(Permissivo):
@@ -3243,6 +3258,53 @@ class LibroSimile(Permissivo):
     title: str
     author: Optional[str]
     formats: list[str]
+    #: Le pagine del libro gia' in casa (la colonna #pages), `null` se non
+    #: sono mai state contate. Accostate a quelle del file in attesa sono
+    #: il metro per scegliere quale copia tenere (22/11/2026).
+    pages: Optional[int]
+    #: La qualita' del libro gia' in casa (0-100, da qualita_libri), `null`
+    #: se mai misurata o misurata con errore. L'altro metro del confronto:
+    #: la scheda in attesa mostra la QUALITA' del file nuovo, e qui c'e'
+    #: quella della copia gia' importata (22/11/2026, spunto di Paolo).
+    qualita_punteggio: Optional[int] = None
+
+
+class SchedaDaIsbn(Permissivo):
+    """L'esito di UN ISBN della messa in attesa senza file (22-23/11/2026:
+    la voce nasce in Ingest e si importa dopo, come un file).
+
+    Ogni riga e' indipendente: un ISBN non valido non ferma gli altri —
+    lo stesso disegno «parziale per costruzione» del caricamento dal
+    browser.
+    """
+    #: L'ISBN normalizzato (solo cifre); per un `non_valido`, la stringa
+    #: com'era arrivata, cosi' chi legge la ritrova.
+    isbn: str
+    #: `in_attesa` (voce creata coi metadati delle fonti),
+    #: `in_attesa_vuota` (nessuna fonte lo conosce: voce col solo ISBN,
+    #: titolo = ISBN, da compilare a mano), `non_valido` (la cifra di
+    #: controllo non torna: NON creata), `ripetuto` (stesso ISBN due
+    #: volte nella stessa richiesta).
+    esito: str
+    #: La voce di Ingest creata, per `in_attesa` e `in_attesa_vuota`.
+    staged_id: Optional[int]
+    title: Optional[str]
+    author: Optional[str]
+    #: La copertina vera delle fonti, scaricata in staging. `False` anche
+    #: quando la voce e' nata bene ma l'immagine no: la copertina e' un
+    #: di piu', mai un motivo per fallire.
+    cover: bool
+    #: AVVISO, non blocco: il libro che occupa gia' quell'ISBN nella
+    #: biblioteca indicata. La voce viene messa in attesa lo stesso —
+    #: come un file doppione, si decide davanti alla scheda.
+    existing_book_id: Optional[int]
+    existing_title: Optional[str]
+
+
+class SchedeDaIsbn(Permissivo):
+    """Tutte le righe dell'importazione per ISBN, nella stessa chiamata."""
+    library: str
+    rows: list[SchedaDaIsbn]
 
 
 class DoppioniInArrivo(Permissivo):

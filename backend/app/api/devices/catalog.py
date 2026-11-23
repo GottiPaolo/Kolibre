@@ -143,6 +143,15 @@ def _bucket_counts(all_books: list, section: str) -> dict:
     return counts
 
 
+def _only_books_with_files(books: list) -> list:
+    """Il catalogo dei dispositivi mostra solo libri che un lettore puo'
+    SCARICARE: una scheda fantasma (soli metadati, nessun formato — le
+    schede da ISBN del 22/11/2026, l'inventario di una libreria fisica)
+    resta fuori, per scelta di Paolo — e' lo stile dell'OPDS 2 di Calibre,
+    che filtra i libri senza formati invece di mostrarli non scaricabili."""
+    return [b for b in books if b.get("formats")]
+
+
 @sync_router.get(
     "/catalog/sections/{section}",
     responses={200: {"model": SezioneDelCatalogo}},
@@ -184,7 +193,7 @@ def catalog_sections(
         raise HTTPException(status_code=400, detail="page and size must be >= 1")
 
     lib = CalibreLibrary(config.library_path(library))
-    all_books = lib.list_books()
+    all_books = _only_books_with_files(lib.list_books())
     counts = _bucket_counts(all_books, section)
 
     names = sorted(counts.keys())
@@ -287,7 +296,7 @@ def catalog_discover(
     recent_ids = list(dict.fromkeys(r[0] for r in recent_rows))  # dedup, keep recency order
 
     lib = CalibreLibrary(config.library_path(library))
-    all_books = lib.list_books()
+    all_books = _only_books_with_files(lib.list_books())
     books_by_id = {b["id"]: b for b in all_books}
 
     recent_authors = set()
@@ -390,7 +399,7 @@ def browse_catalog(
     it — including an un-updated plugin, which never will.
     """
     lib = CalibreLibrary(config.library_path(library))
-    all_books = lib.list_books()
+    all_books = _only_books_with_files(lib.list_books())
     books = all_books
     if q and author:
         q_needle, author_needle = _fold_accents(q), _fold_accents(author)

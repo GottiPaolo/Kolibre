@@ -217,7 +217,7 @@ def list_devices(
             "storage_available": d.storage_available,
             "backup_file_count": backup_file_count,
             "pending_restore_request": _serialize_restore_request(db, open_restore_request) if open_restore_request else None,
-            "supported_formats": ["EPUB", "PDF", "MOBI", "MD"],
+            "supported_formats": ["EPUB", "PDF", "MOBI", "AZW3", "TXT", "MD"],
             "write_folder_cover": d.write_folder_cover,
             "books": [
                 {

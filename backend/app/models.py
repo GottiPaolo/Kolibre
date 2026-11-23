@@ -1071,6 +1071,27 @@ class IngestedBook(Base):
     series_index = Column(Float, nullable=True)
     language = Column(String, nullable=True)
     isbn = Column(String, nullable=True)
+    # Una voce SENZA file (23/11/2026, scelta di Paolo: la scheda fantasma
+    # «si crea una voce in ingest come per gli altri libri e dopo la si
+    # importa»). Nasce dall'importazione per ISBN o dal plugin Calibre per
+    # un libro solo-record: file_path e' la stringa vuota, i metadati sono
+    # tutti qui, e all'importazione diventa una scheda Calibre senza
+    # formati. Tutto cio' che presuppone un file (aprire, scaricare,
+    # contare pagine, misurare qualita') per queste righe non esiste.
+    record_only = Column(Boolean, nullable=False, default=False)
+    # La data di pubblicazione trovata dalle fonti ISBN (solo l'anno e'
+    # affidabile): sul file vero non serve — la porta l'EPUB — ma una voce
+    # senza file non ha altro posto dove tenerla fino all'importazione.
+    pubdate = Column(String, nullable=True)
+    # Le pagine del file in attesa, contate in sottofondo appena il file
+    # arriva (services/ingest_pages.py; 22/11/2026, richiesta di Paolo:
+    # il numero serve a scegliere fra due copie simili PRIMA di importare,
+    # quindi deve essere gia' qui quando si guarda la pagina — stesso
+    # ragionamento della qualita' qui sotto). `None` finche' il conteggio
+    # non e' arrivato, e per sempre per un formato che non si sa leggere.
+    # E' un'anteprima: il numero che finisce nella colonna #pages di
+    # Calibre si conta all'importazione, sul file spostato.
+    pages = Column(Integer, nullable=True)
 
     status = Column(String, default="pending", index=True)  # pending, confirmed, rejected
     # Mai scritta da nessuno: era pensata per marcare un file come doppione di

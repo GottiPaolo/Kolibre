@@ -671,6 +671,10 @@ export interface paths {
          *     Serve al caso vero: una cartella con migliaia di file da rivedere. La
          *     pagina Ingest disegna una scheda per ogni libro, con copertina e
          *     metadati, e a qualche migliaio diventa una pagina che non si apre.
+         *
+         *     Dal 21/11/2026 l'elenco e' per utente: l'amministratore vede tutto
+         *     (comprese le righe senza proprietario), un utente le sue — vedi
+         *     _visible_to.
          */
         get: operations["list_ingest_books_api_kolibre_ingest_get"];
         put?: never;
@@ -749,6 +753,9 @@ export interface paths {
         /**
          * Get Ingest Pagination
          * @description Se la pagina Ingest va impaginata, e con che pagina. Conta e basta.
+         *
+         *     Conta le righe che QUESTO utente vede (21/11/2026): il totale deve
+         *     corrispondere all'elenco, o la pagina crederebbe di avere pagine vuote.
          */
         get: operations["get_ingest_pagination_api_kolibre_ingest_pagination_get"];
         put?: never;
@@ -791,6 +798,45 @@ export interface paths {
         get: operations["ingest_duplicati_api_kolibre_ingest_duplicati_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/ingest/isbn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stage Books By Isbn
+         * @description Voci di Ingest SENZA file da uno o piu' ISBN: l'inventario digitale di
+         *     una libreria fisica (richiesta di Paolo del 22/11; il flusso a due
+         *     tempi e' la sua finezza del 23/11 — «non deve essere importata subito:
+         *     si crea una voce in ingest come per gli altri libri e dopo la si
+         *     importa»).
+         *
+         *     Ogni ISBN valido diventa una voce in attesa (`record_only`), coi
+         *     metadati e la copertina delle fonti (Open Library, e Google Books con
+         *     la chiave di Paolo per i buchi — vedi fetch_metadata_by_isbn). La voce
+         *     si rivede, si corregge con l'editor dei metadati e SOLO all'importazione
+         *     diventa una scheda Calibre senza formati — la convenzione di Calibre:
+         *     riga in `books`, niente righe in `data`.
+         *
+         *     Un ISBN che nessuna fonte conosce crea COMUNQUE la voce, vuota e col
+         *     titolo uguale all'ISBN («se uno vuole forzatamente mettere qualcosa
+         *     puo' farlo»); uno gia' negli identificatori della biblioteca scelta
+         *     viene messo in attesa LO STESSO, con l'avviso del libro che lo occupa
+         *     — come un file doppione: si avvisa, e si decide davanti alla scheda.
+         *     Solo la cifra di controllo sbagliata rifiuta (`non_valido`): l'ISBN
+         *     diventa un identificatore, e una stringa qualsiasi lo inquinerebbe.
+         */
+        post: operations["stage_books_by_isbn_api_kolibre_ingest_isbn_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1041,7 +1087,7 @@ export interface paths {
         };
         /**
          * Get Reading Position
-         * @description The web reader's counterpart to devices.py's kosync-style /sync/progress
+         * @description The web reader's counterpart to devices/readings.py's kosync-style /sync/progress
          *     — same ReadingPosition table (a single universal "latest position" per
          *     book, shared with KOReader), but identified directly by calibre_book_id
          *     + library (which the web reader already knows) instead of by file hash
@@ -1234,7 +1280,10 @@ export interface paths {
          *
          *     Torna anche com'e' andata ogni fonte: una lista corta puo' voler dire
          *     "questo libro non e' nei cataloghi" oppure "una delle tre oggi non
-         *     risponde", e dai risultati le due cose sono indistinguibili.
+         *     risponde", e dai risultati le due cose sono indistinguibili. La fonte
+         *     Google passa dal vecchio feeds quando l'API ufficiale risponde 429
+         *     (23/11/2026, il trucco di Calibre): la chiave API personale e' stata
+         *     provata e tolta lo stesso giorno, scelta di Paolo.
          */
         get: operations["search_book_metadata_online_api_kolibre_books__id__metadata_search_get"];
         put?: never;
@@ -2066,61 +2115,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/{device_id}/dictionaries": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Accoda Dizionario Per Dispositivo
-         * @description «Manda questo dizionario a quel lettore», dal portale.
-         *
-         *     **Perche' e' una coda e non un invio.** Un server non puo' raggiungere un
-         *     e-reader: e' il lettore che si fa vivo quando e' accesso e ha la rete.
-         *     Quindi qui si scrive soltanto *cosa dovra' prendere*, e lui lo prende
-         *     alla prima sincronizzazione (vedi la risposta di /sync e
-         *     /sync/dictionaries/ack, che svuota la voce quando e' arrivato).
-         *
-         *     Due rifiuti, entrambi per non promettere l'impossibile:
-         *     - una lingua che non conosciamo;
-         *     - un dizionario che il server **non ha installato**: non essendoci i
-         *       file, il lettore chiederebbe un manifest che risponde 404 e
-         *       resterebbe in coda per sempre. Si installa prima da Impostazioni →
-         *       Integrazioni → Dizionari.
-         */
-        post: operations["accoda_dizionario_per_dispositivo_api_devices__device_id__dictionaries_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/dictionaries/{lang}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Annulla Dizionario Per Dispositivo
-         * @description Toglie dalla coda un dizionario non ancora arrivato. Non disinstalla
-         *     niente dal lettore: quello che e' gia' la' resta la' — da qui si annulla
-         *     solo una richiesta, e dire il contrario sarebbe una bugia.
-         */
-        delete: operations["annulla_dizionario_per_dispositivo_api_devices__device_id__dictionaries__lang__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/devices": {
         parameters: {
             query?: never;
@@ -2162,50 +2156,6 @@ export interface paths {
          *     one of them.
          */
         delete: operations["delete_device_api_devices__device_id__delete"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/restore-request/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Confirm Device Restore Request
-         * @description Seconda delle tre conferme (vedi DeviceRestoreRequest): l'admin conferma
-         *     sul frontend la richiesta che il device target ha creato. request_id nel
-         *     body, non solo device_id nel path, per evitare di confermare per sbaglio
-         *     una richiesta già sostituita da una più recente per lo stesso target.
-         */
-        post: operations["confirm_device_restore_request_api_devices__device_id__restore_request_confirm_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/restore-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /**
-         * Cancel Device Restore Request
-         * @description Annulla qualunque richiesta non ancora completata per questo target —
-         *     ce n'è al massimo una alla volta (vedi _get_open_restore_request).
-         */
-        delete: operations["cancel_device_restore_request_api_devices__device_id__restore_request_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2319,85 +2269,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/{device_id}/backups": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Device Backups */
-        get: operations["list_device_backups_api_devices__device_id__backups_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/diagnostics": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Device Diagnostics
-         * @description I registri che questo lettore ha mandato, dal più recente.
-         */
-        get: operations["list_device_diagnostics_api_devices__device_id__diagnostics_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/diagnostics/{filename}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read Device Diagnostic
-         * @description Un registro, come testo da leggere nel browser.
-         *
-         *     `text/plain` e non un allegato: serve aprirlo e guardarlo, non salvarlo.
-         */
-        get: operations["read_device_diagnostic_api_devices__device_id__diagnostics__filename__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/devices/{device_id}/backups/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Download Device Backups
-         * @description Zips whatever this device has backed up so far, for restore purposes.
-         */
-        get: operations["download_device_backups_api_devices__device_id__backups_download_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/devices/{device_id}/sync-history": {
         parameters: {
             query?: never;
@@ -2412,6 +2283,76 @@ export interface paths {
         get: operations["get_device_sync_history_api_devices__device_id__sync_history_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/books/{book_row_id}/acknowledge-removal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Acknowledge Book Removal
+         * @description Web-GUI archives a 'removed_by_device' notification: the user has seen
+         *     that the device dropped the book, so the row can finally go away.
+         */
+        post: operations["acknowledge_book_removal_api_devices__device_id__books__book_row_id__acknowledge_removal_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/books/{book_row_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel Pending Book Action
+         * @description Web-GUI undo for a queued action the device hasn't applied yet:
+         *     a pending send disappears entirely, a pending delete goes back to synced.
+         *     delete_declined counts too — "the user on the device said no" is still a
+         *     removal request the owner may want to withdraw, settling the book back
+         *     to plain synced instead of leaving the declined flag around forever.
+         */
+        post: operations["cancel_pending_book_action_api_devices__device_id__books__book_row_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/books/{book_row_id}/pair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pair Device Book
+         * @description "Accoppia manualmente" from the main device-books view — unlike
+         *     queue_flagged_book_action's 'pair' (which links a file that was NEVER
+         *     matched to a book), this row is already matched to SOME book; the whole
+         *     point here is to RE-point it to a different one the user picked (e.g.
+         *     a hash that resolved to the wrong edition). Available regardless of the
+         *     row's current status, by design — no guard on pending_send/pending_delete.
+         */
+        post: operations["pair_device_book_api_devices__device_id__books__book_row_id__pair_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2518,52 +2459,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/devices/{device_id}/books/{book_row_id}/acknowledge-removal": {
+    "/api/devices/{device_id}/backups": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Device Backups */
+        get: operations["list_device_backups_api_devices__device_id__backups_get"];
         put?: never;
-        /**
-         * Acknowledge Book Removal
-         * @description Web-GUI archives a 'removed_by_device' notification: the user has seen
-         *     that the device dropped the book, so the row can finally go away.
-         */
-        post: operations["acknowledge_book_removal_api_devices__device_id__books__book_row_id__acknowledge_removal_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/devices/{device_id}/books/{book_row_id}/cancel": {
+    "/api/devices/{device_id}/backups/download": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
         /**
-         * Cancel Pending Book Action
-         * @description Web-GUI undo for a queued action the device hasn't applied yet:
-         *     a pending send disappears entirely, a pending delete goes back to synced.
-         *     delete_declined counts too — "the user on the device said no" is still a
-         *     removal request the owner may want to withdraw, settling the book back
-         *     to plain synced instead of leaving the declined flag around forever.
+         * Download Device Backups
+         * @description Zips whatever this device has backed up so far, for restore purposes.
          */
-        post: operations["cancel_pending_book_action_api_devices__device_id__books__book_row_id__cancel_post"];
+        get: operations["download_device_backups_api_devices__device_id__backups_download_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/devices/{device_id}/books/{book_row_id}/pair": {
+    "/api/devices/{device_id}/dictionaries": {
         parameters: {
             query?: never;
             header?: never;
@@ -2573,15 +2506,131 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Pair Device Book
-         * @description "Accoppia manualmente" from the main device-books view — unlike
-         *     queue_flagged_book_action's 'pair' (which links a file that was NEVER
-         *     matched to a book), this row is already matched to SOME book; the whole
-         *     point here is to RE-point it to a different one the user picked (e.g.
-         *     a hash that resolved to the wrong edition). Available regardless of the
-         *     row's current status, by design — no guard on pending_send/pending_delete.
+         * Accoda Dizionario Per Dispositivo
+         * @description «Manda questo dizionario a quel lettore», dal portale.
+         *
+         *     **Perche' e' una coda e non un invio.** Un server non puo' raggiungere un
+         *     e-reader: e' il lettore che si fa vivo quando e' accesso e ha la rete.
+         *     Quindi qui si scrive soltanto *cosa dovra' prendere*, e lui lo prende
+         *     alla prima sincronizzazione (vedi la risposta di /sync e
+         *     /sync/dictionaries/ack, che svuota la voce quando e' arrivato).
+         *
+         *     Due rifiuti, entrambi per non promettere l'impossibile:
+         *     - una lingua che non conosciamo;
+         *     - un dizionario che il server **non ha installato**: non essendoci i
+         *       file, il lettore chiederebbe un manifest che risponde 404 e
+         *       resterebbe in coda per sempre. Si installa prima da Impostazioni →
+         *       Integrazioni → Dizionari.
          */
-        post: operations["pair_device_book_api_devices__device_id__books__book_row_id__pair_post"];
+        post: operations["accoda_dizionario_per_dispositivo_api_devices__device_id__dictionaries_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/dictionaries/{lang}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Annulla Dizionario Per Dispositivo
+         * @description Toglie dalla coda un dizionario non ancora arrivato. Non disinstalla
+         *     niente dal lettore: quello che e' gia' la' resta la' — da qui si annulla
+         *     solo una richiesta, e dire il contrario sarebbe una bugia.
+         */
+        delete: operations["annulla_dizionario_per_dispositivo_api_devices__device_id__dictionaries__lang__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/restore-request/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Device Restore Request
+         * @description Seconda delle tre conferme (vedi DeviceRestoreRequest): l'admin conferma
+         *     sul frontend la richiesta che il device target ha creato. request_id nel
+         *     body, non solo device_id nel path, per evitare di confermare per sbaglio
+         *     una richiesta già sostituita da una più recente per lo stesso target.
+         */
+        post: operations["confirm_device_restore_request_api_devices__device_id__restore_request_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/restore-request": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Cancel Device Restore Request
+         * @description Annulla qualunque richiesta non ancora completata per questo target —
+         *     ce n'è al massimo una alla volta (vedi _get_open_restore_request).
+         */
+        delete: operations["cancel_device_restore_request_api_devices__device_id__restore_request_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Device Diagnostics
+         * @description I registri che questo lettore ha mandato, dal più recente.
+         */
+        get: operations["list_device_diagnostics_api_devices__device_id__diagnostics_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/devices/{device_id}/diagnostics/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Device Diagnostic
+         * @description Un registro, come testo da leggere nel browser.
+         *
+         *     `text/plain` e non un allegato: serve aprirlo e guardarlo, non salvarlo.
+         */
+        get: operations["read_device_diagnostic_api_devices__device_id__diagnostics__filename__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2611,98 +2660,6 @@ export interface paths {
         get: operations["inventario_del_dispositivo_api_devices__device_id__inventory_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/scan-unmatched": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Scan Unmatched Books
-         * @description "Inizializza libreria" (cerca libri non accoppiati) — a device-initiated,
-         *     on-demand reconciliation pass, separate from the routine /sync handshake
-         *     on purpose: unlike managed_books adoption (silent, always-on), here the
-         *     plugin wants to know exactly which hashes DIDN'T resolve, so it can offer
-         *     the user a fuzzy title/author mapping for those specifically. Body:
-         *     {items: [{hash, format, path}]}. Returns matched (candidates identified
-         *     per hash, ready to adopt into the manifest exactly like a routine
-         *     managed_books report — a list rather than a single pick, since the exact
-         *     same file can legitimately be hashed under more than one library, and
-         *     the plugin must let the user choose rather than guessing) and unmatched
-         *     (untouched, for client-side fuzzy matching against /catalog).
-         *
-         *     Also reconciles "Da rivedere" against this fresh full-library scan
-         *     (root-cause fix, 2026-09-12): report_flagged_book only ever
-         *     adds/refreshes a row for a file still unresolved on some past scan —
-         *     nothing ever told the server "this file is fine now, drop it", so a
-         *     later rescan that finally resolves a book (or a file removed from the
-         *     device entirely) left its old flagged row behind forever, confirmed
-         *     against production data (81 of 151 rows for one device predated its
-         *     latest rescan by weeks). `items` here IS always the device's full,
-         *     not-yet-managed local library (see _runLibraryInit: `candidates` comes
-         *     from walking the whole books_dir, never a partial/incremental set), so
-         *     any existing DeviceFlaggedBook row for this device whose local_path
-         *     isn't in THIS payload is provably stale — deleted here, before this
-         *     scan gets the chance to re-flag whatever's genuinely still unresolved.
-         *     Rows with a pending_action (delete/overwrite queued from the web UI,
-         *     not yet applied by the device) are left alone on purpose — that is a
-         *     separate, still-pending decision, not something a rescan should ever
-         *     silently discard.
-         */
-        post: operations["scan_unmatched_books_api_kolibre_devices_scan_unmatched_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/flagged-books": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Report Flagged Book
-         * @description Parks a local book the device-init scan couldn't safely resolve on its
-         *     own — either a *probable* (not hash-identical) match whose local file
-         *     already has reading progress or annotations (match_status
-         *     'flagged_started', with candidate_* filled in), or no plausible match at
-         *     all (match_status 'no_candidate', candidate_* left null) — the plugin
-         *     never touches that file's content on its own (see main.lua's device-init
-         *     flow), it only records it here so the user can review/resolve it later from
-         *     the web UI. Body: {local_path, local_title, match_status,
-         *     local_percent_read, local_highlights_count, candidate_library,
-         *     candidate_calibre_book_id, candidate_title, candidate_author, hash}.
-         *     `hash` (the device's own partial-MD5 for this file, already computed for
-         *     the scan-unmatched round-trip that led here) is needed by the 'pair'
-         *     action later — see queue_flagged_book_action/book_hash_service.
-         *
-         *     `match_source` ("fingerprint" from _identifyFileByContent, or "fuzzy"
-         *     from the title/author guess) distinguishes an authoritative content
-         *     identity from a plausible guess. A fingerprint match on a file that
-         *     already has progress/highlights (match_status 'flagged_started') is
-         *     resolved immediately here via the exact same safe logic as the manual
-         *     'pair' action (queue_flagged_book_action) — record the device's hash,
-         *     migrate any orphan highlights, and never park it in "Da rivedere" at
-         *     all. This is what "il candidato è certo, accoppialo anche se il libro è
-         *     già iniziato" needs: pairing never touches the device's file/sidecar, so
-         *     there is no data-loss risk in doing this automatically for a fingerprint
-         *     match, unlike a fuzzy guess which still always needs human review.
-         */
-        post: operations["report_flagged_book_api_kolibre_devices_flagged_books_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2788,306 +2745,6 @@ export interface paths {
         get: operations["device_capabilities_api_kolibre_devices_capabilities_get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/catalog/sections/{section}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Catalog Sections
-         * @description Drill-down "buckets" behind browse_catalog's own author/series/tag
-         *     filters (foundation for the catalog navigator, phase 1 — no UI here yet,
-         *     just the data surface it'll page over): every distinct author/series/tag
-         *     name across the library with how many books carry it, so a future
-         *     "browse by author" screen can list authors first and only then ask
-         *     browse_catalog?author=... for one author's books, instead of pulling the
-         *     whole catalog client-side to build that list itself.
-         *
-         *     Pure in-Python group-by over list_books() (already fetched for
-         *     browse_catalog, no new SQL/schema) — deliberately NOT keyed by Calibre's
-         *     internal integer FKs, which list_books() never surfaces at this layer;
-         *     staying name-based matches the existing author/series/tag filters on
-         *     browse_catalog, which already match by name too.
-         *
-         *     A multi-author book's `author` field is `"Alice & Bob"` (Calibre's own
-         *     authors_to_string join) — split on `" & "` so each author is counted
-         *     once in their own bucket, never as a separate combined "Alice & Bob"
-         *     bucket. A book contributes to every tag it has (3 tags = +1 to 3
-         *     buckets). `series` uses list_books()'s own singular (already `LIMIT 1`)
-         *     series field, skipping books with none.
-         */
-        get: operations["catalog_sections_api_kolibre_devices_catalog_sections__section__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/catalog/discover": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Catalog Discover
-         * @description "Da scoprire": books NOT already on this device, preferring ones that
-         *     share an author or a tag with what was recently read ON THIS DEVICE
-         *     (ReadingSession.device_id, same scoping already used elsewhere for
-         *     per-device stats — see stats_service.py's own device_id-only filters,
-         *     no separate user scope needed since device_id already identifies a
-         *     single owner). Falls back to a random pick from the rest of the library
-         *     when there aren't enough (or any) author/tag matches, exactly as
-         *     requested: "stesso autore o stessi tag e poi scelta randomica".
-         */
-        get: operations["catalog_discover_api_kolibre_devices_catalog_discover_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/catalog": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Browse Catalog
-         * @description Catalog browser for the plugin's "Sfoglia catalogo" (stile BookOrbit):
-         *     unlike the server-driven sync queue (Fase 5's core loop), this is the
-         *     device *pulling* whatever it wants, on demand. Returns the full matching
-         *     set (capped) rather than a server-paginated page — KOReader's own Menu
-         *     widget already paginates a long item_table on-device, so there's no need
-         *     to reinvent that here. `sort`: "author" (default) or "recent" (newest
-         *     added first, by Calibre's own `timestamp` column).
-         *
-         *     `author`, when given alongside `q`, tightens the fuzzy device-init match
-         *     (main.lua's _findProbableCatalogMatches) from "q anywhere in title OR
-         *     author" to "q in title AND author in author" — plain OR on a single
-         *     needle built by mashing a guessed title and author together (the old
-         *     behavior) is usually a substring of NEITHER field alone, which is why
-         *     filenames that split cleanly into title+author still failed to match.
-         *     Falls back to the original OR-on-q-alone behavior when the AND filter
-         *     finds nothing, so a wrong/noisy author guess never makes matching worse
-         *     than before.
-         *
-         *     If BOTH substring passes above come up empty, a real fuzzy pass (edit-
-         *     distance ratio, not containment) runs over the whole catalog as a last
-         *     resort — confirmed as a real gap, not hypothetical: a subtitle, a
-         *     slightly-off title guess from the filename, or reordered
-         *     title/author words all defeat plain substring containment even when a
-         *     human would call the match obvious. This only ever ADDS candidates when
-         *     the substring passes found zero — it never changes/reorders a query that
-         *     already got substring hits, so the interactive "Sfoglia catalogo"
-         *     type-ahead search (short partial words, where a containment check is
-         *     exactly right) is untouched.
-         *
-         *     `series`/`tag` (new, for the catalog-navigator foundation work): simple
-         *     independent substring filters (accent-folded, same as `author`) applied
-         *     on top of whatever q/author already selected — deliberately NOT folded
-         *     into the tightening/fuzzy-fallback logic above, which exists only to
-         *     rescue a noisy device-init title/author guess, not to serve every filter
-         *     combination.
-         *
-         *     `page`/`size` (new, both optional): when neither is given, behavior is
-         *     byte-for-byte what it always was — up to 500 books, `truncated` if more
-         *     exist. Passing both switches to a real page of the already-filtered/
-         *     sorted list instead of the flat [:500] cap, adding `page`/`has_next` to
-         *     the response. Passing only one of the two falls back to the old
-         *     unpaginated behavior rather than half-implementing pagination.
-         *
-         *     `exclude_on_device` (new, for the Browser's "Non sul device" view):
-         *     drops any book already on the CALLING device for this library (see
-         *     `_device_book_ids_on_device`) before sorting/paginating. Default False
-         *     keeps existing behavior byte-for-byte for every caller that doesn't pass
-         *     it — including an un-updated plugin, which never will.
-         */
-        get: operations["browse_catalog_api_kolibre_devices_catalog_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/identify-file": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Identify Device File
-         * @description Content-level identity for a device file the plugin couldn't otherwise
-         *     place — see text_fingerprint.py's own docstring for why: the filename
-         *     guess (_guessTitleFromPath/_guessAuthorFromPath, used by
-         *     _findProbableCatalogMatches's fuzzy search) is fragile to naming
-         *     conventions (Calibre title_sort, folder layout, ...), and the byte hash
-         *     (BookHash.file_hash) only matches a file byte-identical to the server's
-         *     own copy. KOReader's Lua environment has no way to read inside a
-         *     zip/EPUB itself (confirmed: no zip library exists in this plugin or
-         *     anywhere reusable in it), so the device uploads the raw file here —
-         *     same raw-body convention as upload_device_backup — and the SERVER (which
-         *     already has zip/OPF-parsing code for the TOC editor and page counter)
-         *     computes the fingerprint and looks it up.
-         *
-         *     Searches BookHash across every library (mirrors _findProbableCatalogMatches'
-         *     own "search every library the device can see" behavior), not just one —
-         *     the device doesn't know in advance which library the match is in.
-         */
-        post: operations["identify_device_file_api_kolibre_devices_identify_file_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/annotations": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Push Device Annotations
-         * @description Bulk upload of KOReader annotations read straight from .sdr sidecar files
-         *     (see main.lua's syncAnnotations) — device-token authed, unlike the rest
-         *     of /api/annotations which is JWT/human. Body: {annotations: [{hash,
-         *     text, comment, chapter, page, pos0, pos1, color, path}]}. Dedup/update
-         *     key is (library, calibre_book_id, koreader_pos0): re-syncing the same
-         *     highlight after an edit on the device updates it in place instead of
-         *     duplicating it.
-         *
-         *     An annotation whose hash doesn't resolve to any BookHash is no longer
-         *     silently dropped — if the item carries `path` (the local file path,
-         *     added specifically for this), it's stored as an OrphanHighlight instead,
-         *     so it's still visible/exportable even though it isn't attached to a
-         *     Kolibre book yet (see the frontend Annotations page and the Obsidian
-         *     export, both of which now include orphans). `orphaned` in the response
-         *     counts these separately from `unresolved` (items with no `path` at all —
-         *     older plugin builds before this field existed — which are still dropped,
-         *     same as before).
-         *
-         *     `chapter` as sent by the device is only KOReader's own leaf-title fallback
-         *     now (the plugin no longer reads/walks the book's TOC at all — see
-         *     main.lua's now-removed _resolveFullChapterPath) — the real ancestry is
-         *     resolved here instead, reusing the same EPUB/PDF the server already opens
-         *     for CFI conversion. `_file_path_cache` avoids re-opening the same book
-         *     file once per item in a bulk push (a single sync commonly resends many
-         *     highlights from the same book back to back).
-         */
-        post: operations["push_device_annotations_api_kolibre_devices_annotations_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/annotations/reconcile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reconcile Device Annotations
-         * @description Note cancellate SUL DISPOSITIVO: le toglie anche di qui.
-         *
-         *     Finora la sincronizzazione era solo additiva — una nota cancellata su
-         *     KOReader restava sul server per sempre e niente la riconciliava. Il
-         *     costo per accorgersene era pero' gia' pagato: il plugin manda comunque
-         *     l'insieme COMPLETO delle note di un libro, e lo usavamo come se fosse
-         *     un'aggiunta.
-         *
-         *     Corpo: {files: [{hash, path, keys: [{pos0, page, text}]}]} — le chiavi
-         *     sono quelle su cui push_device_annotations decide se una nota e' gia'
-         *     vista, quindi qui e li' si parla della stessa cosa.
-         *
-         *     Tre limiti deliberati, perche' questa e' l'unica parte del protocollo
-         *     che DISTRUGGE:
-         *
-         *     - solo note con source='device' E device_id di QUESTO dispositivo. Un
-         *       libro letto su due dispositivi ha note che l'altro non conosce, e
-         *       un'evidenziazione fatta nel reader web (source='web') non sta nel
-         *       sidecar di nessuno: nessuna delle due deve sparire perche' questo
-         *       Kindle non ce l'ha;
-         *     - cancellazione MORBIDE (deleted_at), che e' il cestino gia' esistente:
-         *       un errore qui si recupera, non si piange;
-         *     - un file le cui chiavi arrivano vuote non cancella niente. Un sidecar
-         *       illeggibile o un'estrazione fallita produrrebbero esattamente quel
-         *       corpo, e "non ho trovato niente" non e' "l'utente ha cancellato
-         *       tutto".
-         */
-        post: operations["reconcile_device_annotations_api_kolibre_devices_annotations_reconcile_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/annotations/auto-pair": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Auto Pair Orphan Annotations
-         * @description Device-token counterpart of queue_flagged_book_action's 'pair' branch —
-         *     same two effects (record_device_hash + _migrate_orphan_highlights), same
-         *     non-destructive guarantee (touches no file on the device, only server-
-         *     side bookkeeping), just triggered automatically by the plugin right
-         *     after a routine annotation push instead of requiring a human trip
-         *     through "Da rivedere".
-         *
-         *     Root-cause fix for the Kindle case (confirmed against real data): a
-         *     Kindle re-packages EPUBs on
-         *     transfer, so its partial-MD5 never matches BookHash.file_hash — every
-         *     highlight from such a file becomes an OrphanHighlight on EVERY sync
-         *     until a human manually pairs it. The plugin now follows up
-         *     push_device_annotations' `orphan_paths` with a content-identify call
-         *     (_identifyFileByContent, existing endpoint /identify-file) for each
-         *     still-unresolved file, and on a match calls this endpoint with the
-         *     result — closing the gap upstream instead of relying on manual review.
-         *
-         *     Body: {local_path, file_hash, library, calibre_book_id, format}. All
-         *     required — this never guesses a candidate itself, it only registers one
-         *     the plugin already got a confident fingerprint match for.
-         *
-         *     Also drops any DeviceFlaggedBook row for the same (device, local_path):
-         *     once auto-paired here, that file is resolved and would otherwise sit in
-         *     "Da rivedere" forever pointing at a book that's already been handled.
-         */
-        post: operations["auto_pair_orphan_annotations_api_kolibre_devices_annotations_auto_pair_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3283,6 +2940,421 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/devices/sync/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Koreader Sync Confirm
+         * @description v1 compat shim: the old plugin acknowledges applied queue entries by id.
+         *     Since protocol v2 those ids ARE DeviceBook row ids (see the legacy branch
+         *     of /sync), so confirming a download marks the row synced and confirming a
+         *     delete removes it — same transitions as /sync/ack, without a session.
+         */
+        post: operations["koreader_sync_confirm_api_kolibre_devices_sync_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/catalog/sections/{section}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog Sections
+         * @description Drill-down "buckets" behind browse_catalog's own author/series/tag
+         *     filters (foundation for the catalog navigator, phase 1 — no UI here yet,
+         *     just the data surface it'll page over): every distinct author/series/tag
+         *     name across the library with how many books carry it, so a future
+         *     "browse by author" screen can list authors first and only then ask
+         *     browse_catalog?author=... for one author's books, instead of pulling the
+         *     whole catalog client-side to build that list itself.
+         *
+         *     Pure in-Python group-by over list_books() (already fetched for
+         *     browse_catalog, no new SQL/schema) — deliberately NOT keyed by Calibre's
+         *     internal integer FKs, which list_books() never surfaces at this layer;
+         *     staying name-based matches the existing author/series/tag filters on
+         *     browse_catalog, which already match by name too.
+         *
+         *     A multi-author book's `author` field is `"Alice & Bob"` (Calibre's own
+         *     authors_to_string join) — split on `" & "` so each author is counted
+         *     once in their own bucket, never as a separate combined "Alice & Bob"
+         *     bucket. A book contributes to every tag it has (3 tags = +1 to 3
+         *     buckets). `series` uses list_books()'s own singular (already `LIMIT 1`)
+         *     series field, skipping books with none.
+         */
+        get: operations["catalog_sections_api_kolibre_devices_catalog_sections__section__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/catalog/discover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Catalog Discover
+         * @description "Da scoprire": books NOT already on this device, preferring ones that
+         *     share an author or a tag with what was recently read ON THIS DEVICE
+         *     (ReadingSession.device_id, same scoping already used elsewhere for
+         *     per-device stats — see stats_service.py's own device_id-only filters,
+         *     no separate user scope needed since device_id already identifies a
+         *     single owner). Falls back to a random pick from the rest of the library
+         *     when there aren't enough (or any) author/tag matches, exactly as
+         *     requested: "stesso autore o stessi tag e poi scelta randomica".
+         */
+        get: operations["catalog_discover_api_kolibre_devices_catalog_discover_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Browse Catalog
+         * @description Catalog browser for the plugin's "Sfoglia catalogo" (stile BookOrbit):
+         *     unlike the server-driven sync queue (Fase 5's core loop), this is the
+         *     device *pulling* whatever it wants, on demand. Returns the full matching
+         *     set (capped) rather than a server-paginated page — KOReader's own Menu
+         *     widget already paginates a long item_table on-device, so there's no need
+         *     to reinvent that here. `sort`: "author" (default) or "recent" (newest
+         *     added first, by Calibre's own `timestamp` column).
+         *
+         *     `author`, when given alongside `q`, tightens the fuzzy device-init match
+         *     (main.lua's _findProbableCatalogMatches) from "q anywhere in title OR
+         *     author" to "q in title AND author in author" — plain OR on a single
+         *     needle built by mashing a guessed title and author together (the old
+         *     behavior) is usually a substring of NEITHER field alone, which is why
+         *     filenames that split cleanly into title+author still failed to match.
+         *     Falls back to the original OR-on-q-alone behavior when the AND filter
+         *     finds nothing, so a wrong/noisy author guess never makes matching worse
+         *     than before.
+         *
+         *     If BOTH substring passes above come up empty, a real fuzzy pass (edit-
+         *     distance ratio, not containment) runs over the whole catalog as a last
+         *     resort — confirmed as a real gap, not hypothetical: a subtitle, a
+         *     slightly-off title guess from the filename, or reordered
+         *     title/author words all defeat plain substring containment even when a
+         *     human would call the match obvious. This only ever ADDS candidates when
+         *     the substring passes found zero — it never changes/reorders a query that
+         *     already got substring hits, so the interactive "Sfoglia catalogo"
+         *     type-ahead search (short partial words, where a containment check is
+         *     exactly right) is untouched.
+         *
+         *     `series`/`tag` (new, for the catalog-navigator foundation work): simple
+         *     independent substring filters (accent-folded, same as `author`) applied
+         *     on top of whatever q/author already selected — deliberately NOT folded
+         *     into the tightening/fuzzy-fallback logic above, which exists only to
+         *     rescue a noisy device-init title/author guess, not to serve every filter
+         *     combination.
+         *
+         *     `page`/`size` (new, both optional): when neither is given, behavior is
+         *     byte-for-byte what it always was — up to 500 books, `truncated` if more
+         *     exist. Passing both switches to a real page of the already-filtered/
+         *     sorted list instead of the flat [:500] cap, adding `page`/`has_next` to
+         *     the response. Passing only one of the two falls back to the old
+         *     unpaginated behavior rather than half-implementing pagination.
+         *
+         *     `exclude_on_device` (new, for the Browser's "Non sul device" view):
+         *     drops any book already on the CALLING device for this library (see
+         *     `_device_book_ids_on_device`) before sorting/paginating. Default False
+         *     keeps existing behavior byte-for-byte for every caller that doesn't pass
+         *     it — including an un-updated plugin, which never will.
+         */
+        get: operations["browse_catalog_api_kolibre_devices_catalog_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/annotations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push Device Annotations
+         * @description Bulk upload of KOReader annotations read straight from .sdr sidecar files
+         *     (see main.lua's syncAnnotations) — device-token authed, unlike the rest
+         *     of /api/annotations which is JWT/human. Body: {annotations: [{hash,
+         *     text, comment, chapter, page, pos0, pos1, color, path}]}. Dedup/update
+         *     key is (library, calibre_book_id, koreader_pos0): re-syncing the same
+         *     highlight after an edit on the device updates it in place instead of
+         *     duplicating it.
+         *
+         *     An annotation whose hash doesn't resolve to any BookHash is no longer
+         *     silently dropped — if the item carries `path` (the local file path,
+         *     added specifically for this), it's stored as an OrphanHighlight instead,
+         *     so it's still visible/exportable even though it isn't attached to a
+         *     Kolibre book yet (see the frontend Annotations page and the Obsidian
+         *     export, both of which now include orphans). `orphaned` in the response
+         *     counts these separately from `unresolved` (items with no `path` at all —
+         *     older plugin builds before this field existed — which are still dropped,
+         *     same as before).
+         *
+         *     `chapter` as sent by the device is only KOReader's own leaf-title fallback
+         *     now (the plugin no longer reads/walks the book's TOC at all — see
+         *     main.lua's now-removed _resolveFullChapterPath) — the real ancestry is
+         *     resolved here instead, reusing the same EPUB/PDF the server already opens
+         *     for CFI conversion. `_file_path_cache` avoids re-opening the same book
+         *     file once per item in a bulk push (a single sync commonly resends many
+         *     highlights from the same book back to back).
+         */
+        post: operations["push_device_annotations_api_kolibre_devices_annotations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/annotations/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reconcile Device Annotations
+         * @description Note cancellate SUL DISPOSITIVO: le toglie anche di qui.
+         *
+         *     Finora la sincronizzazione era solo additiva — una nota cancellata su
+         *     KOReader restava sul server per sempre e niente la riconciliava. Il
+         *     costo per accorgersene era pero' gia' pagato: il plugin manda comunque
+         *     l'insieme COMPLETO delle note di un libro, e lo usavamo come se fosse
+         *     un'aggiunta.
+         *
+         *     Corpo: {files: [{hash, path, keys: [{pos0, page, text}]}]} — le chiavi
+         *     sono quelle su cui push_device_annotations decide se una nota e' gia'
+         *     vista, quindi qui e li' si parla della stessa cosa.
+         *
+         *     Tre limiti deliberati, perche' questa e' l'unica parte del protocollo
+         *     che DISTRUGGE:
+         *
+         *     - solo note con source='device' E device_id di QUESTO dispositivo. Un
+         *       libro letto su due dispositivi ha note che l'altro non conosce, e
+         *       un'evidenziazione fatta nel reader web (source='web') non sta nel
+         *       sidecar di nessuno: nessuna delle due deve sparire perche' questo
+         *       Kindle non ce l'ha;
+         *     - cancellazione MORBIDE (deleted_at), che e' il cestino gia' esistente:
+         *       un errore qui si recupera, non si piange;
+         *     - un file le cui chiavi arrivano vuote non cancella niente. Un sidecar
+         *       illeggibile o un'estrazione fallita produrrebbero esattamente quel
+         *       corpo, e "non ho trovato niente" non e' "l'utente ha cancellato
+         *       tutto".
+         */
+        post: operations["reconcile_device_annotations_api_kolibre_devices_annotations_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/annotations/auto-pair": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Auto Pair Orphan Annotations
+         * @description Device-token counterpart of queue_flagged_book_action's 'pair' branch —
+         *     same two effects (record_device_hash + _migrate_orphan_highlights), same
+         *     non-destructive guarantee (touches no file on the device, only server-
+         *     side bookkeeping), just triggered automatically by the plugin right
+         *     after a routine annotation push instead of requiring a human trip
+         *     through "Da rivedere".
+         *
+         *     Root-cause fix for the Kindle case (confirmed against real data): a
+         *     Kindle re-packages EPUBs on
+         *     transfer, so its partial-MD5 never matches BookHash.file_hash — every
+         *     highlight from such a file becomes an OrphanHighlight on EVERY sync
+         *     until a human manually pairs it. The plugin now follows up
+         *     push_device_annotations' `orphan_paths` with a content-identify call
+         *     (_identifyFileByContent, existing endpoint /identify-file) for each
+         *     still-unresolved file, and on a match calls this endpoint with the
+         *     result — closing the gap upstream instead of relying on manual review.
+         *
+         *     Body: {local_path, file_hash, library, calibre_book_id, format}. All
+         *     required — this never guesses a candidate itself, it only registers one
+         *     the plugin already got a confident fingerprint match for.
+         *
+         *     Also drops any DeviceFlaggedBook row for the same (device, local_path):
+         *     once auto-paired here, that file is resolved and would otherwise sit in
+         *     "Da rivedere" forever pointing at a book that's already been handled.
+         */
+        post: operations["auto_pair_orphan_annotations_api_kolibre_devices_annotations_auto_pair_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/scan-unmatched": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Scan Unmatched Books
+         * @description "Inizializza libreria" (cerca libri non accoppiati) — a device-initiated,
+         *     on-demand reconciliation pass, separate from the routine /sync handshake
+         *     on purpose: unlike managed_books adoption (silent, always-on), here the
+         *     plugin wants to know exactly which hashes DIDN'T resolve, so it can offer
+         *     the user a fuzzy title/author mapping for those specifically. Body:
+         *     {items: [{hash, format, path}]}. Returns matched (candidates identified
+         *     per hash, ready to adopt into the manifest exactly like a routine
+         *     managed_books report — a list rather than a single pick, since the exact
+         *     same file can legitimately be hashed under more than one library, and
+         *     the plugin must let the user choose rather than guessing) and unmatched
+         *     (untouched, for client-side fuzzy matching against /catalog).
+         *
+         *     Also reconciles "Da rivedere" against this fresh full-library scan
+         *     (root-cause fix, 2026-09-12): report_flagged_book only ever
+         *     adds/refreshes a row for a file still unresolved on some past scan —
+         *     nothing ever told the server "this file is fine now, drop it", so a
+         *     later rescan that finally resolves a book (or a file removed from the
+         *     device entirely) left its old flagged row behind forever, confirmed
+         *     against production data (81 of 151 rows for one device predated its
+         *     latest rescan by weeks). `items` here IS always the device's full,
+         *     not-yet-managed local library (see _runLibraryInit: `candidates` comes
+         *     from walking the whole books_dir, never a partial/incremental set), so
+         *     any existing DeviceFlaggedBook row for this device whose local_path
+         *     isn't in THIS payload is provably stale — deleted here, before this
+         *     scan gets the chance to re-flag whatever's genuinely still unresolved.
+         *     Rows with a pending_action (delete/overwrite queued from the web UI,
+         *     not yet applied by the device) are left alone on purpose — that is a
+         *     separate, still-pending decision, not something a rescan should ever
+         *     silently discard.
+         */
+        post: operations["scan_unmatched_books_api_kolibre_devices_scan_unmatched_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/flagged-books": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report Flagged Book
+         * @description Parks a local book the device-init scan couldn't safely resolve on its
+         *     own — either a *probable* (not hash-identical) match whose local file
+         *     already has reading progress or annotations (match_status
+         *     'flagged_started', with candidate_* filled in), or no plausible match at
+         *     all (match_status 'no_candidate', candidate_* left null) — the plugin
+         *     never touches that file's content on its own (see main.lua's device-init
+         *     flow), it only records it here so the user can review/resolve it later from
+         *     the web UI. Body: {local_path, local_title, match_status,
+         *     local_percent_read, local_highlights_count, candidate_library,
+         *     candidate_calibre_book_id, candidate_title, candidate_author, hash}.
+         *     `hash` (the device's own partial-MD5 for this file, already computed for
+         *     the scan-unmatched round-trip that led here) is needed by the 'pair'
+         *     action later — see queue_flagged_book_action/book_hash_service.
+         *
+         *     `match_source` ("fingerprint" from _identifyFileByContent, or "fuzzy"
+         *     from the title/author guess) distinguishes an authoritative content
+         *     identity from a plausible guess. A fingerprint match on a file that
+         *     already has progress/highlights (match_status 'flagged_started') is
+         *     resolved immediately here via the exact same safe logic as the manual
+         *     'pair' action (queue_flagged_book_action) — record the device's hash,
+         *     migrate any orphan highlights, and never park it in "Da rivedere" at
+         *     all. This is what "il candidato è certo, accoppialo anche se il libro è
+         *     già iniziato" needs: pairing never touches the device's file/sidecar, so
+         *     there is no data-loss risk in doing this automatically for a fingerprint
+         *     match, unlike a fuzzy guess which still always needs human review.
+         */
+        post: operations["report_flagged_book_api_kolibre_devices_flagged_books_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/identify-file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Identify Device File
+         * @description Content-level identity for a device file the plugin couldn't otherwise
+         *     place — see text_fingerprint.py's own docstring for why: the filename
+         *     guess (_guessTitleFromPath/_guessAuthorFromPath, used by
+         *     _findProbableCatalogMatches's fuzzy search) is fragile to naming
+         *     conventions (Calibre title_sort, folder layout, ...), and the byte hash
+         *     (BookHash.file_hash) only matches a file byte-identical to the server's
+         *     own copy. KOReader's Lua environment has no way to read inside a
+         *     zip/EPUB itself (confirmed: no zip library exists in this plugin or
+         *     anywhere reusable in it), so the device uploads the raw file here —
+         *     same raw-body convention as upload_device_backup — and the SERVER (which
+         *     already has zip/OPF-parsing code for the TOC editor and page counter)
+         *     computes the fingerprint and looks it up.
+         *
+         *     Searches BookHash across every library (mirrors _findProbableCatalogMatches'
+         *     own "search every library the device can see" behavior), not just one —
+         *     the device doesn't know in advance which library the match is in.
+         */
+        post: operations["identify_device_file_api_kolibre_devices_identify_file_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/devices/progress": {
         parameters: {
             query?: never;
@@ -3328,7 +3400,37 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/kolibre/devices/sync/dictionaries/ack": {
+    "/api/kolibre/devices/caratteri/state": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Device Letture State
+         * @description Da quale istante il dispositivo deve mandare le letture misurate in
+         *     caratteri.
+         *
+         *     Vedi `letture_service.stato_letture`: "da" e' l'ultimo istante noto meno
+         *     una finestra di sovrapposizione di un giorno, non l'ultimo istante secco —
+         *     una riga viene scritta quando la pagina viene LASCIATA, e un lettore puo'
+         *     restare spento in mezzo.
+         *
+         *     **Questa rotta esiste anche per dire al plugin che il server sa riceverle:**
+         *     un plugin piu' nuovo del server trova un 404 e tiene le sue righe invece
+         *     di buttarle.
+         */
+        get: operations["device_letture_state_api_kolibre_devices_caratteri_state_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/caratteri/incremental": {
         parameters: {
             query?: never;
             header?: never;
@@ -3338,57 +3440,22 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Conferma Dizionario Dal Dispositivo
-         * @description «Il dizionario e' arrivato»: lo togliamo dalla coda.
+         * Upload Letture Incremental
+         * @description Le letture misurate in caratteri che il dispositivo ha e il server no.
          *
-         *     Lo dice il dispositivo e non lo decide il server, per lo stesso motivo
-         *     per cui esiste la conferma dei download dei libri: aver *mandato* i file
-         *     non prova che siano arrivati interi. Il plugin conferma solo dopo aver
-         *     verificato l'impronta di ogni file (vedi downloadDictionary); se non
-         *     conferma, la voce resta in coda e al prossimo giro si riprova.
+         *     Una riga per pagina visitata — quando, per quanto, da quale carattere a
+         *     quale — piu' una per ogni popup di nota tenuto aperto. Le posizioni sono
+         *     xpointer di crengine; il carattere assoluto lo calcola il server
+         *     (`letture_service.converti_le_letture`), e questo e' il punto dell'intero
+         *     disegno: la PROVA resta nel database, quindi se l'indice del testo
+         *     migliora lo storico si ricalcola. Vedi la testa di `letture_service.py`.
+         *
+         *     La conversione si fa **subito dopo**, sul lotto appena arrivato, e non e'
+         *     bloccante per la risposta nel senso che conta: se fallisce, le righe
+         *     restano con `stato_conversione` vuoto e il giro successivo le riprende.
+         *     Una conversione che fallisce non deve far fallire una consegna riuscita.
          */
-        post: operations["conferma_dizionario_dal_dispositivo_api_kolibre_devices_sync_dictionaries_ack_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/dictionaries/{lang}/manifest": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Dictionary Manifest For Device
-         * @description "Scarica dizionario sul dispositivo" (main.lua): same manifest +
-         *     per-file-download shape the plugin already uses for its own self-update
-         *     (_downloadAndInstallUpdate) — reused instead of inventing an on-device
-         *     unzip, since KOReader has no archive-extraction library available to
-         *     this plugin (confirmed: the self-update path deliberately avoids one).
-         */
-        get: operations["dictionary_manifest_for_device_api_kolibre_devices_dictionaries__lang__manifest_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/dictionaries/{lang}/file/{filename}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Dictionary File For Device */
-        get: operations["dictionary_file_for_device_api_kolibre_devices_dictionaries__lang__file__filename__get"];
-        put?: never;
-        post?: never;
+        post: operations["upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3517,37 +3584,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/kolibre/devices/caratteri/state": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Device Letture State
-         * @description Da quale istante il dispositivo deve mandare le letture misurate in
-         *     caratteri.
-         *
-         *     Vedi `letture_service.stato_letture`: "da" e' l'ultimo istante noto meno
-         *     una finestra di sovrapposizione di un giorno, non l'ultimo istante secco —
-         *     una riga viene scritta quando la pagina viene LASCIATA, e un lettore puo'
-         *     restare spento in mezzo.
-         *
-         *     **Questa rotta esiste anche per dire al plugin che il server sa riceverle:**
-         *     un plugin piu' nuovo del server trova un 404 e tiene le sue righe invece
-         *     di buttarle.
-         */
-        get: operations["device_letture_state_api_kolibre_devices_caratteri_state_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/caratteri/incremental": {
+    "/api/kolibre/devices/sync/dictionaries/ack": {
         parameters: {
             query?: never;
             header?: never;
@@ -3557,22 +3594,57 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Upload Letture Incremental
-         * @description Le letture misurate in caratteri che il dispositivo ha e il server no.
+         * Conferma Dizionario Dal Dispositivo
+         * @description «Il dizionario e' arrivato»: lo togliamo dalla coda.
          *
-         *     Una riga per pagina visitata — quando, per quanto, da quale carattere a
-         *     quale — piu' una per ogni popup di nota tenuto aperto. Le posizioni sono
-         *     xpointer di crengine; il carattere assoluto lo calcola il server
-         *     (`letture_service.converti_le_letture`), e questo e' il punto dell'intero
-         *     disegno: la PROVA resta nel database, quindi se l'indice del testo
-         *     migliora lo storico si ricalcola. Vedi la testa di `letture_service.py`.
-         *
-         *     La conversione si fa **subito dopo**, sul lotto appena arrivato, e non e'
-         *     bloccante per la risposta nel senso che conta: se fallisce, le righe
-         *     restano con `stato_conversione` vuoto e il giro successivo le riprende.
-         *     Una conversione che fallisce non deve far fallire una consegna riuscita.
+         *     Lo dice il dispositivo e non lo decide il server, per lo stesso motivo
+         *     per cui esiste la conferma dei download dei libri: aver *mandato* i file
+         *     non prova che siano arrivati interi. Il plugin conferma solo dopo aver
+         *     verificato l'impronta di ogni file (vedi downloadDictionary); se non
+         *     conferma, la voce resta in coda e al prossimo giro si riprova.
          */
-        post: operations["upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post"];
+        post: operations["conferma_dizionario_dal_dispositivo_api_kolibre_devices_sync_dictionaries_ack_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/dictionaries/{lang}/manifest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Dictionary Manifest For Device
+         * @description "Scarica dizionario sul dispositivo" (main.lua): same manifest +
+         *     per-file-download shape the plugin already uses for its own self-update
+         *     (_downloadAndInstallUpdate) — reused instead of inventing an on-device
+         *     unzip, since KOReader has no archive-extraction library available to
+         *     this plugin (confirmed: the self-update path deliberately avoids one).
+         */
+        get: operations["dictionary_manifest_for_device_api_kolibre_devices_dictionaries__lang__manifest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/kolibre/devices/dictionaries/{lang}/file/{filename}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Dictionary File For Device */
+        get: operations["dictionary_file_for_device_api_kolibre_devices_dictionaries__lang__file__filename__get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3670,29 +3742,6 @@ export interface paths {
          *     c'è nessuna ragione per cui debba sceglierlo il lettore.
          */
         post: operations["upload_diagnostic_log_api_kolibre_devices_diagnostic_log_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/devices/sync/confirm": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Koreader Sync Confirm
-         * @description v1 compat shim: the old plugin acknowledges applied queue entries by id.
-         *     Since protocol v2 those ids ARE DeviceBook row ids (see the legacy branch
-         *     of /sync), so confirming a download marks the row synced and confirming a
-         *     delete removes it — same transitions as /sync/ack, without a session.
-         */
-        post: operations["koreader_sync_confirm_api_kolibre_devices_sync_confirm_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4801,7 +4850,7 @@ export interface paths {
          *     (used by the web UI) is display-name-oriented and doesn't expose the
          *     on-disk folder_name that every other per-library endpoint (books,
          *     custom-columns, fulltext, this router) expects as its `library`/`folder`
-         *     parameter — mirrors the same reasoning as devices.py's
+         *     parameter — mirrors the same reasoning as devices/sync.py's
          *     /api/kolibre/devices/libraries (the KOReader-plugin equivalent).
          *
          *     **Solo le sue** (8/11/2026). Questa elencava ogni biblioteca del
@@ -4871,7 +4920,7 @@ export interface paths {
         put?: never;
         /**
          * Upload Library Fulltext Db
-         * @description Raw-bytes upload (no multipart, same pattern as devices.py's
+         * @description Raw-bytes upload (no multipart, same pattern as devices/backups_stats.py's
          *     /api/kolibre/devices/backup) of a fulltext.db previously downloaded from
          *     THIS server (or another Kolibre server) — accepted only after validating
          *     it's actually a SQLite db with the expected fts_meta table, so a
@@ -5171,7 +5220,7 @@ export interface paths {
         /**
          * Pair Orphan Sessions
          * @description Manual "Accoppia manualmente" action for orphan reading sessions —
-         *     same shape as devices.py's pair_device_book/queue_flagged_book_action
+         *     same shape as the devices package's pair_device_book/queue_flagged_book_action
          *     "pair" action for OrphanHighlight, applied to stats_service.
          *     pair_orphan_sessions (see StatsHashPairing's own docstring for why this
          *     is needed at all: automatic hash-based resolution has nothing left to
@@ -6915,7 +6964,10 @@ export interface components {
         Body_upload_library_book_api_kolibre_library_transfer__folder__books_post: {
             /** Metadata */
             metadata: string;
-            /** Files */
+            /**
+             * Files
+             * @default []
+             */
             files: string[];
             /** Cover */
             cover?: string | null;
@@ -8725,6 +8777,24 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * InviiAccodati
+         * @description L'esito dell'invio multiplo (21/11/2026, regola di Paolo): partono SOLO
+         *     i libri che sul dispositivo mancano, e la risposta dice uno per uno
+         *     quali sono partiti e quali no — perche' il browser deve poterlo
+         *     mostrare, non solo saperlo. Le due liste insieme coprono tutti i libri
+         *     chiesti; entrambe possono essere vuote, mai tutte e due.
+         */
+        InviiAccodati: {
+            /** Status */
+            status: string;
+            /** Queued */
+            queued: components["schemas"]["LibroAccodato"][];
+            /** Skipped */
+            skipped: components["schemas"]["LibroSaltato"][];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * InvitiDiAccoppiamento
          * @description Gli ultimi inviti di chi guarda, dal piu' recente. Solo i suoi.
          */
@@ -8795,6 +8865,19 @@ export interface components {
             ip: string | null;
         } & {
             [key: string]: unknown;
+        };
+        /**
+         * IsbnImportRequest
+         * @description Voci di Ingest senza file da uno o più ISBN (22-23/11/2026): ogni
+         *     ISBN valido va in attesa coi metadati delle fonti, e si importa dopo,
+         *     come un file. `library` serve solo all'avviso «ce l'hai già»: la
+         *     biblioteca di destinazione vera si sceglie all'importazione.
+         */
+        IsbnImportRequest: {
+            /** Isbns */
+            isbns: string[];
+            /** Library */
+            library?: string | null;
         };
         /**
          * IstruzioniEseguite
@@ -8921,24 +9004,6 @@ export interface components {
             [key: string]: unknown;
         };
         /**
-         * InviiAccodati
-         * @description L'esito dell'invio multiplo (21/11/2026, regola di Paolo): partono SOLO
-         *     i libri che sul dispositivo mancano, e la risposta dice uno per uno
-         *     quali sono partiti e quali no — perche' il browser deve poterlo
-         *     mostrare, non solo saperlo. Le due liste insieme coprono tutti i libri
-         *     chiesti; entrambe possono essere vuote, mai tutte e due.
-         */
-        InviiAccodati: {
-            /** Status */
-            status: string;
-            /** Queued */
-            queued: components["schemas"]["LibroAccodato"][];
-            /** Skipped */
-            skipped: components["schemas"]["LibroSaltato"][];
-        } & {
-            [key: string]: unknown;
-        };
-        /**
          * LibriDaScoprire
          * @description «Da scoprire»: libri che su questo lettore non ci sono, scelti fra
          *     quelli dello stesso autore o con le stesse etichette di cio' che e'
@@ -8958,6 +9023,18 @@ export interface components {
             totale: number;
             /** Senza Anagrafica */
             senza_anagrafica: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LibroAccodato
+         * @description Un libro che l'invio multiplo ha messo in coda, col formato scelto.
+         */
+        LibroAccodato: {
+            /** Calibre Book Id */
+            calibre_book_id: number;
+            /** Format */
+            format: string;
         } & {
             [key: string]: unknown;
         };
@@ -9005,18 +9082,6 @@ export interface components {
             status: string;
             /** Book Id */
             book_id: number;
-        } & {
-            [key: string]: unknown;
-        };
-        /**
-         * LibroAccodato
-         * @description Un libro che l'invio multiplo ha messo in coda, col formato scelto.
-         */
-        LibroAccodato: {
-            /** Calibre Book Id */
-            calibre_book_id: number;
-            /** Format */
-            format: string;
         } & {
             [key: string]: unknown;
         };
@@ -9285,6 +9350,18 @@ export interface components {
             qualita: {
                 [key: string]: unknown;
             } | null;
+            /** Pages */
+            pages: number | null;
+            /**
+             * Record Only
+             * @default false
+             */
+            record_only: boolean;
+            /**
+             * Supported
+             * @default true
+             */
+            supported: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -9582,6 +9659,10 @@ export interface components {
             author: string | null;
             /** Formats */
             formats: string[];
+            /** Pages */
+            pages: number | null;
+            /** Qualita Punteggio */
+            qualita_punteggio?: number | null;
         } & {
             [key: string]: unknown;
         };
@@ -11085,6 +11166,47 @@ export interface components {
             photo_url: string | null;
             /** Last Scraped At */
             last_scraped_at: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SchedaDaIsbn
+         * @description L'esito di UN ISBN della messa in attesa senza file (22-23/11/2026:
+         *     la voce nasce in Ingest e si importa dopo, come un file).
+         *
+         *     Ogni riga e' indipendente: un ISBN non valido non ferma gli altri —
+         *     lo stesso disegno «parziale per costruzione» del caricamento dal
+         *     browser.
+         */
+        SchedaDaIsbn: {
+            /** Isbn */
+            isbn: string;
+            /** Esito */
+            esito: string;
+            /** Staged Id */
+            staged_id: number | null;
+            /** Title */
+            title: string | null;
+            /** Author */
+            author: string | null;
+            /** Cover */
+            cover: boolean;
+            /** Existing Book Id */
+            existing_book_id: number | null;
+            /** Existing Title */
+            existing_title: string | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * SchedeDaIsbn
+         * @description Tutte le righe dell'importazione per ISBN, nella stessa chiamata.
+         */
+        SchedeDaIsbn: {
+            /** Library */
+            library: string;
+            /** Rows */
+            rows: components["schemas"]["SchedaDaIsbn"][];
         } & {
             [key: string]: unknown;
         };
@@ -13343,6 +13465,41 @@ export interface operations {
             };
         };
     };
+    stage_books_by_isbn_api_kolibre_ingest_isbn_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IsbnImportRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedeDaIsbn"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_ingest_file_api_kolibre_ingest__id__file_get: {
         parameters: {
             query?: {
@@ -15313,79 +15470,6 @@ export interface operations {
             };
         };
     };
-    accoda_dizionario_per_dispositivo_api_devices__device_id__dictionaries_post: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DizionariInCoda"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    annulla_dizionario_per_dispositivo_api_devices__device_id__dictionaries__lang__delete: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-                lang: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DizionariInCoda"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     list_devices_api_devices_get: {
         parameters: {
             query?: {
@@ -15455,78 +15539,6 @@ export interface operations {
         };
     };
     delete_device_api_devices__device_id__delete: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Esito"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    confirm_device_restore_request_api_devices__device_id__restore_request_confirm_post: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Esito"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    cancel_device_restore_request_api_devices__device_id__restore_request_delete: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -15703,139 +15715,6 @@ export interface operations {
             };
         };
     };
-    list_device_backups_api_devices__device_id__backups_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FileDiBackup"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_device_diagnostics_api_devices__device_id__diagnostics_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown[];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    read_device_diagnostic_api_devices__device_id__diagnostics__filename__get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-                filename: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "text/plain": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    download_device_backups_api_devices__device_id__backups_download_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path: {
-                device_id: number;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/zip": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_device_sync_history_api_devices__device_id__sync_history_get: {
         parameters: {
             query?: {
@@ -15857,6 +15736,114 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SincronizzazioneNelloStorico"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    acknowledge_book_removal_api_devices__device_id__books__book_row_id__acknowledge_removal_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                book_row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_pending_book_action_api_devices__device_id__books__book_row_id__cancel_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                book_row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pair_device_book_api_devices__device_id__books__book_row_id__pair_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                book_row_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrfaneMigrate"];
                 };
             };
             /** @description Validation Error */
@@ -16016,7 +16003,7 @@ export interface operations {
             };
         };
     };
-    acknowledge_book_removal_api_devices__device_id__books__book_row_id__acknowledge_removal_post: {
+    list_device_backups_api_devices__device_id__backups_get: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -16024,7 +16011,6 @@ export interface operations {
             header?: never;
             path: {
                 device_id: number;
-                book_row_id: number;
             };
             cookie?: never;
         };
@@ -16036,7 +16022,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Esito"];
+                    "application/json": components["schemas"]["FileDiBackup"][];
                 };
             };
             /** @description Validation Error */
@@ -16050,7 +16036,7 @@ export interface operations {
             };
         };
     };
-    cancel_pending_book_action_api_devices__device_id__books__book_row_id__cancel_post: {
+    download_device_backups_api_devices__device_id__backups_download_get: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -16058,7 +16044,6 @@ export interface operations {
             header?: never;
             path: {
                 device_id: number;
-                book_row_id: number;
             };
             cookie?: never;
         };
@@ -16070,7 +16055,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Esito"];
+                    "application/zip": unknown;
                 };
             };
             /** @description Validation Error */
@@ -16084,7 +16069,7 @@ export interface operations {
             };
         };
     };
-    pair_device_book_api_devices__device_id__books__book_row_id__pair_post: {
+    accoda_dizionario_per_dispositivo_api_devices__device_id__dictionaries_post: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -16092,7 +16077,6 @@ export interface operations {
             header?: never;
             path: {
                 device_id: number;
-                book_row_id: number;
             };
             cookie?: never;
         };
@@ -16110,7 +16094,180 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["OrfaneMigrate"];
+                    "application/json": components["schemas"]["DizionariInCoda"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    annulla_dizionario_per_dispositivo_api_devices__device_id__dictionaries__lang__delete: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                lang: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DizionariInCoda"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_device_restore_request_api_devices__device_id__restore_request_confirm_post: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_device_restore_request_api_devices__device_id__restore_request_delete: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_device_diagnostics_api_devices__device_id__diagnostics_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown[];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    read_device_diagnostic_api_devices__device_id__diagnostics__filename__get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path: {
+                device_id: number;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/plain": unknown;
                 };
             };
             /** @description Validation Error */
@@ -16144,76 +16301,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InventarioDelDispositivo"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    scan_unmatched_books_api_kolibre_devices_scan_unmatched_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ScansioneDeiNonAccoppiati"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    report_flagged_book_api_kolibre_devices_flagged_books_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LibroSegnalato"] | components["schemas"]["SegnalazioneAccoppiataDaSola"];
                 };
             };
             /** @description Validation Error */
@@ -16283,249 +16370,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CapacitaDelServer"];
-                };
-            };
-        };
-    };
-    catalog_sections_api_kolibre_devices_catalog_sections__section__get: {
-        parameters: {
-            query: {
-                library: string;
-                page?: number;
-                size?: number;
-                q?: string;
-            };
-            header?: never;
-            path: {
-                section: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SezioneDelCatalogo"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    catalog_discover_api_kolibre_devices_catalog_discover_get: {
-        parameters: {
-            query: {
-                library: string;
-                limit?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LibriDaScoprire"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    browse_catalog_api_kolibre_devices_catalog_get: {
-        parameters: {
-            query: {
-                library: string;
-                q?: string;
-                author?: string;
-                series?: string;
-                tag?: string;
-                sort?: string;
-                page?: number;
-                size?: number;
-                exclude_on_device?: boolean;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["CatalogoSfogliato"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    identify_device_file_api_kolibre_devices_identify_file_post: {
-        parameters: {
-            query: {
-                filename: string;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["FileIdentificato"] | components["schemas"]["FileNonIdentificato"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    push_device_annotations_api_kolibre_devices_annotations_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnnotazioniRicevute"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    reconcile_device_annotations_api_kolibre_devices_annotations_reconcile_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AnnotazioniRiconciliate"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    auto_pair_orphan_annotations_api_kolibre_devices_annotations_auto_pair_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrfaneMigrate"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -16775,6 +16619,354 @@ export interface operations {
             };
         };
     };
+    koreader_sync_confirm_api_kolibre_devices_sync_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SincronizzazioneConfermata"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_sections_api_kolibre_devices_catalog_sections__section__get: {
+        parameters: {
+            query: {
+                library: string;
+                page?: number;
+                size?: number;
+                q?: string;
+            };
+            header?: never;
+            path: {
+                section: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SezioneDelCatalogo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    catalog_discover_api_kolibre_devices_catalog_discover_get: {
+        parameters: {
+            query: {
+                library: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibriDaScoprire"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    browse_catalog_api_kolibre_devices_catalog_get: {
+        parameters: {
+            query: {
+                library: string;
+                q?: string;
+                author?: string;
+                series?: string;
+                tag?: string;
+                sort?: string;
+                page?: number;
+                size?: number;
+                exclude_on_device?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CatalogoSfogliato"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    push_device_annotations_api_kolibre_devices_annotations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotazioniRicevute"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reconcile_device_annotations_api_kolibre_devices_annotations_reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AnnotazioniRiconciliate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    auto_pair_orphan_annotations_api_kolibre_devices_annotations_auto_pair_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrfaneMigrate"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    scan_unmatched_books_api_kolibre_devices_scan_unmatched_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScansioneDeiNonAccoppiati"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    report_flagged_book_api_kolibre_devices_flagged_books_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibroSegnalato"] | components["schemas"]["SegnalazioneAccoppiataDaSola"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    identify_device_file_api_kolibre_devices_identify_file_post: {
+        parameters: {
+            query: {
+                filename: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileIdentificato"] | components["schemas"]["FileNonIdentificato"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pull_reading_progress_api_kolibre_devices_progress_get: {
         parameters: {
             query?: {
@@ -16844,7 +17036,27 @@ export interface operations {
             };
         };
     };
-    conferma_dizionario_dal_dispositivo_api_kolibre_devices_sync_dictionaries_ack_post: {
+    device_letture_state_api_kolibre_devices_caratteri_state_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StatoDelleLetture"];
+                };
+            };
+        };
+    };
+    upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -16865,70 +17077,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Esito"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dictionary_manifest_for_device_api_kolibre_devices_dictionaries__lang__manifest_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lang: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ManifestDelDizionario"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    dictionary_file_for_device_api_kolibre_devices_dictionaries__lang__file__filename__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                lang: string;
-                filename: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/octet-stream": unknown;
+                    "application/json": components["schemas"]["LettureCucite"];
                 };
             };
             /** @description Validation Error */
@@ -17048,27 +17197,7 @@ export interface operations {
             };
         };
     };
-    device_letture_state_api_kolibre_devices_caratteri_state_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["StatoDelleLetture"];
-                };
-            };
-        };
-    };
-    upload_letture_incremental_api_kolibre_devices_caratteri_incremental_post: {
+    conferma_dizionario_dal_dispositivo_api_kolibre_devices_sync_dictionaries_ack_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -17089,7 +17218,70 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LettureCucite"];
+                    "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dictionary_manifest_for_device_api_kolibre_devices_dictionaries__lang__manifest_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lang: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManifestDelDizionario"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dictionary_file_for_device_api_kolibre_devices_dictionaries__lang__file__filename__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                lang: string;
+                filename: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Validation Error */
@@ -17226,41 +17418,6 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
-                };
-            };
-        };
-    };
-    koreader_sync_confirm_api_kolibre_devices_sync_confirm_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SincronizzazioneConfermata"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

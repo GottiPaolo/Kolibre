@@ -37,6 +37,7 @@ _FORMAT_MIME = {
     "CBZ": "application/vnd.comicbook+zip",
     "CBR": "application/vnd.comicbook-rar",
     "TXT": "text/plain",
+    "MD": "text/markdown",
     "RTF": "application/rtf",
     "DOCX": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
@@ -221,7 +222,12 @@ def _acquisition_feed(
 ) -> Response:
     _get_library_row(db, folder_name)
     lib = CalibreLibrary(config.library_path(folder_name))
-    books = lib.list_books()
+    # Niente schede fantasma (soli metadati, nessun formato — 22/11/2026):
+    # un feed di acquisizione promette file da scaricare, e una entry senza
+    # link di download e' solo rumore su un e-reader. E' la scelta
+    # dell'OPDS 2 di Calibre; il suo OPDS 1 le mostra senza link, e fra le
+    # due filosofie Paolo ha scelto la prima.
+    books = [b for b in lib.list_books() if b.get("formats")]
     books.sort(key=sort_key, reverse=reverse)
 
     total_pages = max(1, math.ceil(len(books) / PAGE_SIZE))

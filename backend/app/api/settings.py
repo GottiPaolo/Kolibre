@@ -45,8 +45,8 @@ from sqlalchemy.orm import Session
 from .. import auth, database, models
 from ..logging_utils import log_message
 from ..schemas_risposte import (
-    ImpostazioneContoPagine, ImpostazionePaginazione, Interruttore,
-    SogliaDelleSessioni, TettoDellIndice,
+    ImpostazioneContoPagine, ImpostazionePaginazione,
+    Interruttore, SogliaDelleSessioni, TettoDellIndice,
 )
 from ..services import app_settings, stats_service
 
