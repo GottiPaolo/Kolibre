@@ -14,11 +14,14 @@ import {
 } from '@/components/settings/SettingsPrimitives'
 import {
   getAutoWikiScrapeSetting,
+  getWikipediaLanguagesSetting,
   loadScraperSettings,
   saveScraperSettings,
   setAutoWikiScrapeSetting,
+  setWikipediaLanguagesSetting,
   type ScraperSettings,
 } from '@/lib/scraperSettingsActions'
+import { autonym } from '@/lib/wikipediaLanguages'
 import { dictionaryErrorDetail, installDictionary, uninstallDictionary, useDictionaries } from '@/lib/dictionaryActions'
 import { CalibrePluginDialog, ObsidianPluginDialog } from './DesktopPluginDialogs'
 import { numero, useLingua } from '@/lib/i18n'
@@ -26,17 +29,18 @@ import { numero, useLingua } from '@/lib/i18n'
 // Impostazioni ▸ Integrazioni: quello che collega Kolibre a programmi e
 // servizi esterni (plugin desktop, Wikipedia, dizionari offline).
 //
-// "Priorità lingue scraper" resta solo client-side (vedi
-// lib/scraperSettingsActions.ts); il toggle auto-wiki invece è collegato al
-// backend reale (AppSetting "auto_wiki_scrape") — localStorage ne resta solo
-// una cache per il primo paint, sovrascritta dal valore del backend appena
-// arriva.
+// Dal 23/11/2026 ANCHE le lingue sono un'impostazione backend reale
+// (AppSetting "wikipedia_bio_languages"): le lingue attive qui sono quelle
+// che lo scraper percorre e per cui la pagina autore mostra un pannello.
+// localStorage resta una cache per il primo paint (nomi e ordine della
+// lista compresi), sovrascritta dal valore del backend appena arriva.
 export function IntegrationsTab() {
   const { t } = useLingua()
   const [showCalibre, setShowCalibre] = useState(false)
   const [showObsidian, setShowObsidian] = useState(false)
   const [settings, setSettings] = useState<ScraperSettings>(() => loadScraperSettings())
   const [autoWikiSaveError, setAutoWikiSaveError] = useState(false)
+  const [languagesSaveError, setLanguagesSaveError] = useState(false)
 
   useEffect(() => {
     getAutoWikiScrapeSetting()
@@ -46,6 +50,28 @@ export function IntegrationsTab() {
       })
       .catch(() => {
         // Backend irraggiungibile: resta il valore da localStorage già caricato.
+      })
+    getWikipediaLanguagesSetting()
+      .then((attive) => {
+        // Il backend è la verità sulle ATTIVE: la lista locale si riconcilia
+        // (una lingua attiva sul server ma assente qui viene aggiunta, col
+        // suo autonimo), nomi e ordine della lista restano cose della UI.
+        setSettings((prev) => {
+          const noti = new Set(prev.languages.map((l) => l.code))
+          const aggiunte = attive
+            .filter((code) => !noti.has(code))
+            .map((code) => ({ code, name: autonym(code), active: true }))
+          const languages = [
+            ...prev.languages.map((l) => ({ ...l, active: attive.includes(l.code) })),
+            ...aggiunte,
+          ]
+          const next = { ...prev, languages }
+          saveScraperSettings(next)
+          return next
+        })
+      })
+      .catch(() => {
+        // Backend irraggiungibile: resta la lista da localStorage.
       })
   }, [])
 
@@ -65,17 +91,32 @@ export function IntegrationsTab() {
     }
   }
 
+  // Le lingue ATTIVE, nell'ordine della lista, vanno anche al server: sono
+  // l'impostazione vera (lo scraper le percorre in quest'ordine, e la prima
+  // che ha una foto vince). Su errore si torna com'era, come per auto-wiki.
+  async function persistLanguages(languages: ScraperSettings['languages']) {
+    const prima = settings
+    persist({ ...settings, languages })
+    setLanguagesSaveError(false)
+    try {
+      await setWikipediaLanguagesSetting(languages.filter((l) => l.active).map((l) => l.code))
+    } catch {
+      persist(prima)
+      setLanguagesSaveError(true)
+    }
+  }
+
   function shiftLanguage(idx: number, dir: -1 | 1) {
     const target = idx + dir
     if (target < 0 || target >= settings.languages.length) return
     const languages = [...settings.languages]
     ;[languages[idx], languages[target]] = [languages[target], languages[idx]]
-    persist({ ...settings, languages })
+    void persistLanguages(languages)
   }
 
   function toggleLanguage(idx: number) {
     const languages = settings.languages.map((l, i) => (i === idx ? { ...l, active: !l.active } : l))
-    persist({ ...settings, languages })
+    void persistLanguages(languages)
   }
 
   return (
@@ -155,6 +196,10 @@ export function IntegrationsTab() {
             ))}
           </SettingsList>
         </SettingsRow>
+
+        {languagesSaveError && (
+          <SettingsFeedback kind="error">{t('settings.integrations.wikipedia.saveError')}</SettingsFeedback>
+        )}
 
         <SettingsHint>{t('settings.integrations.wikipedia.hint')}</SettingsHint>
       </SettingsSection>

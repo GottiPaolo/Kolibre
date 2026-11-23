@@ -709,7 +709,7 @@ class CalibreLibrary:
             conn.close()
 
     def get_description(self, book_id: int) -> Optional[str]:
-        """Untruncated companion to the excerpt api/books.py's list_books()
+        """Raw companion to the sanitized description api/books.py's list_books()
         sends in bulk — a single targeted query, not the full list_books()
         machinery, since this only ever needs one book's comments text."""
         conn = self._connect()

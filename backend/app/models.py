@@ -1178,6 +1178,36 @@ class AuthorMetadata(Base):
     # autore mai cercato, e si ritenterebbe all'infinito.
     wikidata_fetched_at = Column(DateTime, nullable=True)
 
+    # Le biografie nelle lingue oltre it/en (23/11/2026): vedi AuthorBio.
+    extra_bios = relationship("AuthorBio", back_populates="author_metadata", cascade="all, delete-orphan")
+
+
+class AuthorBio(Base):
+    """
+    Biografia di un autore in UNA lingua di Wikipedia (23/11/2026).
+
+    Le due colonne storiche `AuthorMetadata.bio_it`/`bio_en` restano al loro
+    posto e continuano a riempirsi: sono la coppia su cui vivono l'editing a
+    mano e tutto il pregresso. Le lingue OLTRE it/en stanno qui, una riga per
+    (autore, lingua), cosi' aggiungere una lingua nelle impostazioni non
+    aggiunge colonne. La tabella e' nuova di zecca: nasce da create_all come
+    le altre tabelle nuove (es. qualita_libri), senza migrazione.
+    """
+    __tablename__ = "author_bios"
+
+    id = Column(Integer, primary_key=True, index=True)
+    author_metadata_id = Column(Integer, ForeignKey("author_metadata.id"), nullable=False, index=True)
+    # Codice lingua di Wikipedia ("de", "fr", "pt-br"...): lo stesso che
+    # compare nel dominio <lang>.wikipedia.org.
+    lang = Column(String, nullable=False)
+    bio = Column(Text, nullable=True)
+    wikipedia_url = Column(String, nullable=True)
+    fetched_at = Column(DateTime, nullable=True)
+
+    author_metadata = relationship("AuthorMetadata", back_populates="extra_bios")
+
+    __table_args__ = (UniqueConstraint("author_metadata_id", "lang", name="uq_author_bio_lang"),)
+
 
 class PendingCalibreWrite(Base):
     """Fallback queue for metadata.db writes that failed after exhausting in-process retries."""

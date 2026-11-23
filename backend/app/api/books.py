@@ -25,7 +25,7 @@ from ..schemas_risposte import (
     ValoriDeiCampi,
 )
 from ..services.immagini_remote import scarica_immagine
-from ..services.html_sanitizer import sanitize_description_excerpt
+from ..services.html_sanitizer import sanitize_description
 from ..services import cover_builder, converter, metadata_scraper, page_counter, toc_editor, stats_service, author_ingest_hook, app_settings, author_stats_service, book_records, book_hash_service
 from ..calibre.library import CalibreLibrary
 from ..calibre.functions import string_to_authors
@@ -63,16 +63,14 @@ device_or_user_router = APIRouter(
 _CFI_PROGRESS_PREFIX = "cfi:"
 
 
-# Every book's full comments/description used to ride along in the bulk
-# list response even though only two places in the frontend ever show it:
-# the List view's inline snippet (already visually clipped to a couple of
-# lines by CSS) and the full book-detail page. For a library with long,
-# real descriptions this can add real MBs to a 1200-book response for text
-# that's 95% never read at that length. Truncated here; the detail page
-# fetches the untruncated text on demand via GET /{id}/description below.
-_LIST_DESCRIPTION_EXCERPT_CHARS = 400
-
-
+# La descrizione viaggia INTERA nell'elenco (23/11/2026, scelta di Paolo:
+# prima c'era un estratto da 400 caratteri e NESSUNA schermata mostrava mai
+# il testo intero, nemmeno il dettaglio). Il taglio e' tornato a essere
+# solo di presentazione: l'anteprima rapida si accorcia da sola con un
+# tasto «Mostra tutto». Misurato sulla biblioteca vera prima di decidere:
+# il caso peggiore (5840 libri) porta 2,2 MB di descrizioni contro ~1,4 MB
+# che l'estratto gia' portava — col gzip la differenza reale e' qualche
+# centinaio di KB, e non vale una seconda richiesta.
 # ── «Che cosa è cambiato?», per un client con una copia locale ──
 #
 # **Il problema** (letto il 16/11/2026, mentre si preparava il client
@@ -265,14 +263,14 @@ def list_books(
         # "#<label>" key per column that actually exists in this library, not
         # just the two seeded demo columns), so pass all of them through as-is.
         custom_values = {k: v for k, v in b.items() if k.startswith("#")}
-        # Troncata E sanificata (20/11/2026, punto G9): la webapp la mette
-        # in `dangerouslySetInnerHTML` per mostrare l'HTML di Calibre
-        # formattato, quindi QUI è il confine dove tutto quello che non sta
-        # nella lista bianca deve cadere. Solo questa rotta: l'OPDS si
-        # spoglia i tag per conto suo, il catalogo del plugin KOReader non
-        # porta descrizioni, e GET /{id}/description resta grezzo perché è
-        # la sorgente dell'editor dei metadati (vedi html_sanitizer.py).
-        description = sanitize_description_excerpt(b["description"], _LIST_DESCRIPTION_EXCERPT_CHARS)
+        # Intera e sanificata (20/11/2026, punto G9; intera dal 23/11):
+        # la webapp la mette in `dangerouslySetInnerHTML` per mostrare
+        # l'HTML di Calibre formattato, quindi QUI è il confine dove tutto
+        # quello che non sta nella lista bianca deve cadere. Solo questa
+        # rotta: l'OPDS si spoglia i tag per conto suo, il catalogo del
+        # plugin KOReader non porta descrizioni, e GET /{id}/description
+        # resta grezzo perché è la sorgente dell'editor dei metadati.
+        description = sanitize_description(b["description"])
         result.append({
             "id": b["id"],
             "title": b["title"],
@@ -380,9 +378,9 @@ def get_pagination_mode(
 
 @router.get("/{id}/description", responses={200: {"model": DescrizioneLibro}})
 def get_book_description(id: int, library: str = Depends(default_library_param)):
-    """Untruncated companion to the excerpt list_books() above sends in bulk
-    — fetched on demand only by the metadata editor, which is the one place
-    that needs the full text. A single targeted query (CalibreLibrary
+    """RAW companion to the sanitized description list_books() sends (whole,
+    since 23/11/2026) — fetched on demand only by the metadata editor, which
+    must edit Calibre's original HTML, not the sanitized rendering. A single targeted query (CalibreLibrary
     .get_description), not the whole list_books() machinery, for one field
     of one book.
 

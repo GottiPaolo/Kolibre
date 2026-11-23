@@ -20,8 +20,10 @@ import { useBookActions } from '@/lib/bookActionsContext'
 import { useLingua, type Valori } from '@/lib/i18n'
 
 // Nomi delle lingue nella lingua dell'interfaccia — non nella lingua stessa
-// (l'italiano non diventa "Italian" passando a inglese): e' una scelta,
-// coerente con authors.detail.langEnglish/langItalian che fa lo stesso.
+// (l'italiano non diventa "Italian" passando a inglese): e' una scelta.
+// (I pannelli biografia della pagina Autore fanno l'opposto, con gli
+// autonimi di lib/wikipediaLanguages.ts: la' il nome identifica l'edizione
+// di Wikipedia, qui descrive il libro a chi legge.)
 function languageOptions(t: (chiave: string, valori?: Valori) => string) {
   return [
     { value: '', label: '—' },

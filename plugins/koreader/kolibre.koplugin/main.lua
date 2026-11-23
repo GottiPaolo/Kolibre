@@ -655,7 +655,7 @@ local KolibreAccoppiamento = require("kolibre_accoppiamento")
 -- calcoli il server e non noi.
 local KolibreLetture = require("kolibre_letture")
 
-local VERSION = "0.27.0"
+local VERSION = "0.28.0"
 
 -- La versione la dichiara questo file (la legge anche il server, vedi
 -- backend/app/api/tools.py); i moduli che la usano la ricevono qui.
@@ -4962,6 +4962,12 @@ end
 -- position_dirty_paths) — no books_dir walk, unlike push_pos_all above. The
 -- currently open book is excluded (pushProgress covers it separately, same
 -- convention _computeProgressDiff already uses).
+-- Dopo quanti giri di sincronizzazione falliti di fila si smette di
+-- ritentare la posizione di UN libro (la rete assente non conta: la ferma
+-- _requireReachable prima di arrivare qui — questi sono errori del server
+-- su quel libro, tipicamente un hash che non risolve).
+local POSITION_PUSH_MAX_FAILURES = 5
+
 function Kolibre:_pushQueuedPositions(interactive)
     if not self:_requireReachable(interactive) then return end
     local paths = self.manifest:positionDirtyPaths()
@@ -4969,6 +4975,7 @@ function Kolibre:_pushQueuedPositions(interactive)
     local current_path = self.ui.document and self.ui.document.file or nil
 
     local pushed = 0
+    local gave_up = 0
     for _idx, path in ipairs(paths) do
         if path == current_path then
             self.manifest:clearPositionDirty(path) -- pushProgress covers this one
@@ -4984,12 +4991,29 @@ function Kolibre:_pushQueuedPositions(interactive)
                 if ok then
                     pushed = pushed + 1
                     self.manifest:clearPositionDirty(path)
+                else
+                    -- Fallito: resta in coda, ma NON per sempre (23/11/2026,
+                    -- richiesta di Paolo: prima si ritentava in silenzio
+                    -- all'infinito). Dopo POSITION_PUSH_MAX_FAILURES
+                    -- fallimenti consecutivi si rinuncia e lo si DICE una
+                    -- volta; riaprire il libro rimette la posizione in coda
+                    -- da zero (markPositionDirty azzera il contatore), e
+                    -- «Sincronizza tutto» la manda comunque.
+                    if self.manifest:positionPushFailed(path) >= POSITION_PUSH_MAX_FAILURES then
+                        self.manifest:clearPositionDirty(path)
+                        gave_up = gave_up + 1
+                    end
                 end
-                -- On failure: left in the queue, retried next time.
             else
                 self.manifest:clearPositionDirty(path) -- file gone or unreadable, nothing to retry
             end
         end
+    end
+    if gave_up > 0 then
+        UIManager:show(InfoMessage:new{
+            text = t("koreader.position.push_gave_up", { count = gave_up, tries = POSITION_PUSH_MAX_FAILURES }),
+            timeout = 6,
+        })
     end
     if interactive and pushed > 0 then
         UIManager:show(InfoMessage:new{ text = t("koreader.position.push_all_done", { count = pushed }), timeout = 3 })

@@ -81,12 +81,6 @@ _DROP_WITH_CONTENT = frozenset({"script", "style", "iframe", "object", "embed"})
 # descrizione di libro non può puntare a niente di legittimo nostro.
 _SAFE_HREF = re.compile(r"^https?://", re.IGNORECASE)
 
-# Un tag tagliato a metà da un troncamento («...testo <stro»): da togliere
-# PRIMA di sanificare, perché il parser a fine corsa lo emetterebbe come
-# testo e si vedrebbe un «<stro» nudo nell'estratto.
-_DANGLING_TAG = re.compile(r"<[^>]*$")
-
-
 class _WhitelistSanitizer(HTMLParser):
     """Riscrive l'HTML tenendo solo la lista bianca, richiudendo i tag.
 
@@ -196,23 +190,6 @@ def sanitize_description(html: Optional[str]) -> Optional[str]:
     parser = _WhitelistSanitizer()
     parser.feed(html)
     return parser.result()
-
-
-def sanitize_description_excerpt(html: Optional[str], max_chars: int) -> Optional[str]:
-    """L'estratto per l'elenco: troncato E sanificato, in quest'ordine.
-
-    Si tronca il GREZZO e si sanifica dopo, non il contrario: il
-    sanificatore richiude da sé i tag che il taglio ha lasciato aperti,
-    mentre tagliare l'output sanificato lo spaccherebbe a metà di un tag.
-    L'unico residuo del taglio è un eventuale tag spezzato in coda
-    (`…testo <stro`), che si toglie prima. Il budget conta i caratteri del
-    grezzo, tag compresi, come faceva il troncamento di prima.
-    """
-    if not html:
-        return html
-    if len(html) > max_chars:
-        html = _DANGLING_TAG.sub("", html[:max_chars].rstrip()).rstrip() + "…"
-    return sanitize_description(html)
 
 
 def _plain_text_to_html(text: str) -> str:

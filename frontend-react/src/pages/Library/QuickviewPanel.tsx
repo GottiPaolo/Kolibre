@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from 'react'
+import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { BookOpen, Highlighter, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -246,6 +246,27 @@ export function QuickviewPanel({
   // la loro presenza sì — stessa lista, stesso posto).
   const [fieldLayout] = useState(() => loadQuickviewFieldLayout(libraryFolder, customColumns, devices))
   const [descriptionVisible] = useState(() => loadQuickviewDescriptionVisible(libraryFolder))
+  // La descrizione arriva ormai INTERA dal server (23/11/2026): qui si
+  // accorcia solo per presentazione, con «Mostra tutto». Il bottone compare
+  // soltanto se il testo trabocca davvero dal riquadro chiuso.
+  //
+  // Misura e azzeramento in DUE effetti di layout ordinati (23/11 sera,
+  // indagine sulla schermata di Paolo): prima l'azzeramento al cambio di
+  // libro era un useEffect che girava DOPO la misura del ref e la
+  // cancellava anche alla prima apertura — «Mostra tutto» non e' mai
+  // comparso; e al cambio di libro il riquadro non si rimonta, quindi il
+  // ref non rimisurava mai. Ora: (1) il cambio di libro richiude il
+  // riquadro; (2) a riquadro chiuso si misura, e si rimisura a ogni
+  // cambio di libro o di descrizione.
+  const [descrizioneEspansa, setDescrizioneEspansa] = useState(false)
+  const [descrizioneTrabocca, setDescrizioneTrabocca] = useState(false)
+  const descrizioneRef = useRef<HTMLDivElement | null>(null)
+  useLayoutEffect(() => { setDescrizioneEspansa(false) }, [book.id])
+  useLayoutEffect(() => {
+    if (descrizioneEspansa) return
+    const el = descrizioneRef.current
+    setDescrizioneTrabocca(!!el && el.scrollHeight > el.clientHeight + 1)
+  }, [book.id, book.description, descrizioneEspansa])
   const customColumnsByLabel = new Map(customColumns.map((c) => [c.label, c]))
   const devicesById = new Map(devices.map((d) => [String(d.id), d]))
   const deviceStatusForBook = deviceStatusByBookId[book.id]
@@ -267,7 +288,15 @@ export function QuickviewPanel({
         <X className="size-3.5" />
       </button>
 
-      <div className="flex h-full flex-col gap-3 overflow-y-auto p-4">
+      {/* Due regioni, non una (23/11/2026 sera, segnalazione di Paolo:
+          con una descrizione lunga i bottoni coprivano il testo su Safari).
+          Prima i bottoni stavano DENTRO l'area che scorre, con mt-auto:
+          WebKit schiaccia i figli flessibili senza shrink-0 e il testo
+          finiva sotto i bottoni. Ora i contenuti scorrono in una regione
+          loro (min-h-0 + flex-1) e i bottoni vivono SOTTO, fissi e fuori
+          dallo scorrimento: niente puo' coprire la descrizione. */}
+      <div className="flex h-full flex-col">
+        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
         <div className="mx-auto w-[140px] shrink-0 overflow-hidden rounded-md border border-border bg-muted">
           {book.cover_url ? (
             // Larghezza fissa, altezza libera (niente aspect-ratio/object-fit
@@ -342,15 +371,43 @@ export function QuickviewPanel({
         </dl>
 
         {descriptionVisible && book.description && (
-          <div>
+          <div className="shrink-0">
             <h3 className="mb-1 text-[11px] font-semibold tracking-wide text-muted-foreground uppercase">{t('library.field.description')}</h3>
             {/* HTML, non più testo piatto (20/11/2026): il server consegna
-                `description` già sanificata — vedi BookDescriptionHtml. */}
-            <BookDescriptionHtml html={book.description} className="text-[13px]" />
+                `description` già sanificata — vedi BookDescriptionHtml.
+                max-h + overflow invece di line-clamp: il clamp WebKit coi
+                paragrafi annidati fa le bizze proprio su Safari. */}
+            {/* Il corpo del testo sta QUI (text-[13px]) e il tetto del
+                riquadro chiuso e' in em: 6 righe esatte a leading-relaxed
+                (6 × 1.625em = 9.75em), cosi' il taglio cade a fine riga e
+                mai a meta' delle lettere — il vecchio max-h-40 (160px
+                fissi) fermava il testo a meta' dell'ottava riga. Esatto
+                dentro un paragrafo; al confine fra due c'e' la spaziatura,
+                quindi li' e' approssimato, ma mai mezze lettere. */}
+            <div
+              ref={descrizioneRef}
+              className={descrizioneEspansa ? 'text-[13px]' : 'max-h-[9.75em] overflow-hidden text-[13px]'}
+            >
+              <BookDescriptionHtml html={book.description} />
+            </div>
+            {/* Un comando che apre e chiude, non un'azione: quindi un
+                link, non un pulsante (linea guida di Paolo, 23/11/2026 —
+                vedi docs/storico/interfaccia-e-stile.md). */}
+            {(descrizioneTrabocca || descrizioneEspansa) && (
+              <button
+                type="button"
+                className="mt-1 text-[12px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                onClick={() => setDescrizioneEspansa((v) => !v)}
+              >
+                {descrizioneEspansa ? t('library.quickview.showLessDescription') : t('library.quickview.showAllDescription')}
+              </button>
+            )}
           </div>
         )}
 
-        <div className="mt-auto flex flex-col gap-1.5 pt-2">
+        </div>
+
+        <div className="flex shrink-0 flex-col gap-1.5 border-t border-border p-4 pt-2.5">
           <Button variant="secondary" size="sm" onClick={onOpenDetail}>
             {t('library.quickview.fullDetail')}
           </Button>

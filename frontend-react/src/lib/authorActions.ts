@@ -41,14 +41,12 @@ export async function refreshAuthorFromWikipedia(name: string): Promise<AuthorDe
   return data
 }
 
-export async function refreshAuthorFromWikipediaUrl(
-  name: string,
-  url: string,
-  targetLang: 'it' | 'en'
-): Promise<AuthorDetail> {
+export async function refreshAuthorFromWikipediaUrl(name: string, url: string): Promise<AuthorDetail> {
+  // Lo scomparto lo sceglie il link stesso (de.wikipedia.org → tedesco):
+  // dal 23/11/2026 il server ignora il vecchio target_lang.
   const { data, error } = await api.POST('/api/kolibre/authors/{name}/refresh-from-url', {
     params: { path: { name } },
-    body: { url, target_lang: targetLang },
+    body: { url },
   })
   if (error) throw error
   return data

@@ -21,6 +21,10 @@
     "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
   ],
   "plugin": {
+    "0.28.0": {
+      "it": "La posizione di lettura che non si riesce a inviare smette di insistere in silenzio. Prima, se il server rifiutava la posizione di un libro, il plugin la ritentava a ogni sincronizzazione, per sempre, senza dirtelo. Ora dopo 5 sincronizzazioni fallite di fila rinuncia e te lo dice con un avviso sullo schermo; per rimettere in coda quella posizione basta riaprire il libro.",
+      "en": "A reading position that cannot be sent stops insisting silently. Before, if the server rejected one book's position, the plugin retried it at every sync, forever, without telling you. Now after 5 failed syncs in a row it gives up and says so with an on-screen notice; to queue that position again, just reopen the book."
+    },
     "0.27.0": {
       "it": "Il lettore riconosce i formati giusti. La lista dei formati che il plugin cerca fra i tuoi file e riporta al server e' ora la stessa del server: epub, pdf, mobi, azw3, txt e md. Entrano i file Markdown (md), escono gli fb2: un fb2 gia' sul lettore resta leggibile, semplicemente non viene piu' censito dalla sincronizzazione.",
       "en": "The reader recognises the right formats. The list of formats the plugin looks for among your files and reports to the server now matches the server's: epub, pdf, mobi, azw3, txt and md. Markdown files (md) are in, fb2 is out: an fb2 already on the reader stays readable, it is simply no longer inventoried by sync."

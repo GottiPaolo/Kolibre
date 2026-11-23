@@ -331,6 +331,10 @@ class KolibreSyncAction(InterfaceAction):
                 'calibre.send_to_library.result',
                 uploaded=result['uploaded'], failed=result['failed'], total=result['total'],
             )
+            # Come nel caricamento di una libreria intera: i formati
+            # scartati dal cancello si dicono nel riepilogo (23/11 sera).
+            if result.get('skipped_books'):
+                messaggio += ' ' + t('calibre.upload.skipped_note', count=result['skipped_books'])
             if elimina_dopo:
                 # `links` sono le coppie (id locale, id sul server) dei libri
                 # davvero caricati: si cancella quello, non la selezione di

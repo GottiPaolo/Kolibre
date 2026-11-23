@@ -1035,9 +1035,9 @@ export interface paths {
         };
         /**
          * Get Book Description
-         * @description Untruncated companion to the excerpt list_books() above sends in bulk
-         *     — fetched on demand only by the metadata editor, which is the one place
-         *     that needs the full text. A single targeted query (CalibreLibrary
+         * @description RAW companion to the sanitized description list_books() sends (whole,
+         *     since 23/11/2026) — fetched on demand only by the metadata editor, which
+         *     must edit Calibre's original HTML, not the sanitized rendering. A single targeted query (CalibreLibrary
          *     .get_description), not the whole list_books() machinery, for one field
          *     of one book.
          *
@@ -1996,7 +1996,7 @@ export interface paths {
         put?: never;
         /**
          * Refresh Author From Wikipedia
-         * @description Scrapes (or re-scrapes) this author's bio/photo from Wikipedia (IT, falling back to EN).
+         * @description Scrapes (or re-scrapes) this author's bio/photo from Wikipedia, nelle lingue impostate.
          */
         post: operations["refresh_author_from_wikipedia_api_kolibre_authors__name__refresh_post"];
         delete?: never;
@@ -2018,9 +2018,10 @@ export interface paths {
          * Refresh Author From Wikipedia Url
          * @description Scrapes bio/photo from a Wikipedia article URL the caller pastes in
          *     explicitly — for when /refresh's by-name auto-search picks the wrong
-         *     homonym or finds nothing. `target_lang` says which of the two bio slots
-         *     (it/en) the scraped text lands in; the model has no slot for other
-         *     languages, so a French/German/... article still has to pick one.
+         *     homonym or finds nothing. Dal 23/11/2026 lo scomparto lo sceglie il
+         *     LINK stesso (de.wikipedia.org → tedesco): it/en vanno nelle colonne
+         *     storiche, ogni altra lingua in una riga author_bios. Il vecchio
+         *     `target_lang` del payload non serve piu' e viene ignorato.
          */
         post: operations["refresh_author_from_wikipedia_url_api_kolibre_authors__name__refresh_from_url_post"];
         delete?: never;
@@ -4519,6 +4520,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/settings/wikipedia-languages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Wikipedia Languages Setting */
+        get: operations["get_wikipedia_languages_setting_api_kolibre_settings_wikipedia_languages_get"];
+        /**
+         * Update Wikipedia Languages Setting
+         * @description Le lingue di Wikipedia per le biografie degli autori (23/11/2026).
+         *     L'ordine scritto qui NON e' quello dei pannelli: quello e' alfabetico
+         *     per nome della lingua nella lingua stessa, deciso nel frontend.
+         */
+        put: operations["update_wikipedia_languages_setting_api_kolibre_settings_wikipedia_languages_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/settings/opds-feed": {
         parameters: {
             query?: never;
@@ -6923,6 +6947,23 @@ export interface components {
             authors_count: number;
             /** Size Bytes */
             size_bytes: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * BioDiAutore
+         * @description Una biografia in UNA lingua di Wikipedia (23/11/2026): `lang` e' il
+         *     codice del dominio (<lang>.wikipedia.org). L'ordine della lista non
+         *     promette niente: i pannelli li ordina il frontend, in un punto solo
+         *     (lib/wikipediaLanguages.ts).
+         */
+        BioDiAutore: {
+            /** Lang */
+            lang: string;
+            /** Bio */
+            bio: string | null;
+            /** Wikipedia Url */
+            wikipedia_url: string | null;
         } & {
             [key: string]: unknown;
         };
@@ -9398,12 +9439,12 @@ export interface components {
          *     programma. `extra="allow"` li lascia passare, e chi deve sapere quali
          *     esistono chiede `/api/kolibre/custom-columns`.
          *
-         *     Tre campi sono **tagliati o derivati**, non il valore grezzo di Calibre:
-         *     `description` e' troncata a 400 caratteri e **sanificata** — HTML
+         *     Tre campi sono **derivati**, non il valore grezzo di Calibre:
+         *     `description` e' intera (dal 23/11/2026) ma **sanificata** — HTML
          *     ridotto a una lista bianca di tag, sicuro per `dangerouslySetInnerHTML`
-         *     (vedi `services/html_sanitizer.py`; il testo intero e grezzo si chiede
-         *     a `GET /{id}/description`) — e `pubdate`/`last_modified`/`date_added`
-         *     portano solo il giorno.
+         *     (vedi `services/html_sanitizer.py`; il GREZZO per l'editor dei metadati
+         *     si chiede a `GET /{id}/description`) — e `pubdate`/`last_modified`/
+         *     `date_added` portano solo il giorno.
          */
         LibroInElenco: {
             /** Id */
@@ -9732,6 +9773,17 @@ export interface components {
             status: string;
             /** Removed */
             removed: number;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LingueWikipedia
+         * @description Le lingue di Wikipedia per le biografie degli autori (impostazione
+         *     globale, 23/11/2026): codici come compaiono nel dominio.
+         */
+        LingueWikipedia: {
+            /** Languages */
+            languages: string[];
         } & {
             [key: string]: unknown;
         };
@@ -11162,6 +11214,11 @@ export interface components {
             wikipedia_url_it: string | null;
             /** Wikipedia Url En */
             wikipedia_url_en: string | null;
+            /**
+             * Bios
+             * @default []
+             */
+            bios: components["schemas"]["BioDiAutore"][];
             /** Photo Url */
             photo_url: string | null;
             /** Last Scraped At */
@@ -18594,6 +18651,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Interruttore"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_wikipedia_languages_setting_api_kolibre_settings_wikipedia_languages_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LingueWikipedia"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_wikipedia_languages_setting_api_kolibre_settings_wikipedia_languages_put: {
+        parameters: {
+            query?: {
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    [key: string]: unknown;
+                };
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LingueWikipedia"];
                 };
             };
             /** @description Validation Error */

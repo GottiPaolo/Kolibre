@@ -23,7 +23,7 @@ from ..schemas_risposte import (
     AutoreInElenco, Esito, ImmagineProposta, LettureDiUnAutore, LibroDiUnAutore,
     NienteDaRecuperare, RecuperoAvviato, SchedaAutore, StatoDelRecupero,
 )
-from ..services import author_scrape_job, author_scraper, author_stats_service, author_wikidata, permessi, stats_service
+from ..services import app_settings, author_scrape_job, author_scraper, author_stats_service, author_wikidata, permessi, stats_service
 
 router = APIRouter(prefix="/api/kolibre/authors", tags=["authors"])
 
@@ -43,6 +43,17 @@ def _serialize(row: models.AuthorMetadata) -> dict:
         "bio_en": row.bio_en,
         "wikipedia_url_it": row.wikipedia_url_it,
         "wikipedia_url_en": row.wikipedia_url_en,
+        # Tutte le biografie, una per lingua (23/11/2026): it/en dalle
+        # colonne storiche, le altre dalla tabella author_bios. L'ORDINE qui
+        # e' indifferente: i pannelli li ordina il frontend, in un punto
+        # solo (lib/wikipediaLanguages.ts).
+        "bios": (
+            [{"lang": lang, "bio": bio, "wikipedia_url": url}
+             for lang, bio, url in (("it", row.bio_it, row.wikipedia_url_it),
+                                    ("en", row.bio_en, row.wikipedia_url_en)) if bio]
+            + [{"lang": b.lang, "bio": b.bio, "wikipedia_url": b.wikipedia_url}
+               for b in (row.extra_bios or []) if b.bio]
+        ),
         "photo_url": f"/api/kolibre/authors/{quote(row.author_name)}/photo" if row.image_cached else None,
         "last_scraped_at": quando(row.last_scraped_at),
         **_anagrafica(row),
@@ -583,6 +594,7 @@ def get_author_detail(name: str, db: Session = Depends(database.get_db)):
         return {
             "name": name, "bio_it": None, "bio_en": None,
             "wikipedia_url_it": None, "wikipedia_url_en": None,
+            "bios": [],
             "photo_url": None, "last_scraped_at": None,
         }
     return _serialize(row)
@@ -685,15 +697,15 @@ def refresh_author_from_wikipedia(
     # riempie con quello che decide Wikipedia.
     _chi: models.User = Depends(permessi.richiede_modificare_autori),
 ):
-    """Scrapes (or re-scrapes) this author's bio/photo from Wikipedia (IT, falling back to EN)."""
-    scraped = author_scraper.scrape_author(name)
+    """Scrapes (or re-scrapes) this author's bio/photo from Wikipedia, nelle lingue impostate."""
+    scraped = author_scraper.scrape_author(name, app_settings.get_wikipedia_languages(db))
     row = db.query(models.AuthorMetadata).filter(models.AuthorMetadata.author_name == name).first()
     if not row:
         row = models.AuthorMetadata(author_name=name)
         db.add(row)
     # Una sola regola per scrivere dati ed esito, condivisa con il gancio
     # sull'import e con il giro di massa: vedi author_scraper.apply_outcome.
-    author_scraper.apply_outcome(row, scraped, datetime.utcnow())
+    author_scraper.apply_outcome(row, scraped, datetime.utcnow(), db=db)
     _arricchisci_da_wikidata(row)
     db.commit()
     return _serialize(row)
@@ -717,14 +729,14 @@ def refresh_author_from_wikipedia_url(
     """
     Scrapes bio/photo from a Wikipedia article URL the caller pastes in
     explicitly — for when /refresh's by-name auto-search picks the wrong
-    homonym or finds nothing. `target_lang` says which of the two bio slots
-    (it/en) the scraped text lands in; the model has no slot for other
-    languages, so a French/German/... article still has to pick one.
+    homonym or finds nothing. Dal 23/11/2026 lo scomparto lo sceglie il
+    LINK stesso (de.wikipedia.org → tedesco): it/en vanno nelle colonne
+    storiche, ogni altra lingua in una riga author_bios. Il vecchio
+    `target_lang` del payload non serve piu' e viene ignorato.
     """
     url = (payload.get("url") or "").strip()
     if not url:
         raise HTTPException(status_code=400, detail="Missing URL")
-    target_lang = "en" if payload.get("target_lang") == "en" else "it"
 
     scraped = author_scraper.scrape_author_from_url(name, url)
     if not scraped:
@@ -734,12 +746,23 @@ def refresh_author_from_wikipedia_url(
     if not row:
         row = models.AuthorMetadata(author_name=name)
         db.add(row)
-    if target_lang == "it":
+    lang = scraped["lang"]
+    if lang == "it":
         row.bio_it = scraped["bio"] or row.bio_it
         row.wikipedia_url_it = scraped["wikipedia_url"]
-    else:
+    elif lang == "en":
         row.bio_en = scraped["bio"] or row.bio_en
         row.wikipedia_url_en = scraped["wikipedia_url"]
+    else:
+        db.flush()  # la riga nuova deve avere il suo id per la FK
+        riga = next((b for b in (row.extra_bios or []) if b.lang == lang), None)
+        if riga is None:
+            riga = models.AuthorBio(author_metadata_id=row.id, lang=lang)
+            db.add(riga)
+            row.extra_bios.append(riga)
+        riga.bio = scraped["bio"] or riga.bio
+        riga.wikipedia_url = scraped["wikipedia_url"]
+        riga.fetched_at = datetime.utcnow()
     row.image_cached = scraped["image_cached"] or row.image_cached
     row.last_scraped_at = datetime.utcnow()
     trovato = _arricchisci_da_wikidata(row)

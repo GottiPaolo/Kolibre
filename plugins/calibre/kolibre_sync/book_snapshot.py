@@ -144,14 +144,18 @@ def snapshot_book_for_upload(db, book_id: int, selected_columns=None, pages_colu
     """
     mi = db.get_metadata(book_id)
     format_paths = {}
+    skipped_formats = []
     for fmt in db.formats(book_id) or []:
         # Il cancello dei formati (23/11/2026, scelta di Paolo): si inviano
         # solo i formati che Kolibre accetta — la stessa lista di
         # backend/app/services/library_scanner.EBOOK_EXTENSIONS, che sul
         # server rifiuta comunque il lotto se ne arriva uno fuori. Un libro
-        # i cui formati sono TUTTI fuori lista parte come sola scheda,
-        # come un libro senza formati.
+        # i cui formati sono TUTTI fuori lista parte come sola scheda.
+        # I formati scartati si RACCOLGONO invece di sparire (23/11 sera,
+        # il caso vero del .lit di Paolo: «non gli e' stato detto niente»):
+        # il worker li racconta nel registro e nel riepilogo.
         if (fmt or "").lower() not in FORMATI_AMMESSI:
+            skipped_formats.append((fmt or "?").upper())
             continue
         path = db.format_abspath(book_id, fmt)
         if path:
@@ -193,6 +197,7 @@ def snapshot_book_for_upload(db, book_id: int, selected_columns=None, pages_colu
         'custom_values': custom_values,
         'pages_estimate': pages_estimate,
         'format_paths': format_paths,
+        'skipped_formats': skipped_formats,
         'cover_path': db.cover(book_id, as_path=True),
         'last_modified': mi.last_modified,
         # Calibre's real "Aggiunto"/date-added field — was never sent at

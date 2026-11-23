@@ -89,6 +89,7 @@ local it = {
     ["koreader.position.comparing_progress"] = "Confronto posizioni: {done} di {total}…",
     ["koreader.position.pull_all_done"] = "{count} posizione scaricata. | {count} posizioni scaricate.",
     ["koreader.position.push_all_done"] = "{count} posizione inviata. | {count} posizioni inviate.",
+    ["koreader.position.push_gave_up"] = "Kolibre: la posizione di {count} libro non si riesce a inviare da {tries} sincronizzazioni: smetto di ritentare. Riaprilo per rimetterla in coda. | Kolibre: le posizioni di {count} libri non si riescono a inviare da {tries} sincronizzazioni: smetto di ritentare. Riaprili per rimetterle in coda.",
     ["koreader.position.push_all_confirm"] = "{count} libro ha una posizione di lettura locale non ancora inviata a Kolibre. Inviarla? | {count} libri hanno una posizione di lettura locale non ancora inviata a Kolibre. Inviarla?",
     ["koreader.position.pull_all_confirm"] = "{count} libro ha una posizione di lettura più recente su un altro dispositivo. Scaricarla? | {count} libri hanno una posizione di lettura più recente su un altro dispositivo. Scaricarla?",
 
@@ -475,6 +476,7 @@ local en = {
     ["koreader.position.comparing_progress"] = "Comparing positions: {done} of {total}…",
     ["koreader.position.pull_all_done"] = "{count} position downloaded. | {count} positions downloaded.",
     ["koreader.position.push_all_done"] = "{count} position sent. | {count} positions sent.",
+    ["koreader.position.push_gave_up"] = "Kolibre: the position of {count} book could not be sent for {tries} syncs in a row: I am giving up on retrying. Reopen it to queue it again. | Kolibre: the positions of {count} books could not be sent for {tries} syncs in a row: I am giving up on retrying. Reopen them to queue them again.",
     ["koreader.position.push_all_confirm"] = "{count} book has a local reading position not yet sent to Kolibre. Send it? | {count} books have a local reading position not yet sent to Kolibre. Send them?",
     ["koreader.position.pull_all_confirm"] = "{count} book has a more recent reading position on another device. Download it? | {count} books have a more recent reading position on another device. Download them?",
 

@@ -59,11 +59,11 @@ def maybe_trigger_wiki_scrape(author_names) -> None:
                 row = session.query(models.AuthorMetadata).filter(models.AuthorMetadata.author_name == name).first()
                 if row and row.last_scraped_at is not None:
                     continue
-                scraped = author_scraper.scrape_author(name)
+                scraped = author_scraper.scrape_author(name, app_settings.get_wikipedia_languages(session))
                 if not row:
                     row = models.AuthorMetadata(author_name=name)
                     session.add(row)
-                author_scraper.apply_outcome(row, scraped, datetime.utcnow())
+                author_scraper.apply_outcome(row, scraped, datetime.utcnow(), db=session)
                 session.commit()
                 url = row.wikipedia_url_it or row.wikipedia_url_en
                 if url:

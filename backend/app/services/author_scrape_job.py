@@ -39,7 +39,7 @@ from datetime import datetime
 from .. import database, models
 from ..istanti import quando
 from ..logging_utils import log_message
-from . import author_scraper, author_wikidata
+from . import app_settings, author_scraper, author_wikidata
 
 # Stessa pausa che teneva il ciclo nel browser: Wikipedia non va martellata,
 # e con qualche centinaio di autori la differenza fra 0 e 250 ms e' qualche
@@ -102,7 +102,7 @@ def start(names: list, skipped: int = 0) -> bool:
 
 def _scrape_one(session, name: str) -> str:
     """Esegue e registra un autore. Restituisce l'esito (vedi author_scraper)."""
-    scraped = author_scraper.scrape_author(name)
+    scraped = author_scraper.scrape_author(name, app_settings.get_wikipedia_languages(session))
     row = session.query(models.AuthorMetadata).filter(
         models.AuthorMetadata.author_name == name
     ).first()
@@ -113,7 +113,7 @@ def _scrape_one(session, name: str) -> str:
     # autore e col gancio sull'import: se ognuno scrivesse a modo suo, il
     # giro dopo ripartirebbe con idee diverse a seconda di chi ha scritto
     # per ultimo.
-    author_scraper.apply_outcome(row, scraped, datetime.utcnow())
+    author_scraper.apply_outcome(row, scraped, datetime.utcnow(), db=session)
     session.commit()
     return row.scrape_status
 

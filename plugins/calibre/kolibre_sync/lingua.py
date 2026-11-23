@@ -130,6 +130,7 @@ _it = {
     ),
     'calibre.upload.button': 'Carica',
     'calibre.upload.result': 'Fatto: {uploaded} caricati, {failed} falliti su {total}.',
+    'calibre.upload.skipped_note': '{count} con formati non inviati (il registro dice quali e perche\u0301).',
 
     # dialogs.py — ProgressDialog
     'calibre.progress.starting': 'Avvio…',
@@ -232,6 +233,8 @@ _it = {
     'calibre.worker.fulltext_error': 'ERRORE  Indice full-text: {error}',
     'calibre.worker.download_cancelled': 'Download annullato dall\'utente',
     'calibre.worker.upload_error': 'ERRORE  {title}: {error}',
+    'calibre.worker.formats_skipped': 'FORMATI NON INVIATI  {title}: {formats} — Kolibre accetta solo epub, pdf, mobi, azw3, txt e md.',
+    'calibre.worker.sent_record_only': 'SOLA SCHEDA  {title}: nessun formato ammesso ({formats}) — inviati i soli metadati, senza file.',
     'calibre.worker.upload_cancelled': 'Caricamento annullato dall\'utente',
     'calibre.worker.fulltext_reindex_label': 'Aggiornamento indice di ricerca full-text…',
     'calibre.worker.pages_override_error': 'ERRORE  Stima pagine mappata (libro #{book_id}): {error}',
@@ -317,6 +320,7 @@ _en = {
     ),
     'calibre.upload.button': 'Upload',
     'calibre.upload.result': 'Done: {uploaded} uploaded, {failed} failed out of {total}.',
+    'calibre.upload.skipped_note': '{count} with formats not sent (the log says which ones and why).',
 
     # dialogs.py — ProgressDialog
     'calibre.progress.starting': 'Starting…',
@@ -419,6 +423,8 @@ _en = {
     'calibre.worker.fulltext_error': 'ERROR  Full-text index: {error}',
     'calibre.worker.download_cancelled': 'Download cancelled by the user',
     'calibre.worker.upload_error': 'ERROR  {title}: {error}',
+    'calibre.worker.formats_skipped': 'FORMATS NOT SENT  {title}: {formats} — Kolibre only accepts epub, pdf, mobi, azw3, txt and md.',
+    'calibre.worker.sent_record_only': 'RECORD ONLY  {title}: no accepted format ({formats}) — metadata sent without any file.',
     'calibre.worker.upload_cancelled': 'Upload cancelled by the user',
     'calibre.worker.fulltext_reindex_label': 'Updating full-text search index…',
     'calibre.worker.pages_override_error': 'ERROR  Mapped page estimate (book #{book_id}): {error}',

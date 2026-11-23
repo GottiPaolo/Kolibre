@@ -46,7 +46,7 @@ class KolibreSyncPlugin(InterfaceActionBase):
     # 2.2.0 (23/11/2026): si caricano anche i libri SOLO-RECORD, senza
     # formati — l'inventario di una libreria fisica fatto in Calibre
     # («Aggiungi libro vuoto», «Add from ISBN») arriva sul server com'e'.
-    version = (2, 3, 0)  # 23/11/2026: si inviano solo i formati ammessi da Kolibre
+    version = (2, 4, 0)  # 23/11/2026 sera: i formati scartati vengono DETTI, non taciuti
     minimum_calibre_version = (5, 0, 0)
 
     # module:ClassName resolved lazily by load_actual_plugin(gui) — see

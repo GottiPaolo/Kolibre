@@ -14,14 +14,12 @@
 // primo paint (IntegrationsTab la sovrascrive col valore reale del backend
 // appena arriva).
 //
-// `scraperLanguages` invece resta interamente client-side, mai letto da
-// nessun'altra parte del codice (stesso gap preesistente del Vue):
-// backend/app/services/author_scraper.py è hardcoded IT→EN (commento suo
-// stesso: "not a general-purpose multi-language feature yet") — non esiste
-// alcun endpoint che accetti una lista di lingue con priorità/attivazione.
-// Persistito in localStorage come miglioramento onesto rispetto al ref
-// in-memory del Vue, ma la UI resta esplicita sul fatto che lo scraper
-// reale prova sempre e solo IT poi EN (vedi IntegrationsTab).
+// `scraperLanguages`: dal 23/11/2026 le lingue ATTIVE di questa lista sono
+// un'impostazione backend reale (AppSetting "wikipedia_bio_languages", rotte
+// GET/PUT /settings/wikipedia-languages): lo scraper le percorre tutte e la
+// pagina autore mostra un pannello per lingua. localStorage resta la cache
+// del primo paint, più nomi e ordine della lista nella UI (l'ordine dei
+// PANNELLI invece è alfabetico per autonimo: lib/wikipediaLanguages.ts).
 import { api } from './api'
 import { leggiLocale, scriviLocale } from './memoriaLocale'
 
@@ -97,4 +95,18 @@ export async function setAutoWikiScrapeSetting(enabled: boolean): Promise<boolea
   })
   if (error) throw error
   return data.enabled
+}
+
+export async function getWikipediaLanguagesSetting(): Promise<string[]> {
+  const { data, error } = await api.GET('/api/kolibre/settings/wikipedia-languages')
+  if (error) throw error
+  return data.languages
+}
+
+export async function setWikipediaLanguagesSetting(languages: string[]): Promise<string[]> {
+  const { data, error } = await api.PUT('/api/kolibre/settings/wikipedia-languages', {
+    body: { languages },
+  })
+  if (error) throw error
+  return data.languages
 }

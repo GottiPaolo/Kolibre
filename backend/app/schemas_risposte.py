@@ -351,12 +351,12 @@ class LibroInElenco(Permissivo):
     programma. `extra="allow"` li lascia passare, e chi deve sapere quali
     esistono chiede `/api/kolibre/custom-columns`.
 
-    Tre campi sono **tagliati o derivati**, non il valore grezzo di Calibre:
-    `description` e' troncata a 400 caratteri e **sanificata** — HTML
+    Tre campi sono **derivati**, non il valore grezzo di Calibre:
+    `description` e' intera (dal 23/11/2026) ma **sanificata** — HTML
     ridotto a una lista bianca di tag, sicuro per `dangerouslySetInnerHTML`
-    (vedi `services/html_sanitizer.py`; il testo intero e grezzo si chiede
-    a `GET /{id}/description`) — e `pubdate`/`last_modified`/`date_added`
-    portano solo il giorno.
+    (vedi `services/html_sanitizer.py`; il GREZZO per l'editor dei metadati
+    si chiede a `GET /{id}/description`) — e `pubdate`/`last_modified`/
+    `date_added` portano solo il giorno.
     """
     id: int
     title: str
@@ -2523,6 +2523,22 @@ class AutoreInElenco(_AnagraficaAutore):
     photo_url: Optional[str]
 
 
+class BioDiAutore(Permissivo):
+    """Una biografia in UNA lingua di Wikipedia (23/11/2026): `lang` e' il
+    codice del dominio (<lang>.wikipedia.org). L'ordine della lista non
+    promette niente: i pannelli li ordina il frontend, in un punto solo
+    (lib/wikipediaLanguages.ts)."""
+    lang: str
+    bio: Optional[str]
+    wikipedia_url: Optional[str]
+
+
+class LingueWikipedia(Permissivo):
+    """Le lingue di Wikipedia per le biografie degli autori (impostazione
+    globale, 23/11/2026): codici come compaiono nel dominio."""
+    languages: list[str]
+
+
 class SchedaAutore(_AnagraficaAutore):
     """
     La scheda di un autore: le biografie, gli indirizzi, la foto.
@@ -2543,6 +2559,9 @@ class SchedaAutore(_AnagraficaAutore):
     bio_en: Optional[str]
     wikipedia_url_it: Optional[str]
     wikipedia_url_en: Optional[str]
+    #: Tutte le biografie, una per lingua: it/en dalle colonne storiche,
+    #: le altre dalla tabella author_bios. Solo quelle con un testo.
+    bios: list[BioDiAutore] = []
     photo_url: Optional[str]
     #: Quando si e' provato a cercarlo, non quando ci si e' riusciti.
     last_scraped_at: Optional[str]

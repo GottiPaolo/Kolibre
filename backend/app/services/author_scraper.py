@@ -264,7 +264,7 @@ STATUS_BLOCKED = "blocked"    # rifiutati per limite di richieste
 STATUS_ERROR = "error"        # rete o risposta illeggibile
 
 
-def scrape_author(author_name: str) -> dict:
+def scrape_author(author_name: str, langs=None) -> dict:
     """
     Oltre ai dati, restituisce `status` e `detail`: sono quelli che permettono
     al giro di massa di non ritentare alla cieca.
@@ -275,43 +275,54 @@ def scrape_author(author_name: str) -> dict:
     opposto: la prima non va mai ripetuta, la seconda ogni tanto, la terza
     appena passa la tempesta.
 
-    Una nota sull'ordine: se la voce italiana risponde con una foto, quella
-    inglese non viene nemmeno chiesta. E' una richiesta in meno per ogni
-    autore gia' completo — su seicento autori e' la differenza fra farsi
-    limitare e non farsi limitare.
+    `langs` sono le lingue di Wikipedia scelte nelle impostazioni
+    (app_settings.get_wikipedia_languages): it/en finiscono nelle colonne
+    storiche bio_it/bio_en, le altre in `bios` {lingua: {bio, url}} e da li'
+    nella tabella author_bios (vedi apply_outcome). La vecchia ottimizzazione
+    «l'inglese si chiede solo se l'italiano manca o e' senza foto» e' stata
+    tolta il 23/11/2026: ogni lingua impostata ha il suo pannello nella
+    pagina autore, quindi la sua biografia serve comunque — una richiesta
+    per lingua, sempre.
     """
+    langs = list(langs or ("it", "en"))
     result = {
         "bio_it": None, "bio_en": None,
         "wikipedia_url_it": None, "wikipedia_url_en": None,
+        "bios": {},
         "image_cached": None,
         "status": STATUS_NO_PAGE, "detail": None,
     }
 
-    it_summary, it_fail = _fetch_summary(author_name, "it")
-    if it_summary:
-        result["bio_it"] = it_summary.get("extract")
-        result["wikipedia_url_it"] = (it_summary.get("content_urls") or {}).get("desktop", {}).get("page")
-
-    # L'inglese si chiede se l'italiano manca, o se manca la foto: e' l'unica
-    # ragione per cui varrebbe la pena di una seconda richiesta.
-    en_summary, en_fail = (None, None)
-    if not it_summary or not _pick_image_url(it_summary):
-        en_summary, en_fail = _fetch_summary(author_name, "en")
-        if en_summary:
-            result["bio_en"] = en_summary.get("extract")
-            result["wikipedia_url_en"] = (en_summary.get("content_urls") or {}).get("desktop", {}).get("page")
+    summaries = []
+    fails = []
+    for lang in langs:
+        summary, fail = _fetch_summary(author_name, lang)
+        fails.append(fail)
+        if not summary:
+            continue
+        summaries.append(summary)
+        extract = summary.get("extract")
+        page = (summary.get("content_urls") or {}).get("desktop", {}).get("page")
+        if lang == "it":
+            result["bio_it"] = extract
+            result["wikipedia_url_it"] = page
+        elif lang == "en":
+            result["bio_en"] = extract
+            result["wikipedia_url_en"] = page
+        else:
+            result["bios"][lang] = {"bio": extract, "wikipedia_url": page}
 
     # Se ci hanno rifiutati non possiamo concludere nulla sull'autore: va
     # tenuto da parte e riprovato, non marchiato come "non trovato".
-    if FAIL_BLOCKED in (it_fail, en_fail):
+    if FAIL_BLOCKED in fails:
         result["status"] = STATUS_BLOCKED
         result["detail"] = "Wikipedia rate limit (429)"
         return result
-    if not it_summary and not en_summary:
-        if FAIL_ERROR in (it_fail, en_fail):
+    if not summaries:
+        if FAIL_ERROR in fails:
             result["status"] = STATUS_ERROR
             result["detail"] = "Wikipedia unreachable, or the answer could not be read"
-        elif FAIL_DISAMBIGUATION in (it_fail, en_fail):
+        elif FAIL_DISAMBIGUATION in fails:
             result["status"] = STATUS_NO_PAGE
             result["detail"] = "only a disambiguation page: the entry has to be chosen by hand"
         else:
@@ -319,10 +330,11 @@ def scrape_author(author_name: str) -> dict:
             result["detail"] = "no Wikipedia entry with this name"
         return result
 
-    image_url = _pick_image_url(it_summary, en_summary)
+    # La foto: dalla prima lingua che ce l'ha, nell'ordine impostato.
+    image_url = _pick_image_url(*summaries)
     source = "Wikipedia entry"
     if not image_url:
-        image_url = _wikidata_image_url(it_summary or en_summary)
+        image_url = _wikidata_image_url(summaries[0])
         source = "Wikidata"
     if not image_url:
         result["status"] = STATUS_NO_IMAGE
@@ -369,6 +381,9 @@ def scrape_author_from_url(author_name: str, url: str) -> Optional[dict]:
         image_cached = _cache_author_image(author_name, image_url)
 
     return {
+        # La lingua la dice il link stesso (de.wikipedia.org → "de"): e' il
+        # chiamante a decidere in quale scomparto va il testo.
+        "lang": host_match.group(1),
         "bio": summary.get("extract"),
         "wikipedia_url": (summary.get("content_urls") or {}).get("desktop", {}).get("page") or url,
         "image_cached": image_cached,
@@ -388,7 +403,7 @@ RETRY_AFTER = {
 }
 
 
-def apply_outcome(row, scraped: dict, now: datetime) -> None:
+def apply_outcome(row, scraped: dict, now: datetime, db=None) -> None:
     """
     Scrive su una riga AuthorMetadata i dati E l'esito. Sta qui, e non nei
     tre chiamanti, perche' la regola "cosa vale la pena riprovare e quando"
@@ -407,6 +422,25 @@ def apply_outcome(row, scraped: dict, now: datetime) -> None:
     row.wikipedia_url_en = scraped.get("wikipedia_url_en") or row.wikipedia_url_en
     row.image_cached = scraped.get("image_cached") or row.image_cached
     row.last_scraped_at = now
+
+    # Le lingue oltre it/en (23/11/2026): una riga author_bios per lingua,
+    # con la stessa regola dell'`or` qui sopra — un giro andato male non
+    # cancella una biografia gia' buona. `db` e' opzionale solo per non
+    # rompere i chiamanti che non hanno bios extra da scrivere.
+    if db is not None and scraped.get("bios"):
+        from .. import models  # import locale: a livello di modulo sarebbe un giro chiuso
+        if row.id is None:
+            db.flush()  # la riga nuova deve avere il suo id per la FK
+        esistenti = {b.lang: b for b in (row.extra_bios or [])}
+        for lang, dati in scraped["bios"].items():
+            riga = esistenti.get(lang)
+            if riga is None:
+                riga = models.AuthorBio(author_metadata_id=row.id, lang=lang)
+                db.add(riga)
+                row.extra_bios.append(riga)
+            riga.bio = dati.get("bio") or riga.bio
+            riga.wikipedia_url = dati.get("wikipedia_url") or riga.wikipedia_url
+            riga.fetched_at = now
 
     status = scraped.get("status") or STATUS_ERROR
     # Se la foto c'era gia' da prima, l'esito reale e' "completo" anche se

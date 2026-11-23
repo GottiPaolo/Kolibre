@@ -192,6 +192,7 @@ class UploadWorker(QThread):
             # da Calibre quello che e' arrivato, non la selezione di
             # partenza, senza un secondo giro di rete per ritrovare gli id.
             uploaded_links = []
+            libri_con_scarti = 0
             for i, book in enumerate(self.books):
                 if self._cancelled:
                     break
@@ -223,6 +224,19 @@ class UploadWorker(QThread):
                         uploaded_links.append((book['local_book_id'], server_book_id))
                     uploaded += 1
                     self.log.emit(t('calibre.worker.ok', title=book['title']))
+                    # I formati che il cancello ha scartato si DICONO
+                    # (23/11/2026 sera, il caso del .lit di Paolo: il libro
+                    # era partito come sola scheda e nessuno gliel'aveva
+                    # detto). Dopo l'esito, cosi' un errore non li confonde.
+                    scartati = book.get('skipped_formats') or []
+                    if scartati:
+                        libri_con_scarti += 1
+                        if book['format_paths']:
+                            self.log.emit(t('calibre.worker.formats_skipped',
+                                            title=book['title'], formats=', '.join(scartati)))
+                        else:
+                            self.log.emit(t('calibre.worker.sent_record_only',
+                                            title=book['title'], formats=', '.join(scartati)))
                 except KolibreApiError as exc:
                     failed += 1
                     self.log.emit(t('calibre.worker.upload_error', title=book['title'], error=exc))
@@ -279,6 +293,7 @@ class UploadWorker(QThread):
 
             self.finished_ok.emit({
                 'uploaded': uploaded, 'failed': failed, 'total': total, 'links': uploaded_links,
+                'skipped_books': libri_con_scarti,
             })
         except Exception as exc:  # noqa: BLE001
             self.finished_err.emit(str(exc))

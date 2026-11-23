@@ -1,3 +1,4 @@
+import re
 import json
 
 from sqlalchemy.orm import Session
@@ -237,6 +238,40 @@ def is_qualita_enabled(db: Session, folder_name: str) -> bool:
 
 def set_qualita_enabled(db: Session, folder_name: str, enabled: bool) -> None:
     set_setting(db, _qualita_key(folder_name), {"enabled": bool(enabled)})
+
+
+# Le lingue di Wikipedia per le biografie degli autori (23/11/2026):
+# una lista di codici come compaiono nel dominio <lang>.wikipedia.org.
+# Default it+en, che sono anche le due colonne storiche di AuthorMetadata;
+# le lingue oltre quelle finiscono nella tabella author_bios.
+WIKIPEDIA_LANGUAGES_KEY = "wikipedia_bio_languages"
+_WIKIPEDIA_LANG_RE = re.compile(r"^[a-z](?:[a-z-]{0,10}[a-z])?$")
+DEFAULT_WIKIPEDIA_LANGUAGES = ["it", "en"]
+
+
+def get_wikipedia_languages(db: Session) -> list:
+    value = get_setting(db, WIKIPEDIA_LANGUAGES_KEY, {"languages": DEFAULT_WIKIPEDIA_LANGUAGES})
+    langs = [str(l) for l in (value.get("languages") or []) if _WIKIPEDIA_LANG_RE.match(str(l))]
+    return langs or list(DEFAULT_WIKIPEDIA_LANGUAGES)
+
+
+def set_wikipedia_languages(db: Session, languages) -> list:
+    """Valida e deduplica conservando l'ordine scritto dall'utente (l'ordine
+    dei PANNELLI pero' non e' questo: e' alfabetico per autonimo, deciso nel
+    frontend — vedi lib/wikipediaLanguages.ts)."""
+    puliti = []
+    for raw in languages or []:
+        code = str(raw).strip().lower()
+        if not code:
+            continue
+        if not _WIKIPEDIA_LANG_RE.match(code):
+            raise ValueError(f"'{raw}' is not a Wikipedia language code")
+        if code not in puliti:
+            puliti.append(code)
+    if not puliti:
+        puliti = list(DEFAULT_WIKIPEDIA_LANGUAGES)
+    set_setting(db, WIKIPEDIA_LANGUAGES_KEY, {"languages": puliti})
+    return puliti
 
 
 AUTO_WIKI_SCRAPE_KEY = "auto_wiki_scrape"

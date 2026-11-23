@@ -39,14 +39,14 @@ nome di persona in una riga di questo registro, e il contenuto di
 un'impostazione non e' un dato personale).
 """
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from .. import auth, database, models
 from ..logging_utils import log_message
 from ..schemas_risposte import (
     ImpostazioneContoPagine, ImpostazionePaginazione,
-    Interruttore, SogliaDelleSessioni, TettoDellIndice,
+    Interruttore, LingueWikipedia, SogliaDelleSessioni, TettoDellIndice,
 )
 from ..services import app_settings, stats_service
 
@@ -167,6 +167,35 @@ def update_auto_wiki_scrape_setting(
     dopo = app_settings.set_auto_wiki_scrape_enabled(db, payload.get("enabled", True))
     _annota(_chi(chi), "auto-wiki-scrape", prima, dopo)
     return {"enabled": dopo}
+
+
+@router.get(
+    "/wikipedia-languages",
+    responses={200: {"model": LingueWikipedia}},
+)
+def get_wikipedia_languages_setting(db: Session = Depends(database.get_db)):
+    return {"languages": app_settings.get_wikipedia_languages(db)}
+
+
+@router.put(
+    "/wikipedia-languages",
+    responses={200: {"model": LingueWikipedia}},
+)
+def update_wikipedia_languages_setting(
+    payload: dict,
+    db: Session = Depends(database.get_db),
+    chi: models.User = Depends(auth.get_current_user_flexible),
+):
+    """Le lingue di Wikipedia per le biografie degli autori (23/11/2026).
+    L'ordine scritto qui NON e' quello dei pannelli: quello e' alfabetico
+    per nome della lingua nella lingua stessa, deciso nel frontend."""
+    prima = app_settings.get_wikipedia_languages(db)
+    try:
+        dopo = app_settings.set_wikipedia_languages(db, payload.get("languages"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    _annota(_chi(chi), "wikipedia-languages", prima, dopo, payload.get("languages"))
+    return {"languages": dopo}
 
 
 @router.get(

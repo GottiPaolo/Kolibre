@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, BookOpen, Check, Pencil, RefreshCw, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Check, ChevronDown, Pencil, RefreshCw, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useAuthorBooks, useAuthorDetail } from '@/lib/queries'
 import { useRowSelection } from '@/lib/useRowSelection'
@@ -12,6 +12,9 @@ import { AuthorReadingStrip } from './AuthorReadingStrip'
 import { BottoneCopiaLink } from '@/components/BottoneCopiaLink'
 import { useSetPageHeader } from '@/lib/pageHeaderContext'
 import { withBackendUrl } from '@/lib/api'
+import { getWikipediaLanguagesSetting } from '@/lib/scraperSettingsActions'
+import { autonym } from '@/lib/wikipediaLanguages'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import {
   deleteAuthorPhoto,
   refreshAuthorFromWikipedia,
@@ -118,10 +121,22 @@ export function AuthorDetailPage() {
 
   useSetPageHeader(name)
 
-  const [bioLang, setBioLang] = useState<'it' | 'en'>('it')
   const [isEditing, setIsEditing] = useState(false)
+  // La lingua della biografia mostrata (23/11/2026 sera): null = «decidi
+  // tu», cioe' la prima dell'ordine delle Integrazioni che ha un testo.
+  const [linguaBio, setLinguaBio] = useState<string | null>(null)
+  useEffect(() => { setLinguaBio(null) }, [name])
   const [bioItDraft, setBioItDraft] = useState('')
   const [bioEnDraft, setBioEnDraft] = useState('')
+  // Le lingue di Wikipedia scelte nelle impostazioni: decidono QUALI
+  // pannelli esistono anche da vuoti. It/en come ripiego se il server
+  // non risponde — sono le due lingue storiche.
+  const [lingueImpostate, setLingueImpostate] = useState<string[]>(['it', 'en'])
+  useEffect(() => {
+    getWikipediaLanguagesSetting()
+      .then(setLingueImpostate)
+      .catch(() => {})
+  }, [])
   const [showPhotoSearch, setShowPhotoSearch] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -150,10 +165,13 @@ export function AuthorDetailPage() {
   }
 
   async function handleExitEditMode() {
-    // "Fine modifica" salva TUTTO insieme: biografia e anagrafica. Prima
+    // "Fine modifica" salva TUTTO insieme: biografie e anagrafica. Prima
     // erano due salvataggi separati con due pulsanti diversi nello stesso
     // riquadro, che e' il motivo per cui la scheda sembrava due schede.
-    await saveBio(bioLang === 'it' ? 'bio_it' : 'bio_en', bioLang === 'it' ? bioItDraft : bioEnDraft)
+    // Coi pannelli per lingua (23/11/2026) le bozze modificabili sono due,
+    // e si salvano tutte e due.
+    await saveBio('bio_it', bioItDraft)
+    await saveBio('bio_en', bioEnDraft)
     await saveFacts(draftToFields(factsDraft))
     setIsEditing(false)
   }
@@ -195,7 +213,7 @@ export function AuthorDetailPage() {
     setRefreshingFromUrl(true)
     setError(null)
     try {
-      const aggiornato = await refreshAuthorFromWikipediaUrl(name, url, bioLang)
+      const aggiornato = await refreshAuthorFromWikipediaUrl(name, url)
       // La bozza va riseminata con quello che e' appena arrivato.
       //
       // Senza, l'anagrafica presa da Wikidata restava invisibile — e, molto
@@ -261,9 +279,26 @@ export function AuthorDetailPage() {
 
   if (isLoading || !author) return <p className="text-muted-foreground">{t('common.loading')}</p>
 
-  const bioText = bioLang === 'it' ? author.bio_it : author.bio_en
-  // La voce da cui viene la biografia mostrata, nella lingua mostrata.
-  const fonteBio = bioLang === 'it' ? author.wikipedia_url_it : author.wikipedia_url_en
+  // UNA sola biografia visibile (23/11/2026 sera, giudizio di Paolo sul
+  // giro del pomeriggio: la pila di pannelli era «tremenda» — «la
+  // biografia sopra, parte della pagina, mai mostrarle tutte assieme ma
+  // solo una per volta scegliendo da un tasto»). Le lingue offerte dal
+  // tasto sono SOLO quelle che un testo ce l'hanno davvero, nell'ordine
+  // delle Integrazioni; una lingua fuori impostazioni ma con una
+  // biografia si accoda: i dati non si nascondono.
+  const bios = author.bios ?? []
+  const bioByLang = new Map(bios.map((b) => [b.lang, b]))
+  const testoDi = (lang: string) =>
+    (lang === 'it' ? author.bio_it : lang === 'en' ? author.bio_en : bioByLang.get(lang)?.bio) || null
+  const fonteDi = (lang: string) =>
+    (lang === 'it' ? author.wikipedia_url_it : lang === 'en' ? author.wikipedia_url_en : bioByLang.get(lang)?.wikipedia_url) || null
+  const lingueDisponibili = [
+    ...lingueImpostate,
+    ...bios.map((b) => b.lang).filter((l) => !lingueImpostate.includes(l)),
+  ].filter((lang, i, tutte) => tutte.indexOf(lang) === i && testoDi(lang) !== null)
+  const linguaCorrente = linguaBio && lingueDisponibili.includes(linguaBio)
+    ? linguaBio
+    : lingueDisponibili[0] ?? null
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -316,15 +351,6 @@ export function AuthorDetailPage() {
         </div>
 
         <div className="min-w-0 flex-1 space-y-2">
-          <div className="flex gap-1">
-            <Button variant={bioLang === 'it' ? 'secondary' : 'ghost'} size="sm" onClick={() => setBioLang('it')}>
-              {t('authors.detail.langItalian')}
-            </Button>
-            <Button variant={bioLang === 'en' ? 'secondary' : 'ghost'} size="sm" onClick={() => setBioLang('en')}>
-              {t('authors.detail.langEnglish')}
-            </Button>
-          </div>
-
           {/* Anagrafica prima della biografia: sono i dati "da scheda", e si
               leggono a colpo d'occhio prima del testo lungo. */}
           {isEditing ? (
@@ -333,57 +359,81 @@ export function AuthorDetailPage() {
             <AuthorFactsList author={author} />
           )}
 
+          {/* La biografia e' PARTE della pagina, senza riquadro, UNA per
+              volta (23/11/2026 sera, scelta di Paolo sul giro del
+              pomeriggio). Il tasto-lingua e' una scritta piccola col nome
+              della lingua nella lingua stessa; compare solo se le lingue
+              con un testo sono almeno due. All'apertura si mostra la prima
+              dell'ordine delle Integrazioni che ha una biografia.
+              In modifica restano le due aree storiche it/en, com'erano. */}
           {isEditing ? (
-            <textarea
-              autoFocus
-              value={bioLang === 'it' ? bioItDraft : bioEnDraft}
-              onChange={(e) => (bioLang === 'it' ? setBioItDraft(e.target.value) : setBioEnDraft(e.target.value))}
-              onBlur={() => saveBio(bioLang === 'it' ? 'bio_it' : 'bio_en', bioLang === 'it' ? bioItDraft : bioEnDraft)}
-              rows={8}
-              className="w-full resize-none rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-primary"
-            />
+            <div className="space-y-2.5">
+              {([['it', bioItDraft, setBioItDraft], ['en', bioEnDraft, setBioEnDraft]] as const).map(([lang, draft, setDraft]) => (
+                <div key={lang}>
+                  <div className="mb-1 text-[12px] font-semibold text-muted-foreground">{autonym(lang)}</div>
+                  <textarea
+                    value={draft}
+                    onChange={(e) => setDraft(e.target.value)}
+                    onBlur={() => saveBio(lang === 'it' ? 'bio_it' : 'bio_en', draft)}
+                    rows={6}
+                    className="w-full resize-none rounded-md border border-border bg-background px-2.5 py-1.5 text-[13px] outline-none focus:border-primary"
+                  />
+                </div>
+              ))}
+            </div>
           ) : (
-            <>
-              <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap">{bioText || t('authors.detail.noBio')}</p>
-              {/* Da dove viene il testo, quando viene da Wikipedia.
-                  Le biografie sono CC BY-SA 4.0 e non escono mai da qui — non
-                  finiscono nell'export delle annotazioni, nel vault Obsidian o
-                  nella libreria Calibre — quindi l'obbligo è sottile: morde su
-                  chi ridistribuisce o mostra in pubblico, e un'istanza
-                  personale non fa né l'uno né l'altro. Morde però appena un
-                  secondo utente legge questa pagina, e Kolibre è multiutente.
-                  Costa una riga, e verso chi quel testo l'ha scritto è
-                  semplicemente la cosa giusta.
-                  La riga sparisce da sé quando la biografia è stata riscritta
-                  a mano e non c'è più un link: lì non c'è niente da attribuire. */}
-              {/* L'attribuzione e il «copia link», sulla stessa riga. Il
-                  secondo era un bottone in testa alla pagina, accanto al
-                  nome: troppo peso per un gesto che si fa una volta ogni
-                  tanto. Qui e' un'icona, e la riga esiste anche quando non
-                  c'e' niente da attribuire — altrimenti il modo di copiare
-                  l'indirizzo di un autore spariva con la biografia. */}
-              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
-                {bioText && fonteBio && (
-                  <span>
-                    {t('authors.detail.sourcePrefix')}{' '}
-                    <a
-                      href={fonteBio}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-                    >
-                      Wikipedia
-                    </a>
-                  </span>
-                )}
-                <BottoneCopiaLink
-                  sorgente={{ tipo: 'autore', nome: name }}
-                  soloIcona
-                  variant="ghost"
-                  className="size-6 text-muted-foreground/80 hover:text-foreground"
-                />
-              </div>
-            </>
+            <div>
+              {linguaCorrente && lingueDisponibili.length > 1 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button className="mb-1 inline-flex items-center gap-0.5 text-[12px] text-muted-foreground hover:text-foreground">
+                      {autonym(linguaCorrente)}
+                      <ChevronDown className="size-3" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start">
+                    {lingueDisponibili.map((lang) => (
+                      <DropdownMenuItem key={lang} onSelect={() => setLinguaBio(lang)}>
+                        {autonym(lang)}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+              <p className="text-[13.5px] leading-relaxed whitespace-pre-wrap">
+                {linguaCorrente ? testoDi(linguaCorrente) : t('authors.detail.noBio')}
+              </p>
+              {/* Da dove viene il testo, quando viene da Wikipedia: le
+                  biografie sono CC BY-SA 4.0 e l'attribuzione costa una
+                  riga. Sparisce da se' per una biografia riscritta a mano
+                  e senza link. */}
+              {linguaCorrente && fonteDi(linguaCorrente) && (
+                <div className="mt-1 text-[11px] text-muted-foreground/80">
+                  {t('authors.detail.sourcePrefix')}{' '}
+                  <a
+                    href={fonteDi(linguaCorrente)!}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  >
+                    Wikipedia
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Il «copia link» dell'autore: una volta sola, sotto la
+              biografia. */}
+          {!isEditing && (
+            <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
+              <BottoneCopiaLink
+                sorgente={{ tipo: 'autore', nome: name }}
+                soloIcona
+                variant="ghost"
+                className="size-6 text-muted-foreground/80 hover:text-foreground"
+              />
+            </div>
           )}
 
           <div className="flex justify-end">
@@ -397,7 +447,7 @@ export function AuthorDetailPage() {
               <input
                 value={wikiUrlDraft}
                 onChange={(e) => setWikiUrlDraft(e.target.value)}
-                placeholder={t('authors.detail.wikiLinkPlaceholder', { lang: bioLang === 'it' ? 'IT' : 'EN' })}
+                placeholder={t('authors.detail.wikiLinkPlaceholderAnyLang')}
                 className="w-full min-w-0 flex-1 rounded-md border border-border bg-background px-2.5 py-1.5 text-[12.5px] outline-none focus:border-primary"
               />
               <Button type="submit" variant="outline" size="sm" disabled={refreshingFromUrl || !wikiUrlDraft.trim()}>

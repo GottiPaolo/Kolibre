@@ -677,7 +677,13 @@ class KolibreMainDialog(QDialog):
         progress.set_on_cancel(worker.cancel)
 
         def on_ok(summary):
-            progress.set_finished(t('calibre.upload.result', uploaded=summary['uploaded'], failed=summary['failed'], total=summary['total']))
+            messaggio = t('calibre.upload.result', uploaded=summary['uploaded'], failed=summary['failed'], total=summary['total'])
+            # I libri con formati non inviati si vedono anche QUI, non solo
+            # nel registro riga per riga: il riepilogo e' l'unica cosa che
+            # tutti leggono (23/11/2026 sera).
+            if summary.get('skipped_books'):
+                messaggio += ' ' + t('calibre.upload.skipped_note', count=summary['skipped_books'])
+            progress.set_finished(messaggio)
             self.refresh_libraries()
 
         def on_err(message):

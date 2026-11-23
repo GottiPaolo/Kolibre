@@ -57,6 +57,17 @@ export function KoreaderPluginDialog({ device, onClose }: KoreaderPluginDialogPr
 
         <p className="text-[12.5px] text-muted-foreground">{t('settings.koreader.download.description')}</p>
 
+        {/* L'avviso prima di scaricare (23/11/2026, Paolo: «assolutamente
+            deve esserci un avviso»). Il server conserva solo l'impronta
+            del token, quindi questo download ne FABBRICA uno nuovo: un
+            lettore che si e' gia' fatto vivo (last_seen_at) perde il
+            collegamento finche' lo zip nuovo non e' installato. */}
+        {device.last_seen_at && (
+          <p className="rounded-md border border-destructive/50 bg-destructive/10 px-2.5 py-2 text-[12.5px] text-destructive">
+            {t('settings.koreader.download.alreadyLinkedWarning', { name: device.name })}
+          </p>
+        )}
+
         <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
           {t('settings.koreader.download.urlLabel')}
           <input

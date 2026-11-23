@@ -316,4 +316,22 @@ function KolibreManifest:positionDirtyPaths() return _dirtyPaths(self, "position
 function KolibreManifest:clearPositionDirty(path) _clearDirty(self, "position_dirty_paths", path) end
 function KolibreManifest:clearAllPositionDirty() _clearAllDirty(self, "position_dirty_paths") end
 
+-- Quante volte di fila l'invio della posizione di questo file e' fallito
+-- (23/11/2026: prima restava in coda e si ritentava in silenzio PER
+-- SEMPRE). Il contatore vive DENTRO lo stesso insieme: il valore della
+-- chiave passa da `true` (mai fallito, e il formato storico) al numero dei
+-- fallimenti consecutivi — _dirtyPaths legge solo le chiavi, quindi i due
+-- formati convivono. markPositionDirty rimette `true`: un libro riaperto
+-- o riletto riparte da zero tentativi.
+function KolibreManifest:positionPushFailed(path)
+    if not path then return 0 end
+    local set = _dirtySet(self, "position_dirty_paths")
+    if set[path] == nil then return 0 end
+    local falliti = (type(set[path]) == "number" and set[path] or 0) + 1
+    set[path] = falliti
+    self.settings:saveSetting("position_dirty_paths", set)
+    self.settings:flush()
+    return falliti
+end
+
 return KolibreManifest

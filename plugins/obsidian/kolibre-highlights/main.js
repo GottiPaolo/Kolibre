@@ -533,15 +533,27 @@ function leggiIlMarcatore(pezzo) {
  * Si naviga per confini certi, non a indovinare: si taglia al marcatore
  * (sotto c'e' roba tua), si parte dall'ultima riga di metadati (sopra ci
  * possono essere le intestazioni dei capitoli), si taglia alla riga della
- * nota del lettore (una nota puo' contenere virgolette), e in quello che
- * resta si prende **dalla prima all'ultima virgoletta**: quelle due le
- * scrive Kolibre attorno al brano, quindi un brano che a sua volta contiene
- * virgolette torna intero.
+ * nota del lettore (una nota puo' contenere virgolette).
  *
- * `null` se il brano non si riesce a leggere. Chi chiama non deve mai
- * trattare quel null come «cambiato»: vedi imprintaAttuale.
+ * **Due formati, una lettura sola** (23/11/2026, plugin 1.6.0). Fino alla
+ * 1.5.0 il brano era scritto fra virgolette («Assolutamente odioso e non
+ * richiesto», Paolo); dalla 1.6.0 e' nudo. Le note vecchie restano in giro,
+ * quindi si provano TUTTE E DUE le letture — quella nuova (tutta la zona)
+ * e quella vecchia (fra la prima e l'ultima virgoletta) — e decide
+ * l'impronta `base:` del marcatore: la lettura che combacia con la base
+ * vince, perche' combaciare con l'impronta del server non e' un caso.
+ * Se nessuna combacia (l'hai modificato tu) vale la lettura nuova, con una
+ * prudenza: una zona che inizia E finisce con una virgoletta e' quasi
+ * certamente un blocco vecchio ritoccato, e le virgolette di contorno sono
+ * di Kolibre, non tue — si tolgono. Il caso limite dichiarato: una nota
+ * modificata a mano il cui testo inizia e finisce con virgolette TUE viene
+ * letta senza. Inevitabile e innocuo: al primo allineamento col server il
+ * blocco si riscrive e la lettura torna univoca.
+ *
+ * `null` se il brano non si riesce a leggere (zona vuota). Chi chiama non
+ * deve mai trattare quel null come «cambiato»: vedi improntaAttuale.
  */
-function branoDelBlocco(pezzo) {
+function branoDelBlocco(pezzo, base) {
     const m = leggiIlMarcatore(pezzo);
     let zona = m ? pezzo.slice(0, pezzo.indexOf(m.intero)) : pezzo;
 
@@ -554,10 +566,26 @@ function branoDelBlocco(pezzo) {
     const nota = zona.search(INIZIO_NOTA);
     if (nota !== -1) zona = zona.slice(0, nota);
 
+    // Lettura nuova: tutta la zona, nessuna virgoletta pretesa.
+    const nuova = zona.trim();
+    if (!nuova) return null;
+
+    // Lettura vecchia: fra la prima e l'ultima virgoletta, come scriveva
+    // il plugin fino alla 1.5.0.
     const primo = zona.indexOf('"');
     const ultimo = zona.lastIndexOf('"');
-    if (primo === -1 || ultimo <= primo) return null;
-    return zona.slice(primo + 1, ultimo);
+    const vecchia = (primo !== -1 && ultimo > primo) ? zona.slice(primo + 1, ultimo) : null;
+
+    if (base) {
+        if (impronta(nuova) === base) return nuova;
+        if (vecchia !== null && impronta(vecchia) === base) return vecchia;
+    }
+    // Nessuna lettura combacia con la base (o la base non c'e'): vale la
+    // nuova, meno le eventuali virgolette di contorno (vedi sopra).
+    if (nuova.length >= 2 && nuova.startsWith('"') && nuova.endsWith('"')) {
+        return nuova.slice(1, -1);
+    }
+    return nuova;
 }
 
 /**
@@ -571,7 +599,7 @@ function branoDelBlocco(pezzo) {
  * prudente che fa il server per un blocco senza base.
  */
 function improntaAttuale(pezzo, base) {
-    const brano = branoDelBlocco(pezzo);
+    const brano = branoDelBlocco(pezzo, base);
     return brano === null ? base : impronta(brano);
 }
 
@@ -613,7 +641,9 @@ function formatHighlightBlock(hl) {
     const linkSegment = hl.link ? ` · [🔗 Kolibre](${hl.link})` : '';
     const text = (hl.text || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 
-    let block = `*${t('obsidian.block.highlight_label')} ${pageSegment}🗓 ${dateStr}${sourceSegment}${linkSegment}*\n\n"${text}"\n`;
+    // Il brano e' nudo, senza virgolette attorno (23/11/2026, 1.6.0):
+    // quelle di prima erano «assolutamente odiose e non richieste» (Paolo).
+    let block = `*${t('obsidian.block.highlight_label')} ${pageSegment}🗓 ${dateStr}${sourceSegment}${linkSegment}*\n\n${text}\n`;
     if (hl.note && hl.note.trim()) {
         block += `\n*✍🏻 ${t('obsidian.block.note_label')}*\n${hl.note.trim()}\n`;
     }
@@ -811,7 +841,10 @@ function rinnovaIMarcatori(contenuto, notePerId) {
         if (hl && hl.id_durevole) {
             const taglio = contenuto.lastIndexOf('\n***', m.index);
             const pezzo = contenuto.slice(taglio === -1 ? 0 : taglio, m.index + m[0].length);
-            const brano = branoDelBlocco(pezzo);
+            // La base candidata e' l'impronta del testo del server: cosi'
+            // la doppia interpretazione riconosce il formato giusto anche
+            // qui, dove il marcatore vecchio una base non ce l'ha.
+            const brano = branoDelBlocco(pezzo, impronta(hl.text));
             const base = impronta(brano === null ? hl.text : brano);
             fuori += `<!-- kolibre-hl id:${hl.id_durevole} base:${base} -->`;
             rinnovati++;
@@ -1051,7 +1084,7 @@ function inventarioDelFile(percorso, contenuto) {
         const pezzo = contenuto.slice(taglio === -1 ? 0 : taglio, m.index + m[0].length);
         const attuale = improntaAttuale(pezzo, base);
         const blocco = { id_durevole: nome, impronta_base: base, impronta_attuale: attuale };
-        if (attuale !== base) blocco.testo_attuale = branoDelBlocco(pezzo);
+        if (attuale !== base) blocco.testo_attuale = branoDelBlocco(pezzo, base);
         blocchi.push(blocco);
     }
     const vecchi = new RegExp(MARCATORE_VECCHIO.source, 'g');
@@ -1092,7 +1125,7 @@ function riscriviIlBlocco(pezzo, hl) {
 function spostaLaBase(pezzo) {
     const m = leggiIlMarcatore(pezzo);
     if (!m) return null;
-    const brano = branoDelBlocco(pezzo);
+    const brano = branoDelBlocco(pezzo, m.base);
     if (brano === null) return null;
     return pezzo.replace(m.intero, `<!-- kolibre-hl id:${m.nome} base:${impronta(brano)} -->`);
 }
@@ -1840,6 +1873,7 @@ class KolibreHighlightsPlugin extends obsidian.Plugin {
     // ── Core import logic ────────────────────────────────────────────────
 
     // ── Il racconto al server, e le istruzioni che torna ─────────────────
+
 
     /**
      * Legge i file della cartella delle note e compone il racconto.
