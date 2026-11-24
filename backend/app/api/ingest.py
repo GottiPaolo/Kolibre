@@ -556,8 +556,8 @@ def stage_books_by_isbn(
                      "staged_id": item.id, "title": title,
                      "author": item.author, "cover": cover_ok})
         log_message("info", "ingest",
-                    f"Voce da ISBN {isbn} in attesa: "
-                    + ("metadati dalle fonti" if meta else "vuota, da compilare a mano"))
+                    f"Entry from ISBN {isbn} pending: "
+                    + ("metadata from the sources" if meta else "empty, to be filled in by hand"))
     db.commit()
 
     return {"library": library_name, "rows": rows}
@@ -1025,25 +1025,19 @@ async def import_book_from_ingest(
                 "update_book", {"book_id": book_id, "fields": page_count_fields(pages)}, library_path
             )
 
-        # Incorporamento del conteggio pagine nell'OPF e impronta, in
-        # quest'ordine: l'incorporamento riscrive l'EPUB, quindi l'impronta
-        # deve venire dopo o descrive un file che non c'e' piu'. Qui l'ordine
-        # era gia' giusto; sta nel servizio perche' nell'altro percorso
-        # d'ingresso (library_transfer) era invertito, e una regola scritta
-        # in due posti prima o poi diverge. Best-effort l'incorporamento, mai
-        # l'impronta — vedi `chiudi_i_formati`.
+        # L'impronta del file come e' arrivato: Kolibre non scrive piu'
+        # niente dentro i libri (24/11/2026), e la regola «l'impronta dopo
+        # ogni scrittura» sta in un posto solo — vedi `chiudi_i_formati`.
         try:
             book_hash_service.chiudi_i_formati(
                 db, library_path, library_name, book_id, {item.file_format: dest_file},
-                pagine=pages, formato_preferito=item.file_format,
             )
         except Exception as e:
             log_message("warning", "ingest", f"Closing the formats failed for '{dest_file}': {e}")
 
         # La qualita' segue il libro dentro la biblioteca. Il travaso
-        # riesce solo se il file e' ancora quello misurato in ingest; con
-        # l'incorporamento del conteggio pagine acceso non lo e' quasi mai,
-        # e allora si rimisura quel libro soltanto, subito, invece di
+        # riesce solo se il file e' ancora quello misurato in ingest; se non
+        # lo e', si rimisura quel libro soltanto, subito, invece di
         # aspettare il prossimo giro della coda.
         try:
             if not qualita_job.travasa_da_ingest(db, item, library_name, book_id, dest_file):

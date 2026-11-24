@@ -30,26 +30,31 @@ perche' il riconoscimento e' arrivato dopo la lettura.
 import os
 import tempfile
 
-from typing import Union
+from typing import Optional, Union
 from datetime import datetime
 
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from ... import config, models, database, auth
+from ... import config, models, database, auth, schemas
+from ...calibre.write_queue import CalibreWriteQueue
+from ...deps import get_write_queue
+from ...services import ingest_folders, koreader_hash, permessi
+from ...services.library_scanner import EBOOK_EXTENSIONS
+from ...services.watcher import stage_ingest_file
 from ...istanti import quando
 
 from ...logging_utils import log_message
 from ...calibre.library import CalibreLibrary
 from ...services import book_hash_service, text_fingerprint
 from ...schemas_risposte import (
-    AzioneAccodata, AzioniAccodate, Esito, FileIdentificato,
+    AzioneAccodata, AzioniAccodate, Esito, FileIdentificato, LibroMandatoDalDispositivo,
     FileNonIdentificato, LibroDaRivedere, LibroSegnalato, OrfaneMigrate,
     ScansioneDeiNonAccoppiati, SegnalazioneAccoppiataDaSola,
 )
 
 from ._shared import (
-    router, sync_router, _SAFE_BACKUP_FILENAME,
+    router, sync_router,
     _migrate_orphan_highlights,
 )
 
@@ -237,6 +242,26 @@ def report_flagged_book(
     return {"status": "ok", "id": row.id}
 
 
+def _nome_dal_lettore(filename: str) -> str:
+    """
+    Il nome di un file mandato dal lettore, o un 400.
+
+    Il nome e' quello del libro sul lettore, spazi e accenti compresi. Il
+    controllo dei backup (`_SAFE_BACKUP_FILENAME`, solo lettere, cifre e
+    `_.-`) qui rifiutava quasi ogni titolo vero: fino al 24/11/2026
+    `/identify-file` rispondeva «Invalid file name» a ogni file con uno
+    spazio nel nome, e il riaccoppiamento delle note orfane per contenuto
+    falliva in silenzio. Si guarda solo quello che e' pericoloso: un
+    percorso invece di un nome, un file nascosto, un nome vuoto o troppo
+    lungo.
+    """
+    nome = (filename or "").replace("\\", "/").rsplit("/", 1)[-1]
+    if (not nome or nome != filename or nome.startswith(".") or "\x00" in nome
+            or len(nome.encode("utf-8")) > 255):
+        raise HTTPException(status_code=400, detail="Invalid file name")
+    return nome
+
+
 @sync_router.post(
     "/identify-file",
     responses={200: {"model": Union[FileIdentificato, FileNonIdentificato]}},
@@ -265,8 +290,7 @@ async def identify_device_file(
     own "search every library the device can see" behavior), not just one —
     the device doesn't know in advance which library the match is in.
     """
-    if not _SAFE_BACKUP_FILENAME.match(filename):
-        raise HTTPException(status_code=400, detail="Invalid file name")
+    filename = _nome_dal_lettore(filename)
     ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
     if ext not in text_fingerprint.SUPPORTED_FINGERPRINT_FORMATS:
         return {"matched": False, "reason": "unsupported_format"}
@@ -472,3 +496,129 @@ def bulk_queue_flagged_book_action(
     )
     db.commit()
     return {"status": "ok", "updated": updated}
+
+
+@sync_router.post(
+    "/books/upload",
+    responses={200: {"model": LibroMandatoDalDispositivo}},
+)
+async def upload_unpaired_device_book(
+    request: Request,
+    filename: str,
+    library: Optional[str] = None,
+    path: Optional[str] = None,
+    db: Session = Depends(database.get_db),
+    write_queue: CalibreWriteQueue = Depends(get_write_queue),
+    current_device: models.Device = Depends(auth.get_current_device),
+):
+    """
+    «Manda al server questo file esatto»: la seconda meta' di «Initialize
+    library» (piano 1.0.0, approvato da Paolo il 24/11/2026).
+
+    **Da zero.** Sul lettore ci sono libri che nessuna impronta riconosce:
+    copiati a mano prima di Kolibre, o arrivati da un altro programma. Fino
+    alla 0.33.0 il plugin li cercava nel catalogo per titolo e autore e, se
+    trovava qualcosa di simile, proponeva di SOVRASCRIVERE il file del lettore
+    con quello del server. Paolo: «il server deve essere la parte di smanetto,
+    non il device». Adesso il file del lettore e' quello buono: viene qui tale
+    e quale, entra in biblioteca come un libro nuovo, e da questo momento e'
+    accoppiato al lettore. I quasi doppioni che ne nascono sono un problema
+    del server, da trattare dopo.
+
+    **Lo stesso giro dell'ingest**, non uno parallelo: il file si salva nella
+    cartella di ingest di chi possiede il lettore, `stage_ingest_file` ne
+    legge i metadati, e `import_book_from_ingest` lo porta in biblioteca —
+    copertina, pagine, qualita', impronta. Il file arriva in biblioteca
+    **identico byte per byte** (`shutil.copy2`, e dal 24/11 il server non
+    riscrive piu' gli EPUB), quindi l'impronta che il server registra e'
+    quella che il lettore ha in mano.
+
+    **Mai due volte lo stesso file.** Se l'impronta e' gia' in una
+    biblioteca visibile (un secondo giro dello stesso comando, o il file
+    accoppiato nel frattempo), non si importa niente: si accoppia quello
+    che c'e' e si dice `gia_presente`.
+
+    `library` e' la cartella della biblioteca (quella di `/libraries`), e ci
+    vuole il permesso di modificarla. Se manca, va bene solo quando chi
+    possiede il lettore ne puo' modificare una sola.
+    """
+    from ..ingest import (
+        MAX_UPLOAD_SIZE_BYTES, _open_ingest_destination, import_book_from_ingest,
+    )
+    from .sync import report_book_delivered
+
+    nome = _nome_dal_lettore(filename)
+    ext = os.path.splitext(nome)[1].lower()
+    if ext not in EBOOK_EXTENSIONS:
+        raise HTTPException(status_code=400, detail=f"Format '{ext or '(none)'}' is not accepted")
+
+    proprietario = db.query(models.User).filter(models.User.id == current_device.user_id).first()
+    if not proprietario:
+        raise HTTPException(status_code=403, detail="This device has no owner")
+    modificabili = [b for b in permessi.biblioteche_visibili(db, proprietario)
+                    if permessi.puo_modificare(db, proprietario, b)]
+    if library:
+        scelta = next((b for b in modificabili if b.folder_name == library), None)
+        if scelta is None:
+            raise HTTPException(status_code=403, detail="You cannot add books to this library")
+    elif len(modificabili) == 1:
+        scelta = modificabili[0]
+    else:
+        raise HTTPException(status_code=400, detail="Choose the library to add the book to")
+
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty request body")
+    if len(body) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="File is too large")
+
+    # L'impronta, prima di tutto: se il file c'e' gia', non si importa.
+    with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+        tmp.write(body)
+        tmp_path = tmp.name
+    try:
+        impronta = koreader_hash.partial_md5(tmp_path)
+    finally:
+        os.remove(tmp_path)
+    visibili = {b.folder_name for b in permessi.biblioteche_visibili(db, proprietario)}
+    gia = [m for m in book_hash_service.resolve_book_matches(db, impronta) if m.library in visibili] \
+        if impronta else []
+
+    if gia:
+        m = gia[0]
+        libreria, book_id, fmt = m.library, m.calibre_book_id, (m.format or ext.lstrip(".")).upper()
+        gia_presente = True
+    else:
+        os.makedirs(config.INGEST_DIR, exist_ok=True)
+        cartella = ingest_folders.ensure_user_folder(proprietario.id, proprietario.username)
+        out_handle, dest_path = _open_ingest_destination(cartella, os.path.basename(filename))
+        with out_handle:
+            out_handle.write(body)
+        stage_ingest_file(db, dest_path)
+        item = db.query(models.IngestedBook).filter(
+            models.IngestedBook.file_path == os.path.abspath(dest_path)).first()
+        if item is None:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            raise HTTPException(status_code=500, detail="The file could not be staged")
+        esito = await import_book_from_ingest(
+            schemas.IngestImportRequest(id=item.id, library=scelta.folder_name),
+            db=db, write_queue=write_queue, current_user=proprietario)
+        libreria, book_id, fmt = scelta.folder_name, esito["book_id"], ext.lstrip(".").upper()
+        gia_presente = False
+
+    report_book_delivered(
+        {"calibre_book_id": book_id, "library": libreria, "format": fmt,
+         "path": path, "hash": impronta},
+        db=db, current_device=current_device)
+
+    lib = CalibreLibrary(config.library_path(libreria))
+    libro = lib.get_book(book_id) or {}
+    log_message("info", "devices",
+                f"Device '{current_device.name}' sent an unpaired file: book {book_id} in "
+                f"'{libreria}'" + (" (already there)" if gia_presente else " (imported)"))
+    return {
+        "status": "ok", "library": libreria, "calibre_book_id": book_id, "format": fmt,
+        "title": libro.get("title"), "author": lib.get_book_author(book_id),
+        "hash": impronta, "gia_presente": gia_presente,
+    }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronUp, Loader2, Plus, RotateCcw, Settings, Trash2, Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -12,7 +12,6 @@ import {
   SettingsPill,
   SettingsRow,
   SettingsSection,
-  SettingsToggle,
 } from '@/components/settings/SettingsPrimitives'
 import { useLibraries } from '@/lib/queries'
 import { formatBytes, formatDate } from '@/lib/format'
@@ -28,7 +27,6 @@ import {
   type PageCountSettings,
   type TrashedLibrary,
 } from '@/lib/librarySettingsActions'
-import { getIncorporaPagine, setIncorporaPagine } from '@/lib/opdsSettingsActions'
 import { CreateLibraryDialog } from './CreateLibraryDialog'
 import { ImportLibraryDialog } from './ImportLibraryDialog'
 import { LibraryEditDialog } from './LibraryEditDialog'
@@ -152,71 +150,6 @@ export function LibrariesTab() {
   )
 }
 
-// L'interruttore che fa scrivere la stima DENTRO il file EPUB.
-//
-// **Spento di default, e in uscita** (19/11/2026). Incorporare il conteggio
-// ricostruisce lo zip del libro: il file diventa un altro file, con un'altra
-// impronta, e l'impronta e' il modo in cui il server riconosce un libro di cui
-// un lettore gli parla — da li' veniva il difetto per cui 107 righe di
-// consegna su 296 descrivevano un file che non esisteva piu'. Da quando
-// Kolibre ha una UI sua su KOReader la stima arriva al lettore nel manifesto
-// del plugin, che e' un file a parte: incorporarla serve soltanto a chi usa
-// **Project Title** accanto, e per quello resta un interruttore invece di
-// essere cancellata. Vedi INCORPORA_PAGINE_KEY in app_settings.py.
-//
-// Sta in questa sezione e non fra i dispositivi perche' la domanda che
-// risponde e' «la stima delle pagine, dove la scrivo» — la stessa di cui
-// parlano le due righe sopra.
-function IncorporaPagineRow() {
-  const { t } = useLingua()
-  // `null` finche' il server non risponde: un interruttore disegnato spento
-  // che poi salta su da solo e' peggio di uno che compare un istante dopo.
-  const [acceso, setAcceso] = useState<boolean | null>(null)
-  const [errore, setErrore] = useState(false)
-
-  useEffect(() => {
-    // Nel dubbio si mostra SPENTO, che e' anche il predefinito del server:
-    // non si disegna acceso un interruttore che riscrive dei file.
-    getIncorporaPagine().then(setAcceso).catch(() => setAcceso(false))
-  }, [])
-
-  async function cambia(prossimo: boolean) {
-    const precedente = acceso
-    setAcceso(prossimo)
-    setErrore(false)
-    try {
-      await setIncorporaPagine(prossimo)
-    } catch {
-      setAcceso(precedente)
-      setErrore(true)
-    }
-  }
-
-  return (
-    <>
-      <SettingsRow
-        name={t('settings.libraries.incorporaPagine.rowName')}
-        description={
-          acceso
-            ? t('settings.libraries.incorporaPagine.onDescription')
-            : t('settings.libraries.incorporaPagine.offDescription')
-        }
-      >
-        <SettingsToggle
-          label={t('settings.libraries.incorporaPagine.toggleLabel')}
-          checked={acceso ?? false}
-          onChange={(prossimo) => void cambia(prossimo)}
-        />
-      </SettingsRow>
-      {errore && (
-        <SettingsFeedback kind="error">
-          {t('settings.libraries.incorporaPagine.saveError')}
-        </SettingsFeedback>
-      )}
-    </>
-  )
-}
-
 // Impostazioni globali (non per-libreria) della stima pagine per i formati
 // reflowable. Il ricalcolo vero e proprio sui libri già in catalogo è
 // un'operazione di massa e vive lì (BulkOperationsTab).
@@ -305,8 +238,6 @@ function PageCountSection() {
           </SettingsRow>
 
           {message && <SettingsFeedback kind={message.kind}>{message.text}</SettingsFeedback>}
-
-          <IncorporaPagineRow />
 
           <SettingsHint>{t('settings.libraries.pageCount.hint')}</SettingsHint>
         </>

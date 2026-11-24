@@ -345,56 +345,11 @@ def set_web_reader_tracking_enabled(db: Session, enabled: bool) -> bool:
     return enabled
 
 
-# ── Il conteggio pagine dentro il file EPUB ──────────────────────────────
-#
-# **Che cos'e'.** Quando Kolibre stima le pagine di un EPUB, quel numero va
-# in due posti diversi: nella colonna `pages` del database di Calibre, che e'
-# il posto suo, e — fino al 19/11/2026, sempre — anche **dentro il file**,
-# come metadato nell'OPF. Scrivere dentro il file vuol dire ricostruire lo
-# zip da zero: il file diventa un altro file, con un'altra lunghezza e
-# un'altra impronta.
-#
-# **Perche' si faceva.** Per **Project Title**, il cover browser di terze
-# parti che gira sul lettore: lui il numero lo legge da dentro il file,
-# perche' sul dispositivo il database di Calibre non c'e'. Era l'unico modo
-# di dargli quell'informazione.
-#
-# **Perche' adesso e' SPENTO di default.** Perche' quel modo non serve piu':
-# dal 15/11/2026 Kolibre ha una UI sua su KOReader, e la stima del server le
-# arriva nel **manifesto** del plugin (`server_pages`, vedi
-# `kolibre_manifest.lua` e `devices/sync.py::_stime_per_il_manifesto`) — un file
-# a parte, che si riscrive quanto si vuole senza toccare i libri. Scrivere
-# dentro i file, invece, e' costato caro: il 17/11/2026, su 296 righe di
-# consegna misurate sul Kindle di Paolo, **107 portavano l'impronta di un
-# file che non esisteva piu'**, perche' il file era stato riscritto dopo che
-# l'impronta era stata registrata. Quel difetto e' stato chiuso ricalcolando
-# l'impronta (commit `b8f348f`), ma la causa prima era la riscrittura, e
-# questa impostazione la toglie.
-#
-# **Perche' resta un interruttore e non e' stato cancellato.** Deciso da
-# Paolo il 19/11/2026: *«teniamolo con l'interruttore spento nell'idea di
-# abbandonarlo a breve»*. Chi usa Project Title accanto alla UI di Kolibre
-# puo' riaccenderlo e riprendersi quel numero, sapendo che da quel momento i
-# suoi file vengono riscritti. **E' una funzione in uscita**, dichiarata
-# tale il giorno in cui e' nata: quando si toglie, si toglie tutta — questa
-# impostazione, il cancello in `book_hash_service.chiudi_i_formati` e
-# `opf_metadata.embed_page_count` con quello che gli gira attorno.
-#
-# Acceso, il comportamento e' esattamente quello di prima: l'ordine
-# «incorpora, poi registra l'impronta» e' dentro
-# `book_hash_service.chiudi_i_formati` e vale in entrambi i casi.
-INCORPORA_PAGINE_KEY = "incorpora_pagine_negli_epub"
-DEFAULT_INCORPORA_PAGINE = {"enabled": False}
-
-
-def is_incorpora_pagine_enabled(db: Session) -> bool:
-    return get_setting(db, INCORPORA_PAGINE_KEY, DEFAULT_INCORPORA_PAGINE)["enabled"]
-
-
-def set_incorpora_pagine_enabled(db: Session, enabled: bool) -> bool:
-    enabled = bool(enabled)
-    set_setting(db, INCORPORA_PAGINE_KEY, {"enabled": enabled})
-    return enabled
+# Il conteggio pagine DENTRO i file EPUB (l'interruttore
+# `incorpora_pagine_negli_epub`, spento dal 19/11) non esiste piu' dal
+# 24/11/2026: Paolo, «basta modifiche ai file dei libri». La stima sta nella
+# colonna `pages` di Calibre e arriva al lettore nel manifesto del plugin
+# (`server_pages`), senza toccare i libri.
 
 
 # ── Soglia del rumore nelle statistiche ──────────────────────────────────

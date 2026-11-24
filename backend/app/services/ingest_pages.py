@@ -76,7 +76,7 @@ def _count(item_id: int) -> None:
                 ok = True
         except Exception as e:
             db.rollback()
-            log_message("error", "pages", f"Pagine non contate in ingest ({item_id}): {e}")
+            log_message("error", "pages", f"Pages not counted in ingest ({item_id}): {e}")
         finally:
             db.close()
     finally:

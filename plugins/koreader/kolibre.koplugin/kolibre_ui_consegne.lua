@@ -46,12 +46,15 @@ pagine. Il plugin lo tiene come `consegnato_il`. Sul Kindle di Paolo quelle
 date sono sparse su diciannove giorni fra luglio e novembre: la storia vera,
 che il manifesto non aveva.
 
-**`downloaded_at` resta come ripiego**, per la finestra fra l'installazione di
-questa versione e la prima sincronizzazione — dopo, non serve piu'.
+**`downloaded_at` resta, ma solo dove e' una data vera** (Paolo, 24/11/2026):
+per un libro adottato e mai consegnato e' la data dell'accoppiamento, quando
+la voce ha la sua identita' (`_linkHashMatch`). Le voci `hash:*` della
+vecchia migrazione non ne hanno una: adottate in blocco, tutte nello stesso
+secondo.
 
-**Un libro senza nessuna delle due date non si butta: va in fondo**, e la sua
-riga non scrive niente. Metterlo in cima direbbe una cosa falsa, toglierlo ne
-direbbe un'altra. «Non lo so» non e' «oggi».
+**Un libro senza data non si butta: va in fondo**, e la sua riga non scrive
+niente. Metterlo in cima direbbe una cosa falsa, toglierlo ne direbbe
+un'altra. «Non lo so» non e' «oggi». E la data e' un giorno, senza l'ora.
 ]]
 
 local BookList = require("ui/widget/booklist")
@@ -87,10 +90,18 @@ function KolibreConsegne:voci()
             table.insert(tutte, m)
         end
     end
-    -- La data del server se c'e', la nostra altrimenti. Vedi in testa al
-    -- file: la seconda e' spesso la data dell'adozione, non della consegna.
+    -- **La data** (Paolo, 24/11/2026): quella della consegna, dal server;
+    -- per un libro adottato e mai consegnato, quella dell'accoppiamento, se
+    -- c'e'; altrimenti nessuna, e il libro va in fondo. L'accoppiamento vero
+    -- e' una voce con la sua identita' (biblioteca e id): li' `downloaded_at`
+    -- l'ha scritto `_linkHashMatch` nel momento in cui il libro e' stato
+    -- riconosciuto. Le voci `hash:*` della vecchia migrazione invece hanno la
+    -- data in cui sono state adottate in blocco, tutte nello stesso secondo:
+    -- non e' una data di niente, e non si scrive.
     local function consegna(m)
-        return m.consegnato_il or m.downloaded_at
+        if m.consegnato_il then return m.consegnato_il end
+        if m.library and m.calibre_book_id then return m.downloaded_at end
+        return nil
     end
     table.sort(tutte, function(a, b)
         local da, db = consegna(a) or -1, consegna(b) or -1
@@ -128,6 +139,8 @@ function KolibreConsegne:voci()
             -- `quando` torna `nil` e la colonna resta vuota. «Non lo so»
             -- non e' «oggi».
             quando = consegna(m),
+            -- Il giorno e basta: «3 ore fa» qui non serve (Paolo, 24/11).
+            solo_giorno = true,
         })
     end
     return voci

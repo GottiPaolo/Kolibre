@@ -143,9 +143,9 @@ def release_book(
     pagine, e questo rendeva un libro **diverso dalla propria copia byte per
     byte**: l'accorpamento automatico dei file identici, che e' la strada da
     cui si arriva qui, non scattava mai sulla coppia che avrebbe fatto
-    scontrare le due posizioni. Spenta l'incorporazione
-    (`app_settings.INCORPORA_PAGINE_KEY`), i doppioni sono tornati davvero
-    identici e il difetto e' venuto fuori al primo giro.
+    scontrare le due posizioni. Spenta l'incorporazione (19/11/2026, poi
+    tolta del tutto il 24/11), i doppioni sono tornati davvero identici e
+    il difetto e' venuto fuori al primo giro.
 
     Highlights are the one exception on the delete path: they are authored
     content, and deleting a book shouldn't silently destroy notes the user

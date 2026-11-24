@@ -10,7 +10,8 @@
     "sarebbe due file con due impronte diverse, e a ogni cambio di lingua il",
     "lettore si sentirebbe proporre un aggiornamento che non cambia niente.",
     "",
-    "Il PLUGIN ha le novita' in due lingue, come tutta la sua interfaccia.",
+    "Il PLUGIN ha le novita' solo in inglese dalla 0.29.0, come tutta la sua",
+    "interfaccia (Paolo, 24/11/2026); le voci vecchie conservano anche `it`.",
     "Le PATCH solo in inglese, per decisione di Paolo: «la patch NON ha",
     "bisogno di una traduzione, e' e deve essere un unico file in inglese per",
     "sempre e per tutti, tanto non e' un menu' con cui qualcuno deve",
@@ -21,6 +22,27 @@
     "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
   ],
   "plugin": {
+    "1.0.0": {
+      "en": "Kolibre for KOReader 1.0.0. Everything from 0.29 to 0.34 in one place: the plugin is in English; a new menu (Sync, Tools, Global, Dev, Library UI, Settings) with a Last sync reminder; the Kolibre library view is always there when it is on, takes you back to the author's folder when you leave a book, and no longer drops you into KOReader's file browser; deleting a book works offline and the book never comes back; closing a book sends that reading session, going to sleep runs a Sync; author photos arrive by themselves; automations start again from the 1.0 defaults (on startup and wake Sync, new books and updates; opening a book downloads its position; closing it sends the position and that reading session; going to sleep runs a Sync); Kolibre no longer writes anything inside your books; and Initialize library pairs identical files, sends the others to the server as they are, and tidies the device into Author/Title folders without losing reading progress, highlights, history or collections."
+    },
+    "0.34.0": {
+      "en": "Initialize library is one command in three steps, each asking first. Books identical to one on the server are paired with it. Books the server doesn't have are no longer matched by title and never overwritten: the exact file is sent to the server, becomes a new book there and is paired with this device (if you can add to more than one library, you choose which). Then the books Kolibre knows are moved into Author/Title folders, keeping reading progress, highlights, history and collections. A summary tells what happened, including books whose reading data is kept somewhere other than KOReader's setting says. Deleting a book now also removes it from your collections."
+    },
+    "0.33.0": {
+      "en": "Closing a book now also sends that reading session: highlights, positions, KOReader's reading statistics and the reading measurements, without the heavier parts of a full Sync. Going to sleep runs a Sync again, on by default (the automation moment is now called \"Going to sleep or shutting down\", which is what it always was)."
+    },
+    "0.32.0": {
+      "en": "Deleting a book works without a network. The file goes away at once, and the server is told as soon as there is a connection - at the latest at the next sync, before anything else, so the book is never sent back. Author folders now get their photo at every Sync if they are missing it, not only when a new book arrives (an author the server has no photo for is retried once a week). Kolibre no longer writes anything inside your books; if you use Project: Title, it will tell you once that the page count it read from them is gone for new books."
+    },
+    "0.31.0": {
+      "en": "The Kolibre library view (UI 0.8.0) stays put. If it is turned on it is always there: Back no longer closes it, and you no longer end up in KOReader's file browser after leaving a book - that happened whenever the book had been opened from the latest sends, the history, the search or from KOReader itself. Leaving a book takes you to the folder of its author, and from there you can go up to the library as usual. The battery is bigger, black and sits in the bottom-right corner, with the page arrows still centred; the path at the top is darker and larger. In the latest sends, a book that was paired but never sent shows the day it was paired, a book with no known date goes to the bottom, and dates are days only, without hours."
+    },
+    "0.30.0": {
+      "en": "A new, tidier Kolibre menu. At the top there is just \"Sync\" (it was \"Sync everything\"). Tools holds the everyday extras: Browse server library (it was Catalog), Check for new books, Check for updates, the current book's position, KOReader patches and Automations. Global holds the heavy actions on the whole library, Dev the ones for troubleshooting. Gone: \"Open the Kolibre library\", \"Books managed by Kolibre\", \"Run backup now\" and the backup reminder - the backup already runs inside every Sync, and Settings now has a \"Last sync reminder\" instead. Rows per screen is a number you set with arrows, from 4 to 8. Automations are simpler and start again from new defaults: on startup and wake Sync, Check for new books and Check for updates; opening a book downloads its position, closing it sends it; on shutdown you can turn on Sync."
+    },
+    "0.29.0": {
+      "en": "The plugin now speaks English only. Until now it came in the language of your Kolibre account; from this version on every menu and message is in English, for everyone, and updates no longer depend on the language you picked. Nothing else changes."
+    },
     "0.28.0": {
       "it": "La posizione di lettura che non si riesce a inviare smette di insistere in silenzio. Prima, se il server rifiutava la posizione di un libro, il plugin la ritentava a ogni sincronizzazione, per sempre, senza dirtelo. Ora dopo 5 sincronizzazioni fallite di fila rinuncia e te lo dice con un avviso sullo schermo; per rimettere in coda quella posizione basta riaprire il libro.",
       "en": "A reading position that cannot be sent stops insisting silently. Before, if the server rejected one book's position, the plugin retried it at every sync, forever, without telling you. Now after 5 failed syncs in a row it gives up and says so with an on-screen notice; to queue that position again, just reopen the book."
@@ -134,7 +156,5 @@
       "en": "SEARCH is now ours: KOReader's own box — the one that opens when you tap the page number at the bottom, between the arrows — searches the title and the author of the books Kolibre brought here, and opens a results window with covers, like the history. It used to search the file name and jump to a row, so the author (a folder name on the device) was never found. And the LATEST SENDS are in order again: the date now comes from the server, which knows when it actually delivered each book, instead of the one the plugin wrote for itself — that one marked when the row was written, and for books already on the device it was all the same instant. Two duplicate bugs fixed too: the same book could have two rows in the internal list, and an author folder said «17 books» when it held fifteen."
     }
   },
-  "patch": {
-    "2-kolibre-misura-caratteri.lua": "Name, description and header comments translated to English; the measurement itself is unchanged. This patch is one file in English for everyone, on purpose: a translated copy would have a different checksum, and the checksum is how your reader decides whether to update."
-  }
+  "patch": {}
 }

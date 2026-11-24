@@ -3356,6 +3356,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/devices/books/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upload Unpaired Device Book
+         * @description «Manda al server questo file esatto»: la seconda meta' di «Initialize
+         *     library» (piano 1.0.0, approvato da Paolo il 24/11/2026).
+         *
+         *     **Da zero.** Sul lettore ci sono libri che nessuna impronta riconosce:
+         *     copiati a mano prima di Kolibre, o arrivati da un altro programma. Fino
+         *     alla 0.33.0 il plugin li cercava nel catalogo per titolo e autore e, se
+         *     trovava qualcosa di simile, proponeva di SOVRASCRIVERE il file del lettore
+         *     con quello del server. Paolo: «il server deve essere la parte di smanetto,
+         *     non il device». Adesso il file del lettore e' quello buono: viene qui tale
+         *     e quale, entra in biblioteca come un libro nuovo, e da questo momento e'
+         *     accoppiato al lettore. I quasi doppioni che ne nascono sono un problema
+         *     del server, da trattare dopo.
+         *
+         *     **Lo stesso giro dell'ingest**, non uno parallelo: il file si salva nella
+         *     cartella di ingest di chi possiede il lettore, `stage_ingest_file` ne
+         *     legge i metadati, e `import_book_from_ingest` lo porta in biblioteca —
+         *     copertina, pagine, qualita', impronta. Il file arriva in biblioteca
+         *     **identico byte per byte** (`shutil.copy2`, e dal 24/11 il server non
+         *     riscrive piu' gli EPUB), quindi l'impronta che il server registra e'
+         *     quella che il lettore ha in mano.
+         *
+         *     **Mai due volte lo stesso file.** Se l'impronta e' gia' in una
+         *     biblioteca visibile (un secondo giro dello stesso comando, o il file
+         *     accoppiato nel frattempo), non si importa niente: si accoppia quello
+         *     che c'e' e si dice `gia_presente`.
+         *
+         *     `library` e' la cartella della biblioteca (quella di `/libraries`), e ci
+         *     vuole il permesso di modificarla. Se manca, va bene solo quando chi
+         *     possiede il lettore ne puo' modificare una sola.
+         */
+        post: operations["upload_unpaired_device_book_api_kolibre_devices_books_upload_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/devices/progress": {
         parameters: {
             query?: never;
@@ -4572,24 +4620,6 @@ export interface paths {
         get: operations["get_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_get"];
         /** Update Web Reader Tracking Setting */
         put: operations["update_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/kolibre/settings/incorpora-pagine": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Incorpora Pagine Setting */
-        get: operations["get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get"];
-        /** Update Incorpora Pagine Setting */
-        put: operations["update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -6364,9 +6394,9 @@ export interface paths {
          *     update can say it. It comes from plugins/koreader/novita.json and NOT
          *     from inside the plugin's own files, for the reason written at the top of
          *     services/novita.py: the text a person reads and the bytes a machine
-         *     compares must be able to change separately. `lingua` works like every
-         *     other plugin endpoint — the plugin asks in the language it was packaged
-         *     in, and an older one that doesn't ask gets English.
+         *     compares must be able to change separately. English only, like the
+         *     plugin itself (Paolo, 24/11/2026); the `?lingua=` sent by plugins up to
+         *     0.28.0 is simply ignored.
          */
         get: operations["get_koreader_plugin_version_api_tools_plugins_koreader_version_get"];
         put?: never;
@@ -6397,12 +6427,10 @@ export interface paths {
          *     decode this response with its old `ipairs(manifest.files)` loop instead
          *     of choking on a shape change.
          *
-         *     **`lingua`**: il plugin dice in che lingua e' la copia che ha installata,
-         *     e riceve i file in quella. Serve perche' l'aggiornamento non disfi lo
-         *     scarico: senza, un plugin scaricato in italiano tornerebbe inglese al
-         *     primo aggiornamento, in silenzio. Chi non la manda — un plugin vecchio —
-         *     riceve l'inglese, cioe' quello che gia' faceva. Impronte e contenuto
-         *     vengono dalla stessa lingua, quindi non possono discordare.
+         *     **Niente `lingua`** dal 24/11/2026: il plugin e' solo in inglese, e i
+         *     byte sono gli stessi per tutti. Il `?lingua=` delle versioni fino alla
+         *     0.28.0 si ignora; una copia installata in italiano ha impronte diverse
+         *     e al primo aggiornamento torna inglese, come Paolo ha deciso.
          */
         get: operations["get_koreader_plugin_manifest_api_tools_plugins_koreader_manifest_get"];
         put?: never;
@@ -6900,13 +6928,16 @@ export interface components {
          * @description Le biblioteche, ridotte a due campi per il lettore.
          *
          *     `library` e' la **cartella** e non il nome: e' quello che va in ogni
-         *     richiesta successiva.
+         *     richiesta successiva. `can_edit` (24/11/2026) dice se chi possiede il
+         *     lettore puo' aggiungerci libri: «Initialize library» offre solo quelle.
          */
         BibliotecaPerIlDispositivo: {
             /** Name */
             name: string;
             /** Library */
             library: string;
+            /** Can Edit */
+            can_edit: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -9569,6 +9600,37 @@ export interface components {
             author_nationality: string | null;
             /** Author Occupations */
             author_occupations: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * LibroMandatoDalDispositivo
+         * @description Un file del lettore che nessuna impronta riconosceva, mandato tale e
+         *     quale al server (comando «Initialize library», 24/11/2026): adesso e'
+         *     questo libro, in questa biblioteca, ed e' accoppiato al lettore.
+         *
+         *     `gia_presente` e' vero quando lo stesso file (la stessa impronta) era
+         *     gia' in una biblioteca visibile: allora non si importa niente di nuovo,
+         *     si accoppia quello che c'e'. `hash` e' l'impronta del file sul server,
+         *     che e' quella del file sul lettore perche' i byte sono gli stessi.
+         */
+        LibroMandatoDalDispositivo: {
+            /** Status */
+            status: string;
+            /** Library */
+            library: string;
+            /** Calibre Book Id */
+            calibre_book_id: number;
+            /** Format */
+            format: string;
+            /** Title */
+            title?: string | null;
+            /** Author */
+            author?: string | null;
+            /** Hash */
+            hash?: string | null;
+            /** Gia Presente */
+            gia_presente: boolean;
         } & {
             [key: string]: unknown;
         };
@@ -17068,6 +17130,39 @@ export interface operations {
             };
         };
     };
+    upload_unpaired_device_book_api_kolibre_devices_books_upload_post: {
+        parameters: {
+            query: {
+                filename: string;
+                library?: string | null;
+                path?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LibroMandatoDalDispositivo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     pull_reading_progress_api_kolibre_devices_progress_get: {
         parameters: {
             query?: {
@@ -18876,74 +18971,6 @@ export interface operations {
         };
     };
     update_web_reader_tracking_setting_api_kolibre_settings_web_reader_tracking_put: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Interruttore"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_get: {
-        parameters: {
-            query?: {
-                token?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Interruttore"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_incorpora_pagine_setting_api_kolibre_settings_incorpora_pagine_put: {
         parameters: {
             query?: {
                 token?: string | null;
@@ -21790,9 +21817,7 @@ export interface operations {
     };
     get_koreader_plugin_version_api_tools_plugins_koreader_version_get: {
         parameters: {
-            query?: {
-                lingua?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -21808,22 +21833,11 @@ export interface operations {
                     "application/json": components["schemas"]["VersioneDelPlugin"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     get_koreader_plugin_manifest_api_tools_plugins_koreader_manifest_get: {
         parameters: {
-            query?: {
-                lingua?: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -21839,22 +21853,11 @@ export interface operations {
                     "application/json": components["schemas"]["ManifestDelPlugin"];
                 };
             };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
         };
     };
     get_koreader_plugin_file_api_tools_plugins_koreader_file__file_path__get: {
         parameters: {
-            query?: {
-                lingua?: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 file_path: string;

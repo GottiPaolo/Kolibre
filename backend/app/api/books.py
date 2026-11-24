@@ -771,26 +771,12 @@ async def recompute_book_page_count(
         raise HTTPException(status_code=422, detail="Page count is not available for this format")
 
     await write_queue.submit("update_book", {"book_id": id, "fields": page_count_fields(pages)}, library_path)
-    # **Passa da `chiudi_i_formati` e non da `embed_page_count`**, e non e' un
-    # dettaglio di stile (17/11/2026).
-    #
-    # Incorporare il conteggio pagine ricostruisce lo zip e lo rimette al suo
-    # posto con `os.replace`: il file sul disco **diventa un altro file**, con
-    # altri byte e quindi un'altra impronta. L'impronta e' la cosa con cui un
-    # lettore dice «questo libro che ho in mano e' quello», quindi lasciarla
-    # vecchia vuol dire tenere in database la descrizione di un file che non
-    # esiste piu'.
-    #
-    # Fino a stamattina qui si incorporava e si andava a casa. Misurato sul
-    # server di Paolo: su 296 righe di consegna, **107 avevano un'impronta che
-    # non descriveva nessun file vivo** — il ricalcolo delle pagine le
-    # riscriveva e nessuno ricalcolava. Il buco non si vedeva perche' un
-    # `Recompute hashes` fatto a mano, giorni dopo, le rimetteva in pari.
-    #
-    # `chiudi_i_formati` fa le due cose nell'ordine giusto e **tiene l'ordine
-    # scritto in un posto solo**: la scansione di una biblioteca passava gia'
-    # da la' dal 04/11, questo e il ricalcolo di una biblioteca no. Tre copie
-    # della stessa regola, e una si era persa.
+    # Il ricalcolo scrive solo la colonna `pages` di Calibre: dal 24/11/2026
+    # il file del libro non si tocca (Paolo, «basta modifiche ai file dei
+    # libri»). Fino al 17/11 qui si riscriveva l'EPUB senza ricalcolare
+    # l'impronta — 107 righe di consegna su 296 descrivevano un file che non
+    # esisteva piu'. Si passa comunque da `chiudi_i_formati`, che registra
+    # le impronte dei file come sono: la regola sta in un posto solo.
     try:
         percorsi = {}
         for f in formats:
@@ -799,7 +785,7 @@ async def recompute_book_page_count(
                 percorsi[f["format"]] = percorso
         await run_in_threadpool(
             book_hash_service.chiudi_i_formati,
-            db, library_path, library, id, percorsi, pages, fmt,
+            db, library_path, library, id, percorsi,
         )
         db.commit()
     except Exception as e:
@@ -1373,9 +1359,8 @@ def edit_book_toc(id: int, payload: dict, library: str = Depends(biblioteca_scri
     lib.touch_last_modified(id)
     # **Anche salvare un indice riscrive il file**, e quindi ne cambia
     # l'impronta — vale per l'EPUB (zip ricostruito) come per il PDF. Era il
-    # terzo dei tre punti che riscrivevano senza ricalcolare; `pagine=None`
-    # perche' qui non c'e' niente da incorporare, si registrano le impronte
-    # dei file come stanno.
+    # terzo dei tre punti che riscrivevano senza ricalcolare: si registrano
+    # le impronte dei file come stanno dopo la scrittura.
     try:
         book_hash_service.chiudi_i_formati(
             db, library_path, library, id, {fmt: file_path})

@@ -59,6 +59,8 @@ local KolibreFinestre = require("kolibre_finestre")
 local KolibreManifest = require("kolibre_manifest")
 local KolibrePercorsi = require("kolibre_percorsi")
 
+local KolibreRimozioni = require("kolibre_rimozioni")
+
 local KolibreSync = {}
 
 -- La versione dichiarata del plugin vive in main.lua (la legge anche il
@@ -635,6 +637,12 @@ function KolibreSync._syncNowRun(self, interactive, trigger, allow_migration, so
     local payload, missing_keys, migration_items = self:_buildSyncPayload(trigger, allow_migration)
     markPhase("preparazione")
 
+    -- Fase 0.5: i libri eliminati da qui che il server non sa ancora
+    -- (`kolibre_rimozioni.lua`). PRIMA dell'handshake, perche' e' la sua
+    -- risposta a portare i libri da consegnare: se il server non sa ancora
+    -- che un libro l'abbiamo eliminato, ce lo rimanda.
+    KolibreRimozioni.consegna(self.manifest, self.api, function(msg) logger.warn(msg) end)
+
     -- Fase 1: handshake
     barra(1, passi, t("koreader.sync.phase_handshake"))
     local result, err = self.api:request("POST", "/api/kolibre/devices/sync", payload)
@@ -795,6 +803,12 @@ function KolibreSync._syncNowRun(self, interactive, trigger, allow_migration, so
                 if self._ultime_righe_statistiche then
                     phases.statistiche_righe = self._ultime_righe_statistiche
                 end
+                -- Le foto degli autori che mancano (piano del 24/11/2026):
+                -- vedi `_fotoDegliAutoriMancanti`. Dentro un pcall: una foto
+                -- che non scende non deve chiudere male una sincronizzazione.
+                local ok_foto, foto = pcall(function() return self:_fotoDegliAutoriMancanti() end)
+                if ok_foto and foto then phases.foto_autori = foto.downloaded end
+                markPhase("foto_autori")
             end
 
             -- Fase 5: close the session
@@ -940,8 +954,14 @@ function KolibreSync._syncNowRun(self, interactive, trigger, allow_migration, so
         afterDownloads(downloaded, failed)
     end
 
-    self:_confirmDownloads(result.sends or {}, interactive,
-        function() runDownloads(result.sends or {}) end,
+    -- Un libro eliminato da qui non torna, nemmeno se la sua richiesta al
+    -- server non e' ancora partita (vedi la Fase 0.5).
+    local da_scaricare, tolti = KolibreRimozioni.togliDaiDaScaricare(self.manifest, result.sends or {})
+    if tolti > 0 then
+        logger.info("Kolibre: non riscarico", tolti, "libri eliminati da questo lettore")
+    end
+    self:_confirmDownloads(da_scaricare, interactive,
+        function() runDownloads(da_scaricare) end,
         function() afterDownloads(0, 0) end)
 end
 

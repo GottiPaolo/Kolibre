@@ -247,17 +247,58 @@ function Comune.batteriaNellaBarra(vista)
     if vista.page_info_text and vista.page_info_text.getSize then
         local ok, misura = pcall(function() return vista.page_info_text:getSize() end)
         if ok and misura and misura.h and misura.h > 0 then
-            alto = math.floor(misura.h * 0.60)
+            -- Piu' grande (24/11/2026): quasi quanto il testo delle
+            -- pagine, era al 60%.
+            alto = math.floor(misura.h * 0.85)
         end
     end
     local pezzo = Pezzi.batteriaCompatta(Pezzi.corpo(alto))
     if not pezzo then return end
-    local larghezza = pezzo:getSize().w
-    table.insert(vista.page_info, 1, HorizontalSpan:new{ width = larghezza })
+    vista._spazio_davanti = HorizontalSpan:new{ width = 0 }
+    vista._spazio_dietro = HorizontalSpan:new{ width = 0 }
+    table.insert(vista.page_info, 1, vista._spazio_davanti)
+    table.insert(vista.page_info, vista._spazio_dietro)
     table.insert(vista.page_info, pezzo)
     vista.batteria_nella_barra = pezzo
     -- Il TextWidget dentro il gruppo: e' quello a cui si riscrive il testo.
-    vista._testo_batteria = pezzo[2]
+    vista._testo_batteria = pezzo[1]
+    Comune.allineaBatteria(vista)
+end
+
+--- La batteria nell'angolo, le frecce al centro (Paolo, 24/11/2026).
+--
+-- `page_info` lo centra KOReader (un `BottomContainer` largo quanto
+-- `inner_dimen`, uguale in 2025.08, 2026.03 e 2026.07). Il gruppo si fa
+-- largo quanto lo schermo meno i margini, con due spazi calcolati: quello
+-- davanti rimette le frecce al centro, quello dietro spinge la batteria
+-- contro il margine destro. Si rifa' a ogni ridisegno, perche' «2 / 5» e
+-- «12 / 15» non sono larghi uguali.
+--
+-- Se non ci sta (uno schermo stretto, una scritta lunga) si torna alla
+-- forma di prima: batteria subito dopo le frecce, centro rimesso a posto.
+function Comune.allineaBatteria(vista)
+    local davanti, dietro, batteria = vista._spazio_davanti, vista._spazio_dietro,
+        vista.batteria_nella_barra
+    if not (davanti and dietro and batteria and vista.page_info) then return end
+    local larghezza = (vista.inner_dimen and vista.inner_dimen.w) or Screen:getWidth()
+    local margine = Size.padding.large
+    local largo_batteria = batteria:getSize().w
+    local frecce = 0
+    for _i, pezzo in ipairs(vista.page_info) do
+        if pezzo ~= davanti and pezzo ~= dietro and pezzo ~= batteria and pezzo.getSize then
+            frecce = frecce + pezzo:getSize().w
+        end
+    end
+    local totale = larghezza - 2 * margine
+    local a = math.floor(larghezza / 2 - margine - frecce / 2)
+    local b = totale - a - frecce - largo_batteria
+    if a < 0 or b < margine then
+        a = largo_batteria + margine
+        b = margine
+    end
+    davanti.width = a
+    dietro.width = b
+    vista.page_info:resetLayout()
 end
 
 --- Riscrive la percentuale, se la batteria c'e'.
@@ -323,6 +364,7 @@ function Comune.ridisegna(vista, righe, vuoto, select_number, no_recalculate_dim
 
     Comune.aggiornaBatteria(vista)
     vista:updatePageInfo(scelta)
+    Comune.allineaBatteria(vista)
     -- **Dopo** `updatePageInfo`, non prima: e' lui che decide se la freccia
     -- si vede, e lo decide guardando una pila che le nostre viste non usano.
     Comune.tastoIndietro(vista)

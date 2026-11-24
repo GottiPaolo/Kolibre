@@ -479,14 +479,11 @@ async def _completa_caricamento(
     # the library rather than just the one(s) just uploaded — real wasted
     # wall-clock time on every sync, which from the outside just looks like
     # a plugin stuck "waiting for the checksum".
-    # Le impronte si calcolano DOPO che si e' finito di scrivere nei file, e
-    # per questo tutto il blocco passa da `chiudi_i_formati`: fino al
-    # 04/11/2026 qui l'ordine era invertito — prima l'impronta, poi
-    # l'incorporamento del conteggio pagine, che riscrive l'EPUB da zero e
-    # quindi la invalidava. Due libri su questo impianto ne portavano ancora
-    # il segno. L'ordine ora sta scritto una volta sola, nel servizio.
-    pagine = None
-    preferred_fmt = None
+    # Le impronte si calcolano DOPO che si e' finito di scrivere nei file,
+    # e per questo tutto il blocco passa da `chiudi_i_formati`: fino al
+    # 04/11/2026 qui l'ordine era invertito, e due libri su questo impianto
+    # ne portavano ancora il segno. Dal 24/11/2026 il conteggio pagine non
+    # si scrive piu' dentro il file: va solo nella colonna di Calibre.
     if format_paths:
         page_settings = app_settings.get_page_count_settings(db)
         preferred_fmt = page_counter.pick_preferred_format(list(format_paths.keys()))
@@ -502,7 +499,6 @@ async def _completa_caricamento(
     try:
         book_hash_service.chiudi_i_formati(
             db, library_path, folder, book_id, format_paths,
-            pagine=pagine, formato_preferito=preferred_fmt,
         )
     except Exception as e:
         log_message("warning", "library_transfer",
@@ -645,10 +641,8 @@ async def copy_book_to_library(
         )
         percorsi_copiati[fmt] = dest_file
         saved_formats.append(fmt)
-    # Qui non si incorpora niente (il conteggio pagine viaggia nei metadati
-    # del libro copiato, non si ricalcola), quindi `pagine` resta None: la
-    # funzione registra le impronte dei file come stanno. Ci si passa comunque
-    # perche' la regola sull'ordine stia in un posto solo.
+    # Le impronte dei file copiati, come stanno: ci si passa perche' la
+    # regola sull'ordine stia in un posto solo.
     book_hash_service.chiudi_i_formati(
         db, target_path, target_folder, new_book_id, percorsi_copiati)
     db.commit()

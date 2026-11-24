@@ -915,37 +915,6 @@ class CalibreLibrary:
             conn.close()
         dimentica_lista_libri(self.db_path)
 
-    def update_format_size(self, book_id: int, fmt: str, size_bytes: int) -> bool:
-        """
-        Ridichiara quanto pesa un formato, senza toccare il resto della riga.
-
-        **Perche' esiste, e perche' non e' `add_format`.** Kolibre riscrive
-        gli EPUB (ci incorpora il conteggio pagine), e dopo la riscrittura il
-        file sul disco ha un'altra lunghezza mentre `data.uncompressed_size`
-        ha ancora quella di prima: da li' il peso sbagliato nell'elenco dei
-        libri e nel totale di una biblioteca. `add_format` farebbe anche
-        questo, ma pretende il `name` del file — che qui non si vuole
-        cambiare, e che chi riscrive un OPF non ha in mano.
-
-        Torna False se quella riga non c'e' (un formato che Calibre non
-        conosce): e' un «non c'era niente da aggiornare», non un errore.
-        """
-        conn = self._connect()
-        try:
-            cur = conn.execute(
-                "UPDATE data SET uncompressed_size = ? WHERE book = ? AND format = ?",
-                (int(size_bytes), book_id, fmt.upper()),
-            )
-            if cur.rowcount:
-                conn.execute("UPDATE books SET last_modified = ? WHERE id = ?", (_now_iso(), book_id))
-            conn.commit()
-            toccata = bool(cur.rowcount)
-        finally:
-            conn.close()
-        if toccata:
-            dimentica_lista_libri(self.db_path)
-        return toccata
-
     def set_identifier(self, book_id: int, id_type: str, value: str) -> None:
         conn = self._connect()
         try:

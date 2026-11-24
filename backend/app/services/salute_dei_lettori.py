@@ -9,8 +9,9 @@ campionamento a salti dei suoi byte, e quell'impronta resta come rete per
 tutto quello che il nome non copre: un libro consegnato prima di quella data,
 un file che sta solo sul lettore, un messaggio da un plugin vecchio.
 
-Quella rete si logora in silenzio. Kolibre riscrive gli EPUB (ci incorpora il
-conteggio pagine), e se l'impronta registrata non viene rifatta, descrive una
+Quella rete si logora in silenzio. Quando un EPUB si riscrive (l'indice
+salvato dall'editor; fino al 24/11/2026 anche il conteggio pagine
+incorporato) e l'impronta registrata non viene rifatta, descrive una
 versione del file che non esiste piu'. Il lettore manda una nota, il server
 non riconosce il libro, e la nota diventa orfana. **Nessuno se ne accorge**:
 non c'e' un errore, c'e' un dato che non arriva.

@@ -378,8 +378,8 @@ def _identita_di(db: Session, device_id: int):
 
     **Tre vie, e la terza e' quella che serve davvero.** L'impronta viva
     riconosce un file identico a quello che il server ha adesso; lo storico
-    riconosce una copia precedente (il server riscrive i file quando ci
-    incorpora metadati o copertina); e il **percorso** riconosce un file che
+    riconosce una copia precedente (il server ha riscritto i file: l'indice
+    salvato dall'editor, e fino al 24/11/2026 il conteggio pagine); e il **percorso** riconosce un file che
     il server sa di aver consegnato a QUESTO dispositivo. Misurato sul
     Kindle di Paolo: su sette coppie di doppioni, in **sei** una delle due
     impronte non risolveva ne' per la prima via ne' per la seconda.

@@ -47,9 +47,6 @@ local t = require("kolibre_lingua").t
 
 local Azioni = {}
 
---: Le voci del primo livello che, dentro la vista, non hanno senso.
-local DA_SALTARE = { apri_libreria = true }
-
 --- Il testo di una voce di menu di KOReader, che puo' essere una funzione.
 local function etichetta(voce)
     if type(voce.text_func) == "function" then
@@ -89,11 +86,10 @@ function Azioni.menuDiVoci(voci, titolo)
     local dialogo
     local pulsanti = {}
     for _i, voce in ipairs(voci or {}) do
-        local id = voce.kolibre_id
         -- Il separatore di KOReader (`separator = true`) non ha un pulsante
         -- suo: qui si salta, perche' una riga vuota in un riquadro di
         -- pulsanti sembra un pulsante rotto.
-        if not (id and DA_SALTARE[id]) and (voce.text or voce.text_func) then
+        if voce.text or voce.text_func then
             local testo = conSpunta(voce, etichetta(voce))
             local sotto = voce.sub_item_table
             if not sotto and type(voce.sub_item_table_func) == "function" then

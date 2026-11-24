@@ -223,6 +223,12 @@ function Elenco:onClose()
     return true
 end
 
+--- Un libro si sta aprendo, da qualunque strada: questa finestra esce dalla
+--- pila (vedi `KolibreUI:onShowingReader`, la causa dei «salti»).
+function Elenco:onShowingReader()
+    UIManager:close(self)
+end
+
 --- «Indietro», in fondo a sinistra: qui non c'e' una cartella sopra, quindi
 --- vuol dire «chiudi e torna alla libreria». Lo stesso tasto nello stesso
 --- posto, con il significato che ha in questa finestra.

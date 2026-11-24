@@ -1797,10 +1797,12 @@ class BibliotecaPerIlDispositivo(Permissivo):
     Le biblioteche, ridotte a due campi per il lettore.
 
     `library` e' la **cartella** e non il nome: e' quello che va in ogni
-    richiesta successiva.
+    richiesta successiva. `can_edit` (24/11/2026) dice se chi possiede il
+    lettore puo' aggiungerci libri: «Initialize library» offre solo quelle.
     """
     name: str
     library: str
+    can_edit: bool
 
 
 class DispositivoFratello(Permissivo):
@@ -2181,6 +2183,26 @@ class PagineRicevute(Permissivo):
     """
     updated: int
     unresolved: int
+
+
+class LibroMandatoDalDispositivo(Esito):
+    """
+    Un file del lettore che nessuna impronta riconosceva, mandato tale e
+    quale al server (comando «Initialize library», 24/11/2026): adesso e'
+    questo libro, in questa biblioteca, ed e' accoppiato al lettore.
+
+    `gia_presente` e' vero quando lo stesso file (la stessa impronta) era
+    gia' in una biblioteca visibile: allora non si importa niente di nuovo,
+    si accoppia quello che c'e'. `hash` e' l'impronta del file sul server,
+    che e' quella del file sul lettore perche' i byte sono gli stessi.
+    """
+    library: str
+    calibre_book_id: int
+    format: str
+    title: Optional[str] = None
+    author: Optional[str] = None
+    hash: Optional[str] = None
+    gia_presente: bool
 
 
 class LibroConsegnato(Esito):

@@ -256,38 +256,6 @@ def update_web_reader_tracking_setting(
 
 
 @router.get(
-    "/incorpora-pagine",
-    responses={200: {"model": Interruttore}},
-)
-def get_incorpora_pagine_setting(db: Session = Depends(database.get_db)):
-    return {"enabled": app_settings.is_incorpora_pagine_enabled(db)}
-
-
-@router.put(
-    "/incorpora-pagine",
-    responses={200: {"model": Interruttore}},
-)
-def update_incorpora_pagine_setting(
-    payload: dict,
-    db: Session = Depends(database.get_db),
-    chi: models.User = Depends(auth.get_current_user_flexible),
-):
-    # **Questa decide se Kolibre riscrive i tuoi file EPUB**, e per questo il
-    # ripiego e' il default (spento) e non `True`: una richiesta senza campo
-    # non deve mettersi a riscrivere una biblioteca.
-    #
-    # E' anche la riga che si va a cercare quando un'impronta non torna: da
-    # quando questo interruttore e' acceso, ogni stima nuova cambia i byte
-    # del file a cui si riferisce. Il nome, il prima e il dopo bastano —
-    # chi ha acceso e quando sono esattamente la domanda che ci si fa.
-    predefinito = app_settings.DEFAULT_INCORPORA_PAGINE["enabled"]
-    prima = app_settings.is_incorpora_pagine_enabled(db)
-    dopo = app_settings.set_incorpora_pagine_enabled(db, payload.get("enabled", predefinito))
-    _annota(_chi(chi), "incorpora-pagine", prima, dopo)
-    return {"enabled": dopo}
-
-
-@router.get(
     "/library-pagination",
     responses={200: {"model": ImpostazionePaginazione}},
 )

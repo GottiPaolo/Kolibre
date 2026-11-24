@@ -713,20 +713,15 @@ async def rescan_library(
                 await write_queue.submit(
                     "update_book", {"book_id": book_id, "fields": page_count_fields(pages)}, library_path
                 )
-            # Incorporamento e impronte, in quest'ordine, nel servizio: fino
-            # al 04/11/2026 l'impronta si calcolava qui sopra, PRIMA che
-            # l'incorporamento del conteggio pagine riscrivesse l'EPUB, e
-            # restava quella di un file che non esisteva piu'. Di tutti e tre
-            # i percorsi d'ingresso questo e' il sospetto piu' forte per i due
-            # libri che su questo impianto portavano ancora un'impronta
-            # sbagliata, e per le 125 impronte rotte su 157 che una
-            # biblioteca reale aveva il 04/10: una scansione tocca tutti i
-            # libri in una volta.
+            # Le impronte, nel servizio: fino al 04/11/2026 si calcolavano qui
+            # sopra, PRIMA che l'incorporamento del conteggio pagine
+            # riscrivesse l'EPUB (125 impronte rotte su 157 in una biblioteca
+            # reale). Dal 24/11/2026 il file non si riscrive piu', e la regola
+            # sta comunque in un posto solo.
             try:
                 await run_in_threadpool(
                     book_hash_service.chiudi_i_formati,
                     db, library_path, folder_name, book_id, format_paths,
-                    pages, preferred_fmt,
                 )
             except Exception as e:
                 log_message("warning", "libraries",
@@ -795,25 +790,11 @@ async def recompute_page_counts(
         await write_queue.submit(
             "update_book", {"book_id": book["id"], "fields": page_count_fields(pages)}, library_path
         )
-        # **Da `chiudi_i_formati` e non da `embed_page_count`** (17/11/2026).
-        #
-        # Incorporare il conteggio ricostruisce lo zip e lo rimette al suo
-        # posto: il file **diventa un altro file**, con un'altra impronta. E
-        # l'impronta e' la cosa con cui un lettore dice «questo libro che ho
-        # in mano e' quello». Qui si incorporava e si andava avanti, quindi
-        # dopo questo endpoint il database descriveva, per ogni libro della
-        # biblioteca, un file che non esisteva piu'.
-        #
-        # **Misurato sul server di Paolo, ed e' il difetto piu' grosso dei
-        # tre**: 107 righe di consegna su 296 portavano l'impronta di un file
-        # riscritto, e tutte e 107 nella stessa biblioteca — quella su cui
-        # questo pulsante e' stato premuto sette volte. Non si vedeva perche'
-        # un `Recompute hashes` a mano, giorni dopo, rimetteva in pari.
-        #
-        # `chiudi_i_formati` incorpora **e poi** registra, e tiene quell'ordine
-        # scritto in un posto solo: la scansione qui sopra passa da la' dal
-        # 04/11, questo e il ricalcolo di un libro singolo no. La stessa
-        # regola in tre copie, e due si erano perse.
+        # Solo la colonna `pages`: dal 24/11/2026 il file non si tocca. Fino
+        # al 17/11 questo pulsante riscriveva ogni EPUB della biblioteca senza
+        # ricalcolare l'impronta (107 righe di consegna su 296, tutte qui).
+        # Si passa da `chiudi_i_formati`, che registra le impronte dei file
+        # come sono: la regola sta in un posto solo.
         try:
             percorsi = {}
             for f in formats:
@@ -822,7 +803,7 @@ async def recompute_page_counts(
                     percorsi[f["format"]] = percorso
             await run_in_threadpool(
                 book_hash_service.chiudi_i_formati,
-                db, library_path, folder_name, book["id"], percorsi, pages, fmt,
+                db, library_path, folder_name, book["id"], percorsi,
             )
         except Exception as e:
             log_message("warning", "libraries",
@@ -861,10 +842,9 @@ def recompute_hashes(name: str, db: Session = Depends(database.get_db)):
                 percorsi[fmt] = file_path
         if not percorsi:
             continue
-        # `pagine=None`: qui non si incorpora niente, si ricalcola soltanto.
-        # Si passa comunque dalla stessa funzione degli altri percorsi perche'
-        # la regola sull'ordine non abbia eccezioni — un'eccezione e' il posto
-        # dove il prossimo difetto si nasconde.
+        # Si passa dalla stessa funzione degli altri percorsi perche' la
+        # regola non abbia eccezioni — un'eccezione e' il posto dove il
+        # prossimo difetto si nasconde.
         esito = book_hash_service.chiudi_i_formati(
             db, library_path, folder_name, book["id"], percorsi)
         updated += len(esito["impronte"])

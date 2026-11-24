@@ -103,26 +103,32 @@ def _aggiungi_la_licenza(z: zipfile.ZipFile, prefisso: str = "") -> None:
 
 # ── La lingua di chi scarica ─────────────────────────────────────────────
 #
-# **Da zero.** Ognuno dei tre plugin porta con se' il proprio catalogo di
-# traduzioni, completo in italiano e in inglese. Quale dei due usare e' pero'
-# una costante scritta nel codice — `active_lang` in kolibre_lingua.lua,
-# `_ACTIVE_LANG` in lingua.py, `ACTIVE_LANG` in main.js — e non viene
+# **Da zero.** I plugin Calibre e Obsidian portano con se' il proprio
+# catalogo di traduzioni, completo in italiano e in inglese (quello KOReader
+# e' solo inglese dal 24/11/2026: vedi sotto). Quale dei due usare e' pero'
+# una costante scritta nel codice — `_ACTIVE_LANG` in lingua.py,
+# `ACTIVE_LANG` in main.js — e non viene
 # assegnata da nessuna parte: un plugin installato parla inglese qualunque
 # cosa l'account abbia scelto, e fino al 07/11/2026 l'interfaccia diceva il
 # contrario.
 #
-# Farla arrivare dal server a ogni avvio vorrebbe dire, per ognuno dei tre,
+# Farla arrivare dal server a ogni avvio vorrebbe dire, per ognuno dei due,
 # un giro di andata e ritorno che oggi non c'e'. **Cucirla nel file mentre lo
-# si impacchetta, no**: tutti e tre gli endpoint di scarico sono autenticati,
+# si impacchetta, no**: entrambi gli endpoint di scarico sono autenticati,
 # quindi il server sa gia' chi sta scaricando, e la lingua e' una preferenza
 # dell'account dal 04/11 (`services/preferenze_utente.py`). Qui non si
 # traduce niente: si cambia **una riga** del sorgente, e il plugin che arriva
 # sul dispositivo e' gia' quello giusto.
 #
 # Il nome del file basta a riconoscerla, ed e' sempre uno solo per plugin.
+#
+# **Il plugin KOReader non c'e' piu'** (Paolo, 24/11/2026: «per ora il plugin
+# e' solo in inglese», scelta definitiva). Ha un catalogo solo, quindi non
+# c'e' niente da cucire: scarico, manifest e file sono gli stessi byte per
+# tutti, e il `?lingua=` che mandavano le versioni fino alla 0.28.0 si
+# ignora. Un plugin vecchio installato in italiano vede impronte diverse da
+# quelle che ha, e al primo aggiornamento torna inglese: e' voluto.
 _RIGA_DELLA_LINGUA = {
-    "kolibre_lingua.lua": (re.compile(rb'^local active_lang = "[a-z][a-z]"$', re.M),
-                           b'local active_lang = "%s"'),
     "lingua.py": (re.compile(rb"^_ACTIVE_LANG = '[a-z][a-z]'$", re.M),
                   b"_ACTIVE_LANG = '%s'"),
     "main.js": (re.compile(rb"^const ACTIVE_LANG = '[a-z][a-z]';$", re.M),
@@ -332,18 +338,18 @@ def _plugin_update_files() -> list:
     return _plugin_files(_KOREADER_PLUGIN_SRC_DIR)
 
 
-def _read_plugin_file_bytes(rel_path: str, lingua: str = "en") -> bytes:
-    return _plugin_file_bytes(_KOREADER_PLUGIN_SRC_DIR, rel_path, lingua)
+def _read_plugin_file_bytes(rel_path: str) -> bytes:
+    return _plugin_file_bytes(_KOREADER_PLUGIN_SRC_DIR, rel_path)
 
 
-def _plugin_file_checksums(lingua: str = "en") -> dict:
+def _plugin_file_checksums() -> dict:
     """
     sha256 + size per updatable file, so the device can detect a truncated or
     corrupted download (a dropped connection can still leave the transport
     layer reporting HTTP 200 with a short body) before it ever stages the
     file for install, instead of trusting "HTTP 200 + file exists" alone.
     """
-    return _plugin_checksums(_KOREADER_PLUGIN_SRC_DIR, lingua)
+    return _plugin_checksums(_KOREADER_PLUGIN_SRC_DIR)
 
 
 def _plugin_checksums(src_dir: str, lingua: str = "en") -> dict:
@@ -530,8 +536,6 @@ def download_koreader_plugin(
     if not os.path.isdir(_KOREADER_PLUGIN_SRC_DIR):
         raise HTTPException(status_code=404, detail="KOReader plugin not found on the server")
 
-    lingua = _lingua_dell_account(db, current_user.id)
-
     gconfig_lua = None
     if device_id is not None:
         device = db.query(models.Device).filter(
@@ -578,7 +582,8 @@ def download_koreader_plugin(
                     continue
                 abs_path = os.path.join(root, fname)
                 arcname = os.path.join("kolibre.koplugin", os.path.relpath(abs_path, _KOREADER_PLUGIN_SRC_DIR))
-                _scrivi_nello_zip(z, abs_path, arcname, lingua)
+                # Solo inglese: nessuna riga da cucire, si copia e basta.
+                z.write(abs_path, arcname)
         _aggiungi_la_licenza(z, "kolibre.koplugin/")
         if gconfig_lua:
             z.writestr("kolibre.koplugin/gconfig.lua", gconfig_lua)
@@ -702,7 +707,7 @@ def get_calibre_plugin_version():
     "/plugins/koreader/version",
     responses={200: {"model": VersioneDelPlugin}},
 )
-def get_koreader_plugin_version(lingua: str = "en"):
+def get_koreader_plugin_version():
     """
     Lets the plugin itself ask "is there a newer version?" without needing
     the cable — it's a plain unauthenticated GET (same trust level as the
@@ -712,14 +717,14 @@ def get_koreader_plugin_version(lingua: str = "en"):
     update can say it. It comes from plugins/koreader/novita.json and NOT
     from inside the plugin's own files, for the reason written at the top of
     services/novita.py: the text a person reads and the bytes a machine
-    compares must be able to change separately. `lingua` works like every
-    other plugin endpoint — the plugin asks in the language it was packaged
-    in, and an older one that doesn't ask gets English.
+    compares must be able to change separately. English only, like the
+    plugin itself (Paolo, 24/11/2026); the `?lingua=` sent by plugins up to
+    0.28.0 is simply ignored.
     """
     versione = _read_plugin_version()
     return {
         "version": versione,
-        "novita": novita.per_il_plugin(versione, _lingua_valida(lingua)),
+        "novita": novita.per_il_plugin(versione),
     }
 
 
@@ -727,7 +732,7 @@ def get_koreader_plugin_version(lingua: str = "en"):
     "/plugins/koreader/manifest",
     responses={200: {"model": ManifestDelPlugin}},
 )
-def get_koreader_plugin_manifest(lingua: str = "en"):
+def get_koreader_plugin_manifest():
     """
     File list + version for the self-update flow. gconfig.lua is
     deliberately absent (see _plugin_update_files) so a plain update never
@@ -740,22 +745,20 @@ def get_koreader_plugin_manifest(lingua: str = "en"):
     decode this response with its old `ipairs(manifest.files)` loop instead
     of choking on a shape change.
 
-    **`lingua`**: il plugin dice in che lingua e' la copia che ha installata,
-    e riceve i file in quella. Serve perche' l'aggiornamento non disfi lo
-    scarico: senza, un plugin scaricato in italiano tornerebbe inglese al
-    primo aggiornamento, in silenzio. Chi non la manda — un plugin vecchio —
-    riceve l'inglese, cioe' quello che gia' faceva. Impronte e contenuto
-    vengono dalla stessa lingua, quindi non possono discordare.
+    **Niente `lingua`** dal 24/11/2026: il plugin e' solo in inglese, e i
+    byte sono gli stessi per tutti. Il `?lingua=` delle versioni fino alla
+    0.28.0 si ignora; una copia installata in italiano ha impronte diverse
+    e al primo aggiornamento torna inglese, come Paolo ha deciso.
     """
     return {
         "version": _read_plugin_version(),
         "files": _plugin_update_files(),
-        "checksums": _plugin_file_checksums(_lingua_valida(lingua)),
+        "checksums": _plugin_file_checksums(),
     }
 
 
 @public_router.get("/plugins/koreader/file/{file_path:path}", response_class=Response, responses={200: {"content": {"text/plain": {}}}})
-def get_koreader_plugin_file(file_path: str, lingua: str = "en"):
+def get_koreader_plugin_file(file_path: str):
     """
     Raw contents of a single plugin source file, for the device to fetch and
     overwrite locally one file at a time (no zip/unzip needed on-device).
@@ -773,11 +776,9 @@ def get_koreader_plugin_file(file_path: str, lingua: str = "en"):
     # Raw bytes, no text-mode decode/re-encode round trip: this must be
     # byte-for-byte what _read_plugin_file_bytes hashed for the manifest, or
     # the device's checksum check would reject every download as "corrupt".
-    # Che e' anche il motivo per cui da qui in poi si passa da quella stessa
-    # funzione invece di riaprire il file: la riga della lingua la cambia
-    # lei, e un `open()` diretto consegnerebbe byte diversi da quelli
-    # misurati nel manifest.
-    data = _read_plugin_file_bytes(file_path, _lingua_valida(lingua))
+    # Si passa dalla stessa funzione del manifest, cosi' i byte misurati e
+    # quelli consegnati non possono divergere.
+    data = _read_plugin_file_bytes(file_path)
     return Response(content=data, media_type="text/plain; charset=utf-8")
 
 

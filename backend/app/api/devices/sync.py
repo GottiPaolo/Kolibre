@@ -426,7 +426,8 @@ def list_libraries_for_device(
     proprietario = db.query(models.User).filter(
         models.User.id == current_device.user_id).first()
     rows = permessi.biblioteche_visibili(db, proprietario) if proprietario else []
-    return [{"name": row.name, "library": row.folder_name} for row in rows]
+    return [{"name": row.name, "library": row.folder_name,
+             "can_edit": permessi.puo_modificare(db, proprietario, row)} for row in rows]
 
 
 @sync_router.get(

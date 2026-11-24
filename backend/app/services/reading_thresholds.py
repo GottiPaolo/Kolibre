@@ -91,7 +91,7 @@ def _percentile(valori: list, quota: float) -> float:
     notebook del 23/11: cosi' i numeri tornano confrontabili)."""
     ordinati = sorted(valori)
     if not ordinati:
-        raise ValueError("nessun valore")
+        raise ValueError("no values")
     posizione = quota * (len(ordinati) - 1)
     sotto = int(posizione)
     sopra = min(sotto + 1, len(ordinati) - 1)

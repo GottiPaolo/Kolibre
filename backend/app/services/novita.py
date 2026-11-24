@@ -8,15 +8,15 @@ userpatch».*
 patch e' il modo in cui il dispositivo decide se aggiornare. Un testo dentro
 il file, tradotto in due lingue, sarebbe due file con due impronte diverse:
 a ogni cambio di lingua il lettore si sentirebbe proporre un aggiornamento
-che non cambia niente. E' lo stesso principio per cui la lingua del plugin
-si cuce al momento dello scarico e il manifest e' per lingua (07/11): il
-testo che una persona legge e i byte che una macchina confronta devono poter
-cambiare separatamente.
+che non cambia niente: il testo che una persona legge e i byte che una
+macchina confronta devono poter cambiare separatamente.
 
-**Due lingue per il plugin, solo inglese per le patch.** Deciso da Paolo:
-«la patch NON ha bisogno di una traduzione, e' e deve essere un unico file
-in inglese per sempre e per tutti, tanto non e' un menu' con cui qualcuno
-deve interagire e rimane silenziosa in background».
+**Solo inglese, per il plugin e per le patch.** Per le patch da sempre
+(Paolo: «la patch NON ha bisogno di una traduzione, e' e deve essere un
+unico file in inglese per sempre e per tutti»); per il plugin dal 24/11/2026,
+quando Paolo ha deciso che il plugin KOReader, per ora, parla solo inglese.
+Le voci di versione fino alla 0.28.0 hanno anche `it`: resta nel file come
+storia, non lo legge piu' nessuno, e le voci nuove hanno solo `en`.
 
 **Nulla e' un errore.** Una versione senza novita' scritte torna `None`, non
 solleva niente: una finestra che dice che c'e' un aggiornamento deve
@@ -34,8 +34,7 @@ PERCORSO = os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "..", "plugins", "koreader", "novita.json")
 )
 
-LINGUE = ("it", "en")
-LINGUA_DI_RIPIEGO = "en"
+LINGUA_DEL_PLUGIN = "en"
 
 
 def _leggi() -> dict:
@@ -64,15 +63,16 @@ def _leggi() -> dict:
     return dati if isinstance(dati, dict) else {}
 
 
-def per_il_plugin(versione: Optional[str], lingua: Optional[str] = None) -> Optional[str]:
-    """Le novita' di UNA versione del plugin, nella lingua chiesta."""
+def per_il_plugin(versione: Optional[str]) -> Optional[str]:
+    """Le novita' di UNA versione del plugin. **Solo inglese** dal 24/11/2026,
+    come il plugin (Paolo: «per ora il plugin e' solo in inglese»): le voci
+    vecchie hanno anche `it`, che resta nel file e non si legge piu'."""
     if not versione:
         return None
     voce = (_leggi().get("plugin") or {}).get(str(versione))
     if not isinstance(voce, dict):
         return None
-    codice = lingua if lingua in LINGUE else LINGUA_DI_RIPIEGO
-    testo = voce.get(codice) or voce.get(LINGUA_DI_RIPIEGO)
+    testo = voce.get(LINGUA_DEL_PLUGIN)
     return testo or None
 
 

@@ -306,11 +306,11 @@ def analizza_libro_async(library: str, book_id: int, percorso: str) -> None:
     """
     Misura UN libro appena importato, in sottofondo.
 
-    Serve perche' il travaso dall'ingest fallisce quasi sempre proprio nel
-    caso normale: se l'incorporamento del conteggio pagine e' acceso, Kolibre
-    riscrive l'EPUB subito dopo averlo copiato, e il file nella biblioteca non
-    e' piu' quello misurato in ingest. Senza questa chiamata il libro
-    resterebbe senza punteggio fino al prossimo giro della coda.
+    Serve quando il travaso dall'ingest fallisce, cioe' quando il file nella
+    biblioteca non e' piu' quello misurato in ingest (fino al 24/11/2026
+    succedeva quasi sempre: Kolibre ci incorporava il conteggio pagine
+    subito dopo averlo copiato). Senza questa chiamata il libro resterebbe
+    senza punteggio fino al prossimo giro della coda.
     """
     def _fai():
         db = database.SessionLocal()

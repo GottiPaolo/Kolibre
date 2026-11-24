@@ -72,6 +72,20 @@ function Compat.pluginiAccesi(loader)
     return fuori
 end
 
+--- Project: Title e' acceso? (24/11/2026)
+--
+-- Il suo nome e' quello della cartella senza `.koplugin` — `projecttitle` —
+-- come dice il suo `_meta.lua` («name field deprecated»), verificato sul
+-- repository joshuacant/ProjectTitle. Serve all'avviso di `main.lua`: dalla
+-- 0.32.0 il server non scrive piu' le pagine dentro gli EPUB, e Project:
+-- Title le leggeva proprio da li'.
+function Compat.projectTitleAcceso(loader)
+    for _i, nome in ipairs(Compat.pluginiAccesi(loader)) do
+        if nome:lower() == "projecttitle" then return true end
+    end
+    return false
+end
+
 --- Che cosa non torna in questa vista. Una lista di frasi, vuota se va bene.
 --
 -- Ognuna di queste tre e' un difetto gia' visto o gia' sfiorato, non un

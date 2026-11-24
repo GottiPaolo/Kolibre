@@ -36,7 +36,6 @@ local util        = require("util")
 local sha2        = require("ffi/sha2")
 local DataStorage = require("datastorage")
 local t             = require("kolibre_lingua").t
-local lingua_attiva = require("kolibre_lingua").lingua_attiva
 -- Quali patch proporre di aggiornare, e quali no: la scelta e' una funzione
 -- pura, provabile senza KOReader (vedi la prova «patch_da_aggiornare»).
 local KolibrePatch = require("kolibre_patch")
@@ -111,7 +110,7 @@ function KolibreAggiornamento._versioneNuovaDelPlugin(self)
     -- righe di novita'. I 10/30 s del profilo LARGE qui non sono margine:
     -- sono quanto resta fermo il lettore se il server e' lento o assente.
     local result, err = self.api:request(
-        "GET", "/api/tools/plugins/koreader/version?lingua=" .. lingua_attiva(),
+        "GET", "/api/tools/plugins/koreader/version",
         nil, { breve = true })
     if not result or not result.version then return nil, tostring(err) end
     if not _isNewerVersion(result.version, VERSION) then return nil, nil end
@@ -350,11 +349,10 @@ end
 --- e' davvero riuscito, e non due volte di fila (vedi
 --- `_proponiTuttiGliAggiornamenti`).
 function KolibreAggiornamento._downloadAndInstallUpdate(self, new_version, senza_riavvio)
-    -- `?lingua=`: i file che arrivano devono essere nella stessa lingua di
-    -- quelli installati, altrimenti l'aggiornamento riporta il plugin in
-    -- inglese. Un server vecchio ignora il parametro e risponde come prima.
+    -- Niente `?lingua=` dalla 0.29.0: il plugin e' solo in inglese, e i
+    -- byte sono gli stessi per tutti (vedi la testa di kolibre_lingua.lua).
     local manifest, err = self.api:request(
-        "GET", "/api/tools/plugins/koreader/manifest?lingua=" .. lingua_attiva())
+        "GET", "/api/tools/plugins/koreader/manifest")
     if not manifest or not manifest.files then
         UIManager:show(InfoMessage:new{ text = t("koreader.update.manifest_failed", { error = tostring(err) }) })
         return false
@@ -389,8 +387,6 @@ function KolibreAggiornamento._downloadAndInstallUpdate(self, new_version, senza
             remote_path = remote_path .. urlEncode(segment) .. "/"
         end
         remote_path = remote_path:gsub("/$", "")
-        -- Stessa lingua del manifest: le impronte da verificare sono quelle.
-        remote_path = remote_path .. "?lingua=" .. lingua_attiva()
 
         local target_path = base_path .. "/" .. rel_path
         local staged_path = target_path .. ".kolibre-new"

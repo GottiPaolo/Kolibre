@@ -1,11 +1,30 @@
 --[[--
-Kolibre's own translation layer for this plugin's user-visible text.
+Kolibre's own text layer for this plugin's user-visible strings.
 
-NOT KOReader's `gettext` (require("gettext")): that follows KOReader's own
-language setting, which is independent of — and may well differ from —
-whatever language the Kolibre SERVER/account is set to. Every other Kolibre
-surface (web UI, the other two plugins) follows the Kolibre language, so this
-plugin does too, via its own tiny mechanism instead.
+**English only** (Paolo, 24/11/2026: «per ora il plugin e' solo in inglese»,
+scelta definitiva). Fino alla 0.28.0 qui c'erano due cataloghi, italiano e
+inglese, e il server cuciva la lingua dell'account nel file al momento dello
+scarico e dell'aggiornamento (`?lingua=`). Tenere due lingue vuol dire
+scrivere e verificare ogni testo due volte per un plugin che si usa in
+inglese: il catalogo italiano e' andato, e resta nella storia del
+repository per il giorno in cui servisse (Paolo: «in futuro potrei volerlo
+riprendere»).
+
+**Per recuperarlo.** L'ultima versione completa, allineata al catalogo
+inglese di allora (336 chiavi per lingua, plugin 0.28.0), e' nel commit
+`a75d4ab`:
+
+    git show a75d4ab:plugins/koreader/kolibre.koplugin/kolibre_lingua.lua
+
+Il blocco e' `local it = { ... }`. Per rimetterlo servono tre cose: il
+catalogo, le chiavi nate dopo la 0.28.0 tradotte (la prova
+`chiavi_di_lingua` le elenca, se torna a contare due cataloghi), e la
+lingua dell'account cucita dal server (`_RIGA_DELLA_LINGUA` in
+`backend/app/api/tools.py`, da cui KOReader e' uscito nel commit
+`a3598eb`).
+
+NOT KOReader's `gettext` (require("gettext")): the plugin's strings live
+here, in one flat table, and no setting changes them.
 
 Usage: local t = require("kolibre_lingua").t
        t("koreader.menu.catalog")                    -- plain lookup
@@ -13,443 +32,41 @@ Usage: local t = require("kolibre_lingua").t
        t("koreader.common.book_count", {count=n})     -- plural (see below)
 
 Keys are flat, English, dot-separated, prefixed "koreader." (this plugin's
-namespace) — e.g. "koreader.sync.failed". `it` is the language these
-strings were first written in; `en` is the DEFAULT and the fallback — a key
-missing from the active catalog falls back to English, not to Italian.
+namespace) — e.g. "koreader.sync.failed". A missing key shows up as the bare
+key on screen (visibly odd, never a crash); `prove/chiavi_di_lingua.lua`
+checks that every key the sources use is in the catalog.
 
-Plural entries hold TWO forms in one catalog string, separated by " | "
-(space-bar-space): "{count} libro | {count} libri". t() picks the first form
+Plural entries hold TWO forms in one string, separated by " | "
+(space-bar-space): "{count} book | {count} books". t() picks the first form
 when values.count == 1, the second otherwise (0 counts as plural, same as in
 ordinary speech). A non-plural entry has no " | " and is used as-is.
 
-Kept as flat Lua tables (no nested structures, no runtime catalog merging) on
-purpose — this plugin runs on slow, memory-constrained e-ink readers; two flat
-string-keyed tables loaded once at require-time is the cheapest shape that
-works.
+A flat Lua table on purpose — this plugin runs on slow, memory-constrained
+e-ink readers.
 ]]
 
 local KolibreLingua = {}
 
--- ── Lingua attiva ──
---
--- PUNTO UNICO in cui si decide quale catalogo usare. Oggi fissato a "it" di
--- proposito (valore di partenza, come richiesto) — la propagazione dal server
--- (impostazione dell'account Kolibre, inoltrata al device nell'handshake di
--- sync o altrove) si collega QUI, sostituendo l'assegnazione sottostante con
--- la lettura di quel valore. Nessun altro punto di questo modulo, né alcun
--- chiamante in main.lua/kolibre_catalog.lua/kolibre_catalog_widgets.lua, deve
--- sapere come quel valore arriva: tutti passano per KolibreLingua.t().
--- **L'inglese e' la lingua predefinita e il ripiego** (dal 07/10/2026).
--- Era l'italiano, scelta giusta per un impianto italiano e sbagliata per un
--- plugin che si scarica: il catalogo inglese esisteva e non lo leggeva
--- nessuno. Resta una costante — vedi il roadmap: oggi questo valore non lo
--- cambia niente, e seguire la lingua di KOReader e' un lavoro a parte.
-local active_lang = "en"
-
--- ── Catalogo italiano (lingua di riferimento) ──
-local it = {
-    -- menu principale
-    ["koreader.menu.title"] = "Kolibre",
-    ["koreader.menu.sync_all"] = "Sincronizza tutto",
-    ["koreader.menu.check_new_books"] = "Controlla libri nuovi",
-    ["koreader.menu.sync_all_help"] = "«Sincronizza tutto» fa, in quest'ordine:\n\n• dice al server cosa c'è su questo lettore: libri gestiti, spazio libero, patch installate;\n• scarica i libri che il server ha in consegna, chiedendo prima;\n• esegue le azioni in attesa;\n• toglie i libri che hai chiesto di rimuovere dal web;\n• scarica i dizionari che hai mandato dal portale;\\n• manda il numero di pagine dei libri aperti;\n• manda le note nuove e le posizioni di lettura;\n• manda il backup, statistiche di lettura comprese.\n\n«Controlla libri nuovi» si ferma dopo le rimozioni.",
-    ["koreader.menu.check_new_books_help"] = "La metà veloce di «Sincronizza tutto»: solo i libri in arrivo e quelli da togliere. Non manda note, posizioni né backup — risponde alla domanda «c'è qualcosa di nuovo da leggere?».",
-    ["koreader.menu.catalog"] = "Catalogo",
-    ["koreader.menu.tools"] = "Strumenti",
-    ["koreader.menu.settings"] = "Impostazioni",
-    ["koreader.menu.automations"] = "Automazioni",
-
-    -- impostazioni
-    ["koreader.settings.connection"] = "Connessione al server...",
-    ["koreader.settings.test_connection"] = "Test connessione",
-    ["koreader.settings.sync_popup"] = "Popup delle sincronizzazioni",
-    ["koreader.settings.sync_popup_help"] = "Acceso, una sincronizzazione automatica mostra la barra di avanzamento e, se è successo qualcosa, un riepilogo. Spento, le sincronizzazioni automatiche sono mute. Quelle che chiedi tu dal menù rispondono sempre, altrimenti un comando che non dice niente sembrerebbe rotto.",
-    ["koreader.settings.info"] = "Info: Kolibre v{version} · interfaccia {ui}",
-    ["koreader.settings.dialog_title"] = "Kolibre — Impostazioni di sync",
-    ["koreader.settings.field_server_url"] = "URL server (es. http://192.168.1.10:8081)",
-    ["koreader.settings.field_device_token"] = "Token dispositivo (da Impostazioni → Dispositivi sul server)",
-    ["koreader.settings.field_books_dir"] = "Cartella libri locale",
-    ["koreader.settings.saved"] = "Impostazioni salvate.",
-    ["koreader.settings.test_failed"] = "Connessione fallita: {error}",
-    ["koreader.settings.test_ok"] = "Connesso come dispositivo: {name}",
-
-    -- posizione di lettura
-    ["koreader.position.push_current"] = "Invia posizione libro corrente",
-    ["koreader.position.pull_current"] = "Scarica posizione libro corrente",
-    ["koreader.position.sync_all"] = "Sincronizza tutte le posizioni",
-    ["koreader.position.no_document_push"] = "Apri un libro per inviare la sua posizione di lettura.",
-    ["koreader.position.push_sent"] = "Posizione di lettura inviata.",
-    ["koreader.position.push_failed"] = "Invio posizione fallito: {error}",
-    ["koreader.position.no_document_pull"] = "Apri un libro per scaricare la sua posizione di lettura.",
-    ["koreader.position.pull_failed"] = "Recupero posizione fallito: {error}",
-    ["koreader.position.nothing_to_sync"] = "Nessuna posizione da sincronizzare da altri dispositivi.",
-    ["koreader.position.already_synced"] = "La posizione è già sincronizzata.",
-    ["koreader.position.synced"] = "Posizione sincronizzata.",
-    ["koreader.position.sync_confirm"] = "Sincronizzare alla posizione {percent}%, salvata dal dispositivo '{device}'?",
-    ["koreader.position.comparing_progress"] = "Confronto posizioni: {done} di {total}…",
-    ["koreader.position.pull_all_done"] = "{count} posizione scaricata. | {count} posizioni scaricate.",
-    ["koreader.position.push_all_done"] = "{count} posizione inviata. | {count} posizioni inviate.",
-    ["koreader.position.push_gave_up"] = "Kolibre: la posizione di {count} libro non si riesce a inviare da {tries} sincronizzazioni: smetto di ritentare. Riaprilo per rimetterla in coda. | Kolibre: le posizioni di {count} libri non si riescono a inviare da {tries} sincronizzazioni: smetto di ritentare. Riaprili per rimetterle in coda.",
-    ["koreader.position.push_all_confirm"] = "{count} libro ha una posizione di lettura locale non ancora inviata a Kolibre. Inviarla? | {count} libri hanno una posizione di lettura locale non ancora inviata a Kolibre. Inviarla?",
-    ["koreader.position.pull_all_confirm"] = "{count} libro ha una posizione di lettura più recente su un altro dispositivo. Scaricarla? | {count} libri hanno una posizione di lettura più recente su un altro dispositivo. Scaricarla?",
-
-    -- annotazioni
-    ["koreader.annotations.push_all_full"] = "Pusha tutte le annotazioni (rilettura completa)",
-    ["koreader.annotations.sync_failed"] = "Sync annotazioni fallita.",
-    ["koreader.annotations.push_summary"] = "Annotazioni: {created} nuove, {updated} aggiornate.",
-    ["koreader.annotations.push_summary_orphaned"] = " {count} importate da libri non ancora accoppiati (Dispositivi ▸ Da rivedere).",
-    ["koreader.annotations.push_summary_unresolved"] = " {count} scartate.",
-    ["koreader.annotations.nothing_to_sync"] = "Nessuna annotazione da sincronizzare.",
-    ["koreader.annotations.sending_to_server"] = "Invio annotazioni al server",
-    ["koreader.annotations.sync_interrupted"] = "Sync annotazioni interrotta dopo {sent} di {total} (rete instabile?). Riprova per completare.",
-    ["koreader.annotations.batch_progress"] = "{label} ({sent}/{total}, gruppo {batch_num}/{batch_count})…",
-
-    -- backup
-    ["koreader.backup.run_now"] = "Esegui backup ora",
-    ["koreader.backup.reminder_menu"] = "Promemoria backup",
-    ["koreader.backup.summary"] = "Backup completato: {uploaded} file caricati, {skipped} già aggiornati, {failed} falliti.",
-    ["koreader.backup.reminder_days"] = "Ogni {days} giorni",
-    ["koreader.backup.reminder_never"] = "Mai",
-    ["koreader.backup.reminder_prompt"] = "Sono passati più di {days} giorni dall'ultimo backup Kolibre. Eseguirlo ora?",
-
-    -- resetta a stato di dispositivo
-    ["koreader.restore.menu"] = "Resetta a stato di dispositivo...",
-    ["koreader.restore.no_other_device"] = "Nessun altro dispositivo trovato sul server: {error}",
-    ["koreader.restore.none_registered"] = "nessuno registrato",
-    ["koreader.restore.choose_source"] = "Scegli il dispositivo sorgente",
-    ["koreader.restore.request_confirm"] = "Richiedere il ripristino dello stato locale (statistiche, dizionario, impostazioni reader) dal backup di '{device}'?\n\nServirà anche una conferma da parte di un amministratore sul sito web prima che l'operazione diventi effettiva.",
-    ["koreader.restore.request_failed"] = "Richiesta fallita: {error}",
-    ["koreader.restore.request_sent"] = "Richiesta inviata. Conferma sul sito web per procedere — al prossimo avvio o sincronizzazione riceverai l'ultima conferma qui sul dispositivo.",
-    ["koreader.restore.migration_confirmed_title"] = "Migrazione dati confermata",
-    ["koreader.restore.migration_confirmed_body"] = "Migrazione confermata dal server: procedere a migrare i dati dal dispositivo '{device}'?",
-    ["koreader.restore.migrate_now"] = "Migra ora",
-    ["koreader.restore.overwrite_confirm"] = "Questa operazione SOVRASCRIVE lo stato locale di questo dispositivo (statistiche, dizionario, impostazioni reader) con quello del backup di '{device}'. Procedere?",
-    ["koreader.restore.overwrite_and_migrate"] = "Sovrascrivi e migra",
-    ["koreader.restore.result"] = "Migrazione completata: {applied} file applicati, {missing} non presenti nel backup sorgente.",
-
-    -- aggiornamento plugin
-    ["koreader.update.check_failed"] = "Controllo aggiornamenti fallito: {error}",
-    ["koreader.update.menu_check"] = "Controlla aggiornamenti (plugin e patch)",
-    ["koreader.update.menu_check_help"] = "Chiede al server se c'è una versione più nuova del plugin e se le patch che hai installato sono cambiate. Delle patch propone solo quelle che hai già: una che non hai mai installato non ti viene offerta. Se c'è da aggiornare tutti e due, te li propone insieme in una finestra sola, e il riavvio lo chiede una volta alla fine.",
-    ["koreader.update.all_up_to_date"] = "Tutto aggiornato: plugin v{version}, e le patch installate sono quelle del server.",
-    ["koreader.update.available"] = "È disponibile Kolibre v{version} (versione attuale: v{current}). Scaricare e installare ora?",
-    ["koreader.update.available_list"] = "C'è qualcosa da aggiornare:\n\n{items}\n\nScaricare e installare ora?",
-    ["koreader.update.plugin_line"] = "Kolibre v{version} (hai la v{current})",
-    ["koreader.update.update_all"] = "Aggiorna tutto",
-    ["koreader.update.updated_list"] = "Aggiornato: {names}.",
-    ["koreader.update.failed_list"] = "Non è riuscito: {names}. Si riprova al prossimo controllo.",
-    ["koreader.update.resumed"] = "Un aggiornamento Kolibre (v{version}) interrotto in precedenza è stato completato all'avvio.",
-    ["koreader.update.resume_incomplete"] = "Aggiornamento Kolibre a v{version} incompleto (file: {file}). Verrà ritentato automaticamente al prossimo avvio di KOReader.",
-    ["koreader.update.manifest_failed"] = "Aggiornamento fallito: manifest non disponibile: {error}",
-    ["koreader.update.file_failed"] = "Aggiornamento fallito (file {file}): {error}",
-    ["koreader.update.stage_failed"] = "Aggiornamento fallito: impossibile preparare l'installazione.",
-    ["koreader.update.dir_failed"] = "Aggiornamento fallito: non riesco a creare la cartella {dir}.",
-    ["koreader.update.dir_readonly"] = "Aggiornamento fallito: nella cartella {dir} KOReader non puo' scrivere. Correggi i suoi permessi, oppure cancellala: l'aggiornamento la ricrea.",
-    ["koreader.update.partial"] = "Aggiornamento parzialmente applicato (errore su {file}). Riavvia KOReader: il completamento verrà ritentato automaticamente.",
-    ["koreader.update.whats_new"] = "Cosa cambia:",
-    ["koreader.update.done"] = "Kolibre aggiornato a v{version}.",
-    ["koreader.update.restart_needed"] = "La versione nuova entra in vigore al riavvio: finché non riavvii KOReader gira ancora quella di prima.",
-
-    -- Patch per KOReader: installate dal plugin, senza cavo. Vedi la
-    -- sezione "Patch per KOReader" in main.lua per cosa sono e cosa no.
-    ["koreader.patches.menu"] = "Patch per KOReader",
-    ["koreader.patches.install"] = "Installa",
-    ["koreader.patches.update"] = "Aggiorna",
-    ["koreader.patches.remove"] = "Rimuovi",
-    ["koreader.patches.update_available"] = "da aggiornare",
-    ["koreader.patches.auto_update_available"] = "Queste patch installate sono cambiate sul server:\n\n{names}\n\nSostituirle con la versione nuova?",
-    ["koreader.patches.updated_list"] = "Aggiornate: {names}.",
-    ["koreader.patches.no_description"] = "Questa patch non si descrive da sé.",
-    ["koreader.patches.confirm_install"] = "{name}\n\n{description}\n\nUna patch è codice che KOReader esegue a ogni avvio, finché non la rimuovi. Installarla?",
-    ["koreader.patches.confirm_update"] = "{name}\n\n{description}\n\nSul server c'è una versione diversa da quella installata. Sostituirla?",
-    ["koreader.patches.confirm_remove"] = "Rimuovere «{name}»? KOReader smetterà di eseguirla al prossimo avvio.",
-    ["koreader.patches.installed"] = "Patch «{name}» installata.",
-    ["koreader.patches.removed"] = "Patch «{name}» rimossa.",
-    ["koreader.patches.restart_needed"] = "Le patch entrano in vigore all'avvio: finché non riavvii KOReader non è cambiato nulla.",
-    ["koreader.patches.install_failed"] = "Installazione di «{name}» non riuscita: {error}. Non è stato installato niente.",
-    ["koreader.patches.remove_failed"] = "Non riesco a rimuovere «{name}»: il file è ancora lì.",
-    ["koreader.patches.dir_failed"] = "Non riesco a creare la cartella delle patch ({dir}).",
-    ["koreader.patches.dir_unknown"] = "Questa versione di KOReader non dice dove tiene le patch: non so dove installarle.",
-    ["koreader.patches.none_available"] = "Il server non ha patch da offrire.",
-    ["koreader.patches.server_unreachable"] = "Server non raggiungibile: qui sotto solo quello che è già installato.",
-    ["koreader.patches.all_disabled"] = "⚠ KOReader ha le patch disattivate",
-    ["koreader.patches.all_disabled_explain"] = "KOReader ha un interruttore generale che disattiva TUTTE le patch, e adesso è tirato: anche una patch installata non verrà eseguita. Si riattiva da KOReader stesso (Strumenti → altri strumenti), non da qui.",
-    ["koreader.patches.where"] = "Dove stanno le patch",
-    ["koreader.patches.where_explain"] = "Le patch installate stanno in {dir}. Si possono togliere anche da lì, cancellando il file: questo menù fa la stessa cosa senza cavo.",
-
-    -- dizionario
-    ["koreader.dictionary.unavailable"] = "Dizionario non disponibile sul server — installalo prima da Impostazioni → Integrazioni → Dizionari, poi mandalo a questo lettore dalla sua scheda.",
-    ["koreader.dictionary.download_failed"] = "Download dizionario fallito (file {file}): {error}",
-    ["koreader.dictionary.no_folder"] = "Non riesco a creare la cartella del dizionario ({dir}). Il dizionario resta in coda sul server e si riprova.",
-    ["koreader.dictionary.done"] = "Dizionario «{name}» installato. Da ora KOReader lo userà anche per la ricerca durante la lettura (tieni premuto su una parola).",
-
-    -- sync (protocollo v2)
-    ["koreader.sync.migration_scanning"] = "Riconoscimento libri già presenti: {count} esaminati…",
-    ["koreader.sync.removing_progress"] = "Rimozione in corso: {done} di {total}…",
-    ["koreader.sync.removal_confirm"] = "Kolibre richiede la rimozione di {count} libri:\n\n{list}\n\nRimuoverli ora?",
-    ["koreader.sync.removal_pending"] = "Kolibre: {count} rimozioni in attesa di conferma — apri \"Sincronizza tutto\".",
-    ["koreader.sync.downloads_pending"] = "Kolibre: {count} libri in consegna in attesa di conferma — apri \"Sincronizza tutto\".",
-    ["koreader.sync.first_sync_confirm"] = "Prima sincronizzazione: Kolibre analizzerà i libri già presenti sul dispositivo per riconoscerli — nessun libro nuovo viene scaricato in questo passaggio. Su librerie grandi può richiedere qualche minuto. Continuare?",
-    ["koreader.sync.skip_for_now"] = "Salta per ora",
-    ["koreader.sync.checking_new_books"] = "Kolibre: controllo libri nuovi...",
-    ["koreader.sync.in_progress"] = "Kolibre: sincronizzazione in corso...",
-    ["koreader.sync.phase_handshake"] = "Handshake",
-    ["koreader.sync.already_running"] = "Kolibre: un'altra sincronizzazione è già in corso per questo dispositivo. Riprova tra qualche minuto.",
-    ["koreader.sync.failed"] = "Sync fallita: {error}",
-    ["koreader.sync.protocol_unsupported"] = "Sync fallita: il server non supporta il protocollo v2. Aggiorna il server Kolibre.",
-    ["koreader.sync.phase_pending_actions"] = "Azioni in sospeso",
-    ["koreader.sync.phase_removals"] = "Rimozioni",
-    ["koreader.sync.phase_pages"] = "Conteggio pagine",
-    ["koreader.sync.phase_notes_positions_backup"] = "Note, posizioni e backup",
-    ["koreader.sync.phase_download_books"] = "Download libri",
-    ["koreader.sync.summary_books_only"] = "Libri: {downloaded} scaricati, {deleted} rimossi, {deferred} rimozioni rinviate, {errors} errori.",
-    ["koreader.sync.gave_up"] = "Kolibre: il server non ha risposto. Ho smesso di provare; riprovo al prossimo risveglio, o appena torna il WiFi.",
-    ["koreader.sync.summary_full"] = "Sync completata: {downloaded} scaricati, {deleted} rimossi, {deferred} rimozioni rinviate, {pages} conteggi pagine inviati, {errors} errori.",
-    ["koreader.sync.downloads_confirm"] = "Kolibre ha {count} libri pronti per essere scaricati:\n\n{list}\n\nScaricarli ora?",
-
-    -- libri gestiti
-    ["koreader.managed_books.menu_title"] = "Libri gestiti da Kolibre",
-    ["koreader.managed_books.pages_count"] = "{count} pag.",
-    ["koreader.managed_books.empty"] = "Nessun libro gestito da Kolibre su questo dispositivo.",
-    ["koreader.managed_books.detail_title"] = "Titolo: {value}",
-    ["koreader.managed_books.detail_author"] = "Autore: {value}",
-    ["koreader.managed_books.detail_format"] = "Formato: {value}",
-    ["koreader.managed_books.detail_pages"] = "Pagine: {value}",
-    ["koreader.managed_books.detail_downloaded_at"] = "Scaricato il: {value}",
-    ["koreader.managed_books.detail_file"] = "File: {value}",
-    ["koreader.managed_books.remove_confirm_ok"] = "Rimuovi da questo dispositivo",
-    ["koreader.managed_books.removed_notice"] = "Libro rimosso. Il server verrà informato alla prossima sincronizzazione.",
-    ["koreader.managed_books.remove_failed"] = "Rimozione fallita: {error}",
-
-    -- inizializza libreria (cerca libri non accoppiati)
-    -- ── Inventario della cartella dei libri ──
-    ["koreader.inventory.menu"] = "Inventario della libreria (guarda, non tocca)",
-    ["koreader.diagnostica.menu"] = "Manda il registro al server",
-    ["koreader.diagnostica.menu_help"] = "Manda al server il registro di KOReader (crash.log), da leggere nel portale. Serve a capire perche' qualcosa non ha funzionato su questo lettore. Token e indirizzi vengono tolti prima di partire; titoli dei libri e percorsi dei file restano, perche' spesso sono l'unica cosa che spiega un difetto. Non parte mai da solo: si chiede sempre.",
-    ["koreader.diagnostica.conferma"] = "Mando al server il registro di KOReader ({kb} KB, ne partono al massimo {max}).\n\nTolgo token e indirizzi. Restano titoli dei libri e percorsi dei file: vanno sul tuo server e da nessun'altra parte.",
-    ["koreader.diagnostica.manda"] = "Manda",
-    ["koreader.diagnostica.invio"] = "Invio il registro al server…",
-    ["koreader.diagnostica.assente"] = "Nessun registro da mandare: {percorso} non c'e'.",
-    ["koreader.diagnostica.illeggibile"] = "Il registro non si riesce a leggere o a preparare.",
-    ["koreader.diagnostica.mandato"] = "Registro mandato ({kb} KB). Si legge dal portale, nella scheda di questo lettore.",
-    ["koreader.diagnostica.fallito"] = "Invio del registro fallito: {errore}",
-    ["koreader.inventory.scanning_progress"] = "Inventario: {count} file esaminati…",
-    ["koreader.inventory.reading_sidecars"] = "Lettura dei dati di lettura…",
-    ["koreader.inventory.failed"] = "Invio dell'inventario fallito: {error}",
-    ["koreader.inventory.done"] = "Inventario mandato al server. Nessun file è stato toccato.",
-    ["koreader.inventory.result_files"] = "{count} file sul dispositivo",
-    ["koreader.inventory.result_recognized"] = "{count} riconosciuto come libro della biblioteca | {count} riconosciuti come libri della biblioteca",
-    ["koreader.inventory.result_duplicates"] = "{count} libro presente in più copie ({copies} copia in eccesso) | {count} libri presenti in più copie ({copies} copie in eccesso)",
-    ["koreader.inventory.result_unknown"] = "{count} file che il server non riconosce | {count} file che il server non riconosce",
-    ["koreader.inventory.result_to_save"] = "{count} di questi ha annotazioni, da portare al sicuro prima di cancellare niente | {count} di questi hanno annotazioni, da portare al sicuro prima di cancellare niente",
-    ["koreader.library_init.menu"] = "Inizializza libreria (cerca libri non accoppiati)",
-    ["koreader.library_init.confirm"] = "Verranno esaminati tutti i libri presenti su questo dispositivo per trovare quelli non ancora gestiti da Kolibre. Su librerie molto grandi può richiedere qualche minuto. Procedere?",
-    ["koreader.library_init.scanning_progress"] = "Analisi libreria: {count} file esaminati…",
-    ["koreader.library_init.nothing_new"] = "Nessun libro nuovo da esaminare: tutti i libri sul dispositivo sono già gestiti da Kolibre.",
-    ["koreader.library_init.comparing"] = "Confronto con il server…",
-    ["koreader.library_init.compare_failed"] = "Confronto con il server fallito: {error}",
-    ["koreader.library_init.skip_for_now"] = "Ignora per ora",
-    ["koreader.library_init.multi_library_title"] = "'{name}' è presente in più biblioteche",
-    ["koreader.library_init.which_library"] = "A quale biblioteca vuoi fare riferimento?",
-    ["koreader.library_init.hash_match_confirm"] = "Trovato {count} libro già presente su Kolibre (stesso file):\n\n{list}\n\nCollegarlo? | Trovati {count} libri già presenti su Kolibre (stesso file):\n\n{list}\n\nCollegarli?",
-    ["koreader.library_init.hash_linked"] = "{count} libro collegato. Verrà confermato alla prossima sincronizzazione. | {count} libri collegati. Verranno confermati alla prossima sincronizzazione.",
-    ["koreader.library_init.nothing_else"] = "Nessun altro libro da esaminare: la libreria del dispositivo è già in linea con Kolibre.",
-    ["koreader.library_init.searching_matches"] = "Ricerca corrispondenze: 0 di {total}…",
-    ["koreader.library_init.checking_content"] = "Verifica contenuto: {done} di {total}…",
-    ["koreader.library_init.ambiguous_title"] = "'{name}': più corrispondenze possibili",
-    ["koreader.library_init.flagged_notice"] = "\n\n{count} libro con note o lettura in corso è stato aggiunto all'elenco \"da rivedere\" su Kolibre, senza alcuna modifica in locale. | \n\n{count} libri con note o lettura in corso sono stati aggiunti all'elenco \"da rivedere\" su Kolibre, senza alcuna modifica in locale.",
-    ["koreader.library_init.overwrite_confirm"] = "Trovato {count} libro mai aperto che sembra corrispondere a un libro su Kolibre:\n\n{list}\n\nSovrascriverlo con la versione di Kolibre?{notice} | Trovati {count} libri mai aperti che sembrano corrispondere a un libro su Kolibre:\n\n{list}\n\nSovrascriverli con la versione di Kolibre?{notice}",
-    ["koreader.library_init.overwriting_progress"] = "Sovrascrittura: {done} di {total}…",
-    ["koreader.library_init.no_candidate_title"] = "Nessuna corrispondenza su Kolibre",
-    ["koreader.library_init.no_candidate_detail"] = "File: {path}\n\nNessun libro corrispondente trovato su Kolibre.",
-    ["koreader.library_init.delete_from_device"] = "Elimina dal dispositivo",
-    ["koreader.library_init.deleted_notice"] = "Eliminato.",
-    ["koreader.library_init.auto_paired"] = "{migrated} note ricollegate automaticamente a {count} libro. | {migrated} note ricollegate automaticamente a {count} libri.",
-
-    -- catalogo
-    ["koreader.catalog.label"] = "Catalogo",
-    ["koreader.catalog.title"] = "Catalogo Kolibre",
-    ["koreader.catalog.section_author"] = "Autore",
-    ["koreader.catalog.section_series"] = "Serie",
-    ["koreader.catalog.section_tag"] = "Tag",
-    ["koreader.catalog.downloading"] = "Scarico «{title}»…",
-    ["koreader.catalog.downloaded"] = "Scaricato: {filename}",
-    ["koreader.catalog.download_failed"] = "Download fallito: {error}",
-    ["koreader.catalog.info_title"] = "Titolo: {title}",
-    ["koreader.catalog.info_author"] = "Autore: {author}",
-    ["koreader.catalog.unknown_author"] = "Sconosciuto",
-    ["koreader.catalog.unknown_author_item"] = "Autore sconosciuto",
-    ["koreader.catalog.info_format"] = "Formato: {format}",
-    ["koreader.catalog.info_size"] = "Peso: {size}",
-    ["koreader.catalog.download_button"] = "Scarica sul dispositivo",
-    ["koreader.catalog.download_confirm"] = "Scaricare '{title}'?",
-    ["koreader.catalog.view_grid"] = "Vista: Griglia",
-    ["koreader.catalog.view_list"] = "Vista: Lista",
-    ["koreader.catalog.sort_author"] = "Ordina: Per autore",
-    ["koreader.catalog.sort_recent"] = "Ordina: Aggiunti di recente",
-    ["koreader.catalog.browse_by"] = "Sfoglia per {section}",
-    ["koreader.catalog.loading"] = "Chiedo il catalogo al server…",
-    ["koreader.catalog.unavailable"] = "Catalogo non disponibile: {error}",
-    ["koreader.catalog.recent"] = "Aggiunti di recente",
-    ["koreader.catalog.title_by_author"] = "Per autore",
-    ["koreader.catalog.not_on_device"] = "non sul device",
-    ["koreader.catalog.search_title"] = "Cerca nel catalogo",
-    ["koreader.catalog.search_hint"] = "Titolo o autore...",
-    ["koreader.catalog.section_total"] = "{count} totale | {count} totali",
-    ["koreader.catalog.section_list_unavailable"] = "Elenco non disponibile: {error}",
-    ["koreader.catalog.no_library"] = "Nessuna libreria disponibile: {error}",
-    ["koreader.catalog.choose_library"] = "Scegli libreria",
-    ["koreader.catalog.discover"] = "Da scoprire",
-    ["koreader.catalog.browse_library"] = "Sfoglia la libreria",
-    -- ── la vista «libreria»: la UI di Kolibre su KOReader ──
-    ["koreader.ui.apri"] = "Apri la libreria di Kolibre",
-    ["koreader.ui.apri_help"] = "Mostra solo i libri che Kolibre ha mandato su questo dispositivo, con la copertina, lo stato di lettura e una barra lunga in proporzione alle pagine.",
-    ["koreader.ui.usa_la_vista"] = "Usa l'interfaccia di Kolibre",
-    ["koreader.ui.accesa_dopo_il_libro"] = "Interfaccia di Kolibre accesa: si apre quando chiudi questo libro.",
-    ["koreader.ui.usa_la_vista_help"] = "Al posto del gestore di file di KOReader si apre la libreria di Kolibre: all'accensione, e ogni volta che si esce da un libro. Si spegne da qui, e il gestore di file torna quello di sempre. Se in KOReader hai scelto «apri l'ultimo libro», all'accensione vince quella scelta.",
-    ["koreader.ui.righe_scelte"] = "Righe per schermata: {count}",
-    ["koreader.ui.righe_n"] = "{count} righe",
-    ["koreader.ui.righe_help"] = "Quanti libri si vedono insieme nella libreria di Kolibre, da 4 a 8. Con poche righe ogni libro ha una copertina grande e si legge da lontano; con molte se ne vedono piu' insieme e si scorre meno. Sotto una certa altezza la riga non rimpicciolisce i caratteri: toglie invece la barra delle pagine, e poi la riga di stato, perche' un titolo illeggibile non vale lo spazio che occupa. Cambiandolo, la libreria aperta si rifa' subito sulla cartella in cui sei.",
-    ["koreader.ui.nessun_libro"] = "Kolibre non ha ancora mandato nessun libro su questo dispositivo.",
-    ["koreader.ui.cartella_vuota"] = "Qui dentro non c'e' nessun libro di Kolibre.",
-    ["koreader.ui.percorso_radice"] = "Libreria",
-    ["koreader.ui.libri_nella_cartella"] = "{count} libro | {count} libri",
-    -- Quando: la data a destra di una riga (vedi `Pezzi.quando`). Una scala
-    -- sola per la cronologia e per gli invii, perche' le due finestre si
-    -- somigliano e due scale diverse costringerebbero a ricordarsi in quale
-    -- si e'.
-    ["koreader.ui.quando_adesso"] = "adesso",
-    ["koreader.ui.quando_minuti"] = "{count} minuto fa | {count} minuti fa",
-    ["koreader.ui.quando_ore"] = "{count} ora fa | {count} ore fa",
-    ["koreader.ui.quando_ieri"] = "ieri",
-    ["koreader.ui.quando_altroieri"] = "l'altro ieri",
-    ["koreader.ui.quando_giorni"] = "{count} giorno fa | {count} giorni fa",
-    -- La finestra dei risultati: il nome dice CHE COSA si e' cercato e
-    -- QUANTI se ne sono trovati — senza il numero, un elenco corto e uno
-    -- vuoto si distinguono solo contando le righe.
-    ["koreader.ui.ricerca_titolo"] = "«{testo}» — {count} libro | «{testo}» — {count} libri",
-    ["koreader.ui.ricerca_vuota"] = "Nessun libro per «{testo}».\n\nSi cerca nel titolo e nell'autore dei libri che Kolibre ha portato qui.",
-    -- Il menu che si apre tenendo premuto un libro (vedi kolibre_ui_azioni).
-    ["koreader.ui.azione_manda_posizione"] = "Manda al server dove sei arrivato",
-    ["koreader.ui.azione_scarica_posizione"] = "Scarica dal server dove sei arrivato",
-    ["koreader.ui.azione_elimina"] = "Elimina da questo lettore",
-    ["koreader.ui.azione_non_riuscita"] = "Non si e' potuto fare: {error}",
-    -- La conferma dice CHE COSA RESTA, perche' il dubbio davanti a
-    -- «elimina» e' «lo perdo per sempre?» e la risposta e' no.
-    ["koreader.ui.elimina_conferma"] = "«{titolo}» viene cancellato da questo lettore.\n\nIl libro resta nella biblioteca sul server, e Kolibre non lo rimandera' piu' qui da solo. Le note e le evidenziazioni gia' mandate al server restano.",
-    ["koreader.ui.elimina_fatto"] = "Tolto da questo lettore.",
-    ["koreader.ui.elimina_server_no"] = "Il server non ha accettato: {error}. Il libro non e' stato toccato.",
-    ["koreader.ui.elimina_file_no"] = "Il server l'ha segnato, ma il file non si e' potuto cancellare: {error}. Comparira' fra i libri «da rivedere» alla prossima sincronizzazione.",
-    ["koreader.ui.elimina_sconosciuto"] = "Di questo libro non si sa abbastanza per dirlo al server.",
-    ["koreader.ui.libro_non_c_e"] = "Questo file non c'e' piu'.",
-    ["koreader.ui.posizione_libro_aperto"] = "Questo libro e' aperto adesso: la sua posizione si manda e si scarica da Strumenti, mentre lo leggi.",
-    ["koreader.ui.posizione_mandata"] = "Mandata al server: {percento}%.",
-    ["koreader.ui.posizione_scaricata"] = "Scaricata dal server: {percento}%. La trovi aprendo il libro.",
-    ["koreader.ui.posizione_niente_da_mandare"] = "Questo libro non e' mai stato aperto qui: non c'e' nessuna posizione da mandare.",
-    ["koreader.ui.posizione_niente_sul_server"] = "Il server non ha una posizione per questo libro.",
-    ["koreader.ui.posizione_errore"] = "Non si e' potuto: {error}",
-    ["koreader.ui.stato_finito"] = "finito",
-    ["koreader.ui.stato_finito_con_pagine"] = "finito · {pagine} pagine",
-    ["koreader.ui.stato_non_iniziato"] = "non iniziato",
-    ["koreader.ui.stato_non_iniziato_con_pagine"] = "{pagine} pagine · non iniziato",
-    ["koreader.ui.stato_in_lettura"] = "pagina {pagina} di {pagine} · {percento}%",
-    ["koreader.ui.stato_in_lettura_senza_pagine"] = "letto al {percento}%",
-    ["koreader.ui.pagine_ignote"] = "pagine non ancora note",
-    ["koreader.ui.scheda_breve"] = "{titolo}\n{autore}\nBiblioteca: {biblioteca}\nPagine (stima del server): {pagine}",
-    ["koreader.ui.cronologia_non_disponibile"] = "La cronologia di KOReader non e' raggiungibile da qui.",
-    ["koreader.ui.cronologia_vuota"] = "Non hai ancora aperto nessun libro su questo dispositivo. Appena ne apri uno, lo ritrovi qui.",
-    ["koreader.ui.cronologia_titolo"] = "Cronologia",
-    ["koreader.ui.consegne_titolo"] = "Ultimi invii dal server",
-    ["koreader.ui.consegne_vuoto"] = "Il server non ha ancora mandato nessun libro su questo dispositivo.",
-    ["koreader.ui.sezione"] = "Interfaccia libreria",
-    ["koreader.ui.sezione_help"] = "L'interfaccia di Kolibre al posto del gestore di file di KOReader: se accenderla, quante righe mostrare per schermata, e come si aprono il pannello degli ultimi invii e la cronologia.",
-    ["koreader.ui.consegne_voce"] = "Ultimi invii dal server",
-    ["koreader.ui.consegne_voce_help"] = "I libri che il server ha mandato su questo dispositivo, dal piu' recente, in una finestra a se'. Dalla libreria si apre anche tenendo premuto il tasto della casa.",
-    ["koreader.ui.cronologia_voce"] = "Cronologia dei libri aperti",
-    ["koreader.ui.menu_non_disponibile"] = "Il menu di KOReader non e' raggiungibile da qui.",
-    ["koreader.ui.nessun_ultimo_libro"] = "Non c'e' nessun libro aperto di recente.",
-    ["koreader.catalog.recent_unavailable"] = "Aggiunti di recente non disponibili: {error}",
-    ["koreader.catalog.discover_unavailable"] = "Suggerimenti non disponibili: {error}",
-    ["koreader.catalog.all_books"] = "Tutti i libri",
-    ["koreader.catalog.not_on_device_item"] = "Non sul device",
-    ["koreader.catalog.change_library"] = "Cambia libreria",
-    ["koreader.catalog.browse_menu_title"] = "Sfoglia",
-    ["koreader.catalog.page_load_failed"] = "Impossibile caricare la pagina: {error}",
-    ["koreader.catalog.empty"] = "Nessun libro.",
-    ["koreader.catalog.untitled"] = "Senza titolo",
-    ["koreader.catalog.cover_loading"] = "Copertina in caricamento",
-    ["koreader.catalog.cover_failed"] = "Copertina non disponibile",
-    ["koreader.catalog.cover_none"] = "Nessuna copertina",
-
-    -- automazioni
-    ["koreader.automation.moment_startup"] = "All'avvio (e al risveglio)",
-    ["koreader.automation.moment_open"] = "Apertura di un libro",
-    ["koreader.automation.moment_close"] = "Chiusura di un libro",
-    ["koreader.automation.moment_shutdown"] = "Spegnimento del dispositivo",
-    ["koreader.automation.action_sync_books"] = "Controlla solo libri nuovi",
-    ["koreader.automation.action_backup"] = "Carica backup",
-    ["koreader.automation.action_push_annot"] = "Pusha annotazioni",
-    ["koreader.automation.action_push_pos_all"] = "Invia tutte le posizioni (più lento)",
-    ["koreader.automation.action_pull_pos_all"] = "Scarica tutte le posizioni (più lento)",
-
-    -- info dialog (Impostazioni ▸ Info)
-    ["koreader.info.policy_auto"] = "automatica (il server rimuove senza chiedere)",
-    ["koreader.info.policy_ask"] = "con conferma (un'unica richiesta cumulativa)",
-    ["koreader.info.policy_never"] = "mai (il server non richiede rimozioni)",
-    ["koreader.info.policy_unknown"] = "(sconosciuta — esegui una sync)",
-    ["koreader.info.last_sync_never"] = "mai",
-    ["koreader.info.body"] = "Kolibre v{version}\n\nServer: {server}\nUltima sincronizzazione: {last_sync}\nLibri gestiti: {count}\nPolicy di rimozione: {policy}",
-
-    -- dispatcher (azioni assegnabili a gesti/scorciatoie)
-    ["koreader.dispatcher.push_progress"] = "Kolibre: invia posizione di lettura",
-    ["koreader.dispatcher.pull_progress"] = "Kolibre: scarica posizione di lettura",
-
-    -- lessico comune, riusato in più punti
-    ["koreader.common.not_configured"] = "(non configurato)",
-    ["koreader.common.not_configured_message"] = "Configura prima URL server e token in Impostazioni sync.",
-    ["koreader.common.unreachable"] = "Server non raggiungibile: {error}",
-    -- Il segno d'attesa generico delle operazioni di rete (E7, 20/11/2026).
-    ["koreader.common.contacting_server"] = "Parlo col server…",
-    ["koreader.common.close"] = "Chiudi",
-    ["koreader.common.cancel"] = "Annulla",
-    ["koreader.common.save"] = "Salva",
-    ["koreader.common.search"] = "Cerca",
-    ["koreader.common.more"] = "Altro…",
-    ["koreader.common.start"] = "Avvia",
-    ["koreader.common.link"] = "Collega",
-    ["koreader.common.ignore"] = "Ignora",
-    ["koreader.common.none_of_these"] = "Nessuna di queste",
-    ["koreader.common.overwrite"] = "Sovrascrivi",
-    ["koreader.common.leave_as_is"] = "Lascia così",
-    ["koreader.common.remove"] = "Rimuovi",
-    ["koreader.common.not_now"] = "Non ora",
-    ["koreader.common.continue"] = "Continua",
-    ["koreader.common.request"] = "Richiedi",
-    ["koreader.common.later"] = "Più tardi",
-    ["koreader.common.send"] = "Invia",
-    ["koreader.common.download"] = "Download",
-    ["koreader.common.download_verb"] = "Scarica",
-    ["koreader.common.and_more"] = "… e un altro | … e altri {count}",
-    ["koreader.common.book_count"] = "{count} libro | {count} libri",
-}
-
--- ── Catalogo inglese ──
+-- ── The catalog ──
 local en = {
     -- main menu
     ["koreader.menu.title"] = "Kolibre",
-    ["koreader.menu.sync_all"] = "Sync everything",
+    ["koreader.menu.sync_all"] = "Sync",
     ["koreader.menu.check_new_books"] = "Check for new books",
-    ["koreader.menu.sync_all_help"] = "\"Sync everything\" does, in this order:\n\n• tells the server what is on this reader: managed books, free space, installed patches;\n• downloads the books the server has queued, asking first;\n• runs the pending actions;\n• removes the books you asked to delete from the web;\n• downloads the dictionaries you sent from the portal;\\n• sends the page count of the books you opened;\n• sends new highlights and reading positions;\n• sends the backup, reading statistics included.\n\n\"Check for new books\" stops after the removals.",
-    ["koreader.menu.check_new_books_help"] = "The fast half of \"Sync everything\": only the books coming in and the ones to remove. It sends no highlights, positions or backup — it answers the question \"is there anything new to read?\".",
-    ["koreader.menu.catalog"] = "Catalog",
+    ["koreader.menu.sync_all_help"] = "\"Sync\" does, in this order:\n\n• tells the server what is on this reader: managed books, free space, installed patches;\n• downloads the books the server has queued, asking first;\n• runs the pending actions;\n• removes the books you asked to delete from the web;\n• downloads the dictionaries you sent from the portal;\n• sends the page count of the books you opened;\n• sends new highlights and reading positions;\n• sends the backup, reading statistics included.\n\n\"Check for new books\" stops after the removals.",
+    ["koreader.menu.check_new_books_help"] = "The fast half of \"Sync\": only the books coming in and the ones to remove. It sends no highlights, positions or backup — it answers the question \"is there anything new to read?\".",
+    ["koreader.menu.catalog"] = "Browse server library",
     ["koreader.menu.tools"] = "Tools",
+    ["koreader.menu.global"] = "Global",
+    ["koreader.menu.global_help"] = "The heavy actions, the ones that go through the whole library on this device: all positions, all highlights, pairing the books, restoring another device's state.",
+    ["koreader.menu.dev"] = "Dev",
     ["koreader.menu.settings"] = "Settings",
     ["koreader.menu.automations"] = "Automations",
 
     -- settings
     ["koreader.settings.connection"] = "Server connection...",
     ["koreader.settings.test_connection"] = "Test connection",
-    ["koreader.settings.sync_popup"] = "Sync popup",
+    ["koreader.settings.sync_popup"] = "Automatic sync popup",
     ["koreader.settings.sync_popup_help"] = "On, an automatic sync shows the progress bar and, if anything happened, a summary. Off, automatic syncs are silent. The ones you ask for from the menu always answer, otherwise a command that says nothing would look broken.",
     ["koreader.settings.info"] = "Info: Kolibre v{version} · UI {ui}",
     ["koreader.settings.dialog_title"] = "Kolibre — Sync settings",
@@ -492,12 +109,12 @@ local en = {
     ["koreader.annotations.batch_progress"] = "{label} ({sent}/{total}, batch {batch_num}/{batch_count})…",
 
     -- backup
-    ["koreader.backup.run_now"] = "Run backup now",
-    ["koreader.backup.reminder_menu"] = "Backup reminder",
     ["koreader.backup.summary"] = "Backup complete: {uploaded} files uploaded, {skipped} already up to date, {failed} failed.",
-    ["koreader.backup.reminder_days"] = "Every {days} days",
-    ["koreader.backup.reminder_never"] = "Never",
-    ["koreader.backup.reminder_prompt"] = "More than {days} days have passed since the last Kolibre backup. Run it now?",
+    ["koreader.sync_reminder.menu"] = "Last sync reminder",
+    ["koreader.sync_reminder.menu_help"] = "When you open a book and the last full sync is older than this, Kolibre asks whether to sync now. A sync also sends your highlights, positions and the backup.",
+    ["koreader.sync_reminder.days"] = "After {days} days",
+    ["koreader.sync_reminder.never"] = "Never",
+    ["koreader.sync_reminder.prompt"] = "More than {days} days have passed since the last full Kolibre sync. Sync now?",
 
     -- reset to another device's state
     ["koreader.restore.menu"] = "Reset to another device's state...",
@@ -516,7 +133,7 @@ local en = {
 
     -- plugin update
     ["koreader.update.check_failed"] = "Update check failed: {error}",
-    ["koreader.update.menu_check"] = "Check for updates (plugin and patches)",
+    ["koreader.update.menu_check"] = "Check for updates",
     ["koreader.update.menu_check_help"] = "Asks the server whether a newer version of the plugin exists and whether the patches you installed have changed. For patches it only offers the ones you already have: a patch you never installed is never pushed at you. If both need updating, it offers them together in one window, and asks to restart once at the end.",
     ["koreader.update.all_up_to_date"] = "Everything up to date: plugin v{version}, and the installed patches are the server's.",
     ["koreader.update.available"] = "Kolibre v{version} is available (current version: v{current}). Download and install now?",
@@ -573,8 +190,8 @@ local en = {
     ["koreader.sync.migration_scanning"] = "Recognizing books already present: {count} examined…",
     ["koreader.sync.removing_progress"] = "Removing: {done} of {total}…",
     ["koreader.sync.removal_confirm"] = "Kolibre is requesting the removal of {count} books:\n\n{list}\n\nRemove them now?",
-    ["koreader.sync.removal_pending"] = "Kolibre: {count} removals awaiting confirmation — open \"Sync everything\".",
-    ["koreader.sync.downloads_pending"] = "Kolibre: {count} books ready for delivery awaiting confirmation — open \"Sync everything\".",
+    ["koreader.sync.removal_pending"] = "Kolibre: {count} removals awaiting confirmation — open \"Sync\".",
+    ["koreader.sync.downloads_pending"] = "Kolibre: {count} books ready for delivery awaiting confirmation — open \"Sync\".",
     ["koreader.sync.first_sync_confirm"] = "First sync: Kolibre will analyze the books already on the device to recognize them — no new book is downloaded in this step. On large libraries this can take a few minutes. Continue?",
     ["koreader.sync.skip_for_now"] = "Skip for now",
     ["koreader.sync.checking_new_books"] = "Kolibre: checking for new books...",
@@ -594,22 +211,10 @@ local en = {
     ["koreader.sync.downloads_confirm"] = "Kolibre has {count} books ready to download:\n\n{list}\n\nDownload them now?",
 
     -- managed books
-    ["koreader.managed_books.menu_title"] = "Books managed by Kolibre",
-    ["koreader.managed_books.pages_count"] = "{count} page | {count} pages",
-    ["koreader.managed_books.empty"] = "No books are managed by Kolibre on this device.",
-    ["koreader.managed_books.detail_title"] = "Title: {value}",
-    ["koreader.managed_books.detail_author"] = "Author: {value}",
-    ["koreader.managed_books.detail_format"] = "Format: {value}",
-    ["koreader.managed_books.detail_pages"] = "Pages: {value}",
-    ["koreader.managed_books.detail_downloaded_at"] = "Downloaded on: {value}",
-    ["koreader.managed_books.detail_file"] = "File: {value}",
-    ["koreader.managed_books.remove_confirm_ok"] = "Remove from this device",
-    ["koreader.managed_books.removed_notice"] = "Book removed. The server will be informed at the next sync.",
-    ["koreader.managed_books.remove_failed"] = "Removal failed: {error}",
 
     -- initialize library (find unpaired books)
     -- ── Books-folder inventory ──
-    ["koreader.inventory.menu"] = "Library inventory (looks, doesn't touch)",
+    ["koreader.inventory.menu"] = "Library inventory",
     ["koreader.diagnostica.menu"] = "Send the log to the server",
     ["koreader.diagnostica.menu_help"] = "Sends KOReader's log (crash.log) to the server, to read in the portal. It is what explains why something did not work on this reader. Tokens and addresses are stripped before it leaves; book titles and file paths stay, because they are often the only thing that explains a fault. It never happens on its own: you are always asked.",
     ["koreader.diagnostica.conferma"] = "Send KOReader's log to the server ({kb} KB, at most {max} are sent).\n\nTokens and addresses are stripped. Book titles and file paths stay: they go to your server and nowhere else.",
@@ -628,10 +233,23 @@ local en = {
     ["koreader.inventory.result_duplicates"] = "{count} book present in more than one copy ({copies} extra copy) | {count} books present in more than one copy ({copies} extra copies)",
     ["koreader.inventory.result_unknown"] = "{count} file the server doesn't recognise | {count} files the server doesn't recognise",
     ["koreader.inventory.result_to_save"] = "{count} of them has annotations, to bring to safety before deleting anything | {count} of them have annotations, to bring to safety before deleting anything",
-    ["koreader.library_init.menu"] = "Initialize library (find unpaired books)",
-    ["koreader.library_init.confirm"] = "Every book already on this device will be examined to find the ones Kolibre doesn't manage yet. On very large libraries this can take a few minutes. Proceed?",
+    ["koreader.library_init.menu"] = "Initialize library",
+    ["koreader.library_init.confirm"] = "Kolibre will look at every book on this device that it doesn't manage yet, in three steps:\n\n• books identical to one on the server are paired with it;\n• the others can be sent to the server as they are, and become new books there;\n• the books Kolibre knows can be moved into Author/Title folders, with their reading progress, highlights, history and collections.\n\nEach step asks first. On a large library the scan can take a few minutes. Proceed?",
+    ["koreader.library_init.send_confirm"] = "{count} book on this device is not on the server:\n\n{list}\n\nSend this exact file to «{library}»? It becomes a new book there, paired with this device. Nothing changes on the device. | {count} books on this device are not on the server:\n\n{list}\n\nSend these exact files to «{library}»? They become new books there, paired with this device. Nothing changes on the device.",
+    ["koreader.library_init.send"] = "Send",
+    ["koreader.library_init.send_which_library"] = "{count} book is not on the server: add it to which library? | {count} books are not on the server: add them to which library?",
+    ["koreader.library_init.move_confirm"] = "{count} book is not in its author's folder. Move it?\n\n{list}\n\nReading progress, highlights, history and collections move with it. | {count} books are not in their author's folder. Move them?\n\n{list}\n\nReading progress, highlights, history and collections move with them.",
+    ["koreader.library_init.move"] = "Move",
+    ["koreader.library_init.summary_linked"] = "{count} book paired with the server. | {count} books paired with the server.",
+    ["koreader.library_init.summary_sent"] = "{count} book sent to the server and paired. | {count} books sent to the server and paired.",
+    ["koreader.library_init.summary_failed"] = "{count} book could not be sent: it will be offered again next time. | {count} books could not be sent: they will be offered again next time.",
+    ["koreader.library_init.summary_not_sent"] = "{count} book not sent, as you chose. | {count} books not sent, as you chose.",
+    ["koreader.library_init.summary_no_library"] = "{count} book not sent: there is no library you can add books to. | {count} books not sent: there is no library you can add books to.",
+    ["koreader.library_init.summary_moved"] = "{count} book moved into its author's folder. | {count} books moved into their author's folders.",
+    ["koreader.library_init.summary_not_moved"] = "{count} book left where it was. | {count} books left where they were.",
+    ["koreader.library_init.summary_taken"] = "{count} book not moved: a file with the same name is already in its author's folder. | {count} books not moved: a file with the same name is already in their author's folder.",
+    ["koreader.library_init.summary_metadata_elsewhere"] = "{count} book keeps its reading data somewhere other than where KOReader's settings say (Document metadata folder). It is still found and nothing is lost. | {count} books keep their reading data somewhere other than where KOReader's settings say (Document metadata folder). They are still found and nothing is lost.",
     ["koreader.library_init.scanning_progress"] = "Scanning library: {count} files examined…",
-    ["koreader.library_init.nothing_new"] = "No new books to examine: every book on the device is already managed by Kolibre.",
     ["koreader.library_init.comparing"] = "Comparing with the server…",
     ["koreader.library_init.compare_failed"] = "Comparison with the server failed: {error}",
     ["koreader.library_init.skip_for_now"] = "Skip for now",
@@ -640,16 +258,6 @@ local en = {
     ["koreader.library_init.hash_match_confirm"] = "Found {count} book already on Kolibre (identical file):\n\n{list}\n\nLink it? | Found {count} books already on Kolibre (identical files):\n\n{list}\n\nLink them?",
     ["koreader.library_init.hash_linked"] = "{count} book linked. It will be confirmed at the next sync. | {count} books linked. They will be confirmed at the next sync.",
     ["koreader.library_init.nothing_else"] = "No other book to examine: the device's library is already in line with Kolibre.",
-    ["koreader.library_init.searching_matches"] = "Searching for matches: 0 of {total}…",
-    ["koreader.library_init.checking_content"] = "Checking content: {done} of {total}…",
-    ["koreader.library_init.ambiguous_title"] = "'{name}': more than one possible match",
-    ["koreader.library_init.flagged_notice"] = "\n\n{count} book with notes or reading in progress was added to Kolibre's \"to review\" list, with no local changes. | \n\n{count} books with notes or reading in progress were added to Kolibre's \"to review\" list, with no local changes.",
-    ["koreader.library_init.overwrite_confirm"] = "Found {count} never-opened book that seems to match a book on Kolibre:\n\n{list}\n\nOverwrite it with the Kolibre copy?{notice} | Found {count} never-opened books that seem to match books on Kolibre:\n\n{list}\n\nOverwrite them with the Kolibre copies?{notice}",
-    ["koreader.library_init.overwriting_progress"] = "Overwriting: {done} of {total}…",
-    ["koreader.library_init.no_candidate_title"] = "No match on Kolibre",
-    ["koreader.library_init.no_candidate_detail"] = "File: {path}\n\nNo matching book found on Kolibre.",
-    ["koreader.library_init.delete_from_device"] = "Delete from the device",
-    ["koreader.library_init.deleted_notice"] = "Deleted.",
     ["koreader.library_init.auto_paired"] = "{migrated} highlights automatically re-linked to {count} book. | {migrated} highlights automatically re-linked to {count} books.",
 
     -- catalog
@@ -690,19 +298,19 @@ local en = {
     ["koreader.catalog.recent_unavailable"] = "Recently added unavailable: {error}",
     ["koreader.catalog.discover_unavailable"] = "Suggestions unavailable: {error}",
     -- ── the "library" view: Kolibre's own UI on KOReader ──
-    ["koreader.ui.apri"] = "Open the Kolibre library",
-    ["koreader.ui.apri_help"] = "Shows only the books Kolibre delivered to this device, with the cover, the reading status and a bar as long as the book.",
     ["koreader.ui.usa_la_vista"] = "Use the Kolibre UI",
     ["koreader.ui.accesa_dopo_il_libro"] = "Kolibre UI turned on: it opens when you close this book.",
-    ["koreader.ui.usa_la_vista_help"] = "The Kolibre library takes the place of KOReader's file manager: on startup, and every time you leave a book. Turn it off here and the file manager is back to normal. If KOReader is set to \"open the last book\", on startup that choice wins.",
+    ["koreader.ui.usa_la_vista_help"] = "The Kolibre library takes the place of KOReader's file manager: on startup, and every time you leave a book, in the folder of that book's author. While this is on it is always there: Back does not close it, and if you end up in the file manager it brings you back. Turn it off here and the file manager is back to normal. If KOReader is set to \"open the last book\", on startup that choice wins.",
     ["koreader.ui.righe_scelte"] = "Rows per screen: {count}",
-    ["koreader.ui.righe_n"] = "{count} rows",
     ["koreader.ui.righe_help"] = "How many books you see at once in the Kolibre library, from 4 to 8. With fewer rows each book gets a large cover you can read from a distance; with more you see more at once and scroll less. Below a certain row height the row does not shrink the type: it drops the page bar instead, and then the status line, because an unreadable title is not worth the space it takes. Changing this redraws the open library right away, on the folder you are in.",
+    ["koreader.ui.righe_titolo"] = "Rows per screen",
+    ["koreader.ui.righe_ok"] = "Apply",
     ["koreader.ui.nessun_libro"] = "Kolibre has not sent any book to this device yet.",
     ["koreader.ui.cartella_vuota"] = "No Kolibre books in here.",
     ["koreader.ui.percorso_radice"] = "Library",
     ["koreader.ui.libri_nella_cartella"] = "{count} book | {count} books",
     ["koreader.ui.quando_adesso"] = "just now",
+    ["koreader.ui.quando_oggi"] = "today",
     ["koreader.ui.quando_minuti"] = "{count} minute ago | {count} minutes ago",
     ["koreader.ui.quando_ore"] = "{count} hour ago | {count} hours ago",
     ["koreader.ui.quando_ieri"] = "yesterday",
@@ -716,8 +324,9 @@ local en = {
     ["koreader.ui.azione_non_riuscita"] = "It could not be done: {error}",
     ["koreader.ui.elimina_conferma"] = "'{titolo}' will be deleted from this device.\n\nThe book stays in the library on the server, and Kolibre will not send it back here on its own. Notes and highlights already sent to the server are kept.",
     ["koreader.ui.elimina_fatto"] = "Removed from this device.",
-    ["koreader.ui.elimina_server_no"] = "The server did not accept it: {error}. The book was left alone.",
-    ["koreader.ui.elimina_file_no"] = "The server recorded it, but the file could not be deleted: {error}. It will show up among the books to review at the next sync.",
+    ["koreader.compat.project_title_pagine"] = "Project: Title is on.\n\nFrom this version Kolibre no longer writes anything inside your books, including the page count that Project: Title reads from them: books sent from now on will show no page count there. Books already on this device keep theirs.\n\nKolibre's own library view (Kolibre → Library UI) shows the length of every book, taken from the server.",
+    ["koreader.ui.elimina_file_no"] = "The file could not be deleted: {error}. Nothing was changed, and the server was not told.",
+    ["koreader.ui.elimina_in_coda"] = "Removed from this device. The server will be told at the next sync, and will not send the book back.",
     ["koreader.ui.elimina_sconosciuto"] = "Not enough is known about this book to tell the server.",
     ["koreader.ui.libro_non_c_e"] = "This file is gone.",
     ["koreader.ui.posizione_libro_aperto"] = "This book is open right now: send and get its place from Tools, while you read it.",
@@ -761,12 +370,10 @@ local en = {
     ["koreader.automation.moment_startup"] = "At startup (and on wake)",
     ["koreader.automation.moment_open"] = "Opening a book",
     ["koreader.automation.moment_close"] = "Closing a book",
-    ["koreader.automation.moment_shutdown"] = "Shutting down the device",
-    ["koreader.automation.action_sync_books"] = "Check only for new books",
-    ["koreader.automation.action_backup"] = "Upload backup",
-    ["koreader.automation.action_push_annot"] = "Push highlights",
-    ["koreader.automation.action_push_pos_all"] = "Send all positions (slower)",
-    ["koreader.automation.action_pull_pos_all"] = "Download all positions (slower)",
+    ["koreader.automation.moment_shutdown"] = "Going to sleep or shutting down",
+    ["koreader.automation.action_pull_pos"] = "Download this book's position",
+    ["koreader.automation.action_push_pos"] = "Send this book's position",
+    ["koreader.automation.action_session"] = "Send this reading session (highlights, statistics)",
 
     -- info dialog (Settings ▸ Info)
     ["koreader.info.policy_auto"] = "automatic (the server removes without asking)",
@@ -808,7 +415,6 @@ local en = {
     ["koreader.common.book_count"] = "{count} book | {count} books",
 }
 
-local catalogs = { it = it, en = en }
 
 -- Substitutes every "{name}" in `s` for tostring(values[name]). A name with
 -- no matching value is left untouched (visible, not silently blanked — an
@@ -822,15 +428,14 @@ local function interpolate(s, values)
     end))
 end
 
--- t(key, values): looks `key` up in the active language's catalog (falling
--- back to `it`, then to the bare key itself, so a missing/mistyped key shows
--- up as visibly odd text on screen rather than crashing the plugin). When the
+-- t(key, values): looks `key` up in the catalog (falling back to the bare
+-- key itself, so a missing/mistyped key shows up as visibly odd text on
+-- screen rather than crashing the plugin). When the
 -- stored value has two forms separated by " | ", picks the first when
 -- values.count == 1, the second otherwise — then interpolates {name}
 -- placeholders from `values` (which may be nil for a plain lookup).
 function KolibreLingua.t(key, values)
-    local catalog = catalogs[active_lang] or en
-    local template = catalog[key] or en[key] or key
+    local template = en[key] or key
 
     local bar = template:find(" | ", 1, true)
     if bar then
@@ -841,16 +446,6 @@ function KolibreLingua.t(key, values)
     end
 
     return interpolate(template, values)
-end
-
--- La lingua di QUESTA copia del plugin. Serve a una cosa sola:
--- l'aggiornamento la manda al server (`?lingua=`), cosi' i file che
--- arrivano sono nella stessa lingua di quelli installati. Senza, un plugin
--- scaricato in italiano tornerebbe inglese al primo aggiornamento, in
--- silenzio — vedi _RIGA_DELLA_LINGUA in backend/app/api/tools.py, che e'
--- il posto dove la riga qui sopra viene scritta al momento dello scarico.
-function KolibreLingua.lingua_attiva()
-    return active_lang
 end
 
 return KolibreLingua

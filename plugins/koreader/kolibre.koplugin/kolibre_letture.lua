@@ -43,8 +43,9 @@ si aggiorna, e ce l'ha un lettore solo. Il plugin riceve **gli stessi
 eventi** (`onReaderReady`, `onPageUpdate`, `onPosUpdate`), viaggia con
 `VERSION`, arriva senza cavo ed e' coperto dalle prove.
 
-La patch **resta installata** finche' questa strada non e' in opera: una
-lettura non misurata non si recupera.
+La patch **non c'e' piu'**: Paolo l'ha tolta dai quattro lettori il
+23/11/2026, quando questa strada era in opera su tutti, e il 24/11 e'
+uscita anche dal repository (fase 5 delle statistiche).
 
 ────────────────────────────────────────────────────────────────────────
 UNA RIGA QUANDO LA PAGINA VIENE LASCIATA

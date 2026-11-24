@@ -83,7 +83,7 @@ local Menu = require("ui/widget/menu")
 -- **Resta spenta per difetto**: finche' non si accende l'impostazione,
 -- KOReader e' quello di sempre. Il Kindle non la vede e non la vedra'
 -- finche' Paolo non lo decide.
-local UI_VERSION = "0.7.1"
+local UI_VERSION = "0.8.0"
 
 --- Il «gestore di file» che `FileChooser` si aspetta di avere sopra di se'.
 --
@@ -378,8 +378,12 @@ function KolibreUI:init()
     -- cercare fra i nomi delle cartelle. I libri stanno dentro.
     self.search_callback = function(testo) Comune.cerca(self, testo) end
     -- La radice della libreria: sopra di lei non si sale, perche' sopra non
-    -- c'e' la libreria di Kolibre, c'e' il disco.
-    self.radice = self.path
+    -- c'e' la libreria di Kolibre, c'e' il disco. **Si puo' passare**
+    -- (24/11/2026): la vista si apre anche dentro la cartella di un autore —
+    -- uscendo da un suo libro, o rifacendola dopo aver cambiato le righe —
+    -- e prima prendeva quella cartella come radice, da cui non si risaliva.
+    self.radice = self.radice or self.path
+    if self.path ~= self.radice then self.dentro_autore = true end
     -- Vedi `gestoreFileFinto`: da KOReader v2026.07 `FileChooser` chiede
     -- delle cose a `self.ui` mentre disegna, e noi non siamo posseduti da
     -- nessuno. `self.ui or` e non `=` secco: se un giorno qualcuno aprisse
@@ -487,7 +491,19 @@ function KolibreUI.scegliRighe(quante)
     return quante
 end
 
-function KolibreUI.aperta() return _aperta end
+--- La vista aperta, o `nil`.
+--
+-- **Viva davvero, non solo ricordata** (24/11/2026, i «salti» del Kindle).
+-- `_aperta` si azzera quando la vista si chiude; ma una vista rimasta nella
+-- pila sotto un lettore, e poi buttata via insieme al gestore di file senza
+-- che nessuno la chiudesse, resterebbe ricordata per sempre: il plugin la
+-- crederebbe aperta e non ne aprirebbe un'altra, e si finirebbe nel file
+-- browser di KOReader. Si chiede quindi a UIManager se e' ancora mostrata
+-- (`isWidgetShown`, in 2025.08, 2026.03 e 2026.07).
+function KolibreUI.aperta()
+    if _aperta and not UIManager:isWidgetShown(_aperta) then _aperta = nil end
+    return _aperta
+end
 
 --- La versione della vista, per le note e per chi la mostra.
 function KolibreUI.versione() return UI_VERSION end
@@ -554,7 +570,41 @@ end
 -- ripulire.
 function KolibreUI:onCloseWidget()
     if _aperta == self then _aperta = nil end
+    -- **Se e' accesa, c'e' sempre** (Paolo, 24/11/2026): una chiusura che
+    -- nessuno ha voluto — non un libro che si apre, non KOReader che esce,
+    -- non la spunta tolta — e sotto resterebbe il file browser di KOReader.
+    -- La vista si riapre dov'era, al giro dopo.
+    if not self._chiusura_voluta then
+        local kolibre, dove = self.kolibre, self.path
+        UIManager:nextTick(function()
+            if kolibre and type(kolibre.riportaLaVista) == "function" then
+                pcall(function() kolibre:riportaLaVista(dove) end)
+            end
+        end)
+    end
     return Menu.onCloseWidget(self)
+end
+
+--- Una chiusura voluta: non si riapre da sola.
+function KolibreUI:chiudi()
+    self._chiusura_voluta = true
+    UIManager:close(self)
+end
+
+--- **Un libro si sta aprendo: la vista esce dalla pila** (24/11/2026).
+--
+-- E' la causa dei «salti» che Paolo vedeva sul Kindle uscendo da un libro.
+-- KOReader, prima di mostrare un libro, manda `ShowingReader` a tutte le
+-- finestre (readerui.lua, in 2025.08, 2026.03 e 2026.07): il gestore di file
+-- si chiude, la nostra vista no. Se il libro lo apriva lei, si chiudeva da
+-- se'; ma da tutte le altre strade — gli ultimi invii, la cronologia, la
+-- ricerca, la cronologia di KOReader, un gesto — restava nella pila sotto il
+-- lettore. Chiudendo il libro nasceva un gestore di file nuovo SOPRA di lei,
+-- il plugin la credeva aperta e non la rifaceva: davanti c'era il file
+-- browser di KOReader. Ora esce da sola, qualunque sia la strada, e alla
+-- chiusura del libro si rifa' come sempre.
+function KolibreUI:onShowingReader()
+    self:chiudi()
 end
 
 --- Uscendo da KOReader, la vista si toglie di mezzo.
@@ -582,7 +632,7 @@ end
 -- `true` (verificato sul sorgente, v2025.08 e v2026.03): chiuderci qui non
 -- toglie a nessun altro il suo turno.
 function KolibreUI:onExit()
-    UIManager:close(self)
+    self:chiudi()
 end
 
 --- Il percorso da scrivere in cima: dove sei, rispetto alla radice.
@@ -636,8 +686,10 @@ end
 -- Niente scheda intermedia, per decisione di Paolo del 15/11: e' un file
 -- browser, e in un file browser il tocco apre. Quello che oggi non c'e' — la
 -- scheda del libro, gli altri comandi — andra' sulla pressione prolungata.
+--- «Indietro» non chiude la vista (Paolo, 24/11/2026: se e' accesa c'e'
+--- sempre; chi non la vuole toglie la spunta). Il tasto si consuma qui, cosi'
+--- non arriva al menu sotto.
 function KolibreUI:onClose()
-    UIManager:close(self)
     return true
 end
 
@@ -694,7 +746,7 @@ function KolibreUI:onRigaToccata(voce)
         return self:changeToPath(voce.path)
     end
     if voce.path then
-        self:onClose()
+        self:chiudi()
         ReaderUI:showReader(voce.path)
     end
 end
@@ -820,7 +872,7 @@ end
 function KolibreUI:_ultimoLibro()
     local ultimo = G_reader_settings:readSetting("lastfile")
     if ultimo and lfs.attributes(ultimo, "mode") == "file" then
-        self:onClose()
+        self:chiudi()
         ReaderUI:showReader(ultimo)
     else
         UIManager:show(InfoMessage:new{ text = t("koreader.ui.nessun_ultimo_libro") })

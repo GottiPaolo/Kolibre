@@ -269,9 +269,9 @@ class BookHashHistory(Base):
     """
     Previous BookHash.file_hash values for a (library, calibre_book_id,
     format), archived whenever book_hash_service._get_or_create_book_hash
-    overwrites the live row with a newly-recomputed hash — e.g. after
-    embedding page-count/cover/OPF metadata into the file (opf_metadata.py),
-    which changes the exact bytes a partial-MD5 samples even though the book
+    overwrites the live row with a newly-recomputed hash — e.g. after a
+    rewrite of the file (the TOC editor; until 24/11/2026 also the page
+    count embedded into the OPF), which changes the exact bytes a partial-MD5 samples even though the book
     is unchanged. Without this, a device that already downloaded and hashed
     an OLDER copy can never resolve its reported statistics.sqlite3 md5
     again once the server rewrites the file — confirmed against real data

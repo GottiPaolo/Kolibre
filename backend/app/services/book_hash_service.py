@@ -114,10 +114,10 @@ def resolve_book_matches(db: Session, file_hash: str, device_id: Optional[int] =
     Tre livelli, dal più affidabile al più indiretto:
 
     1. BookHash vivo: l'hash del file così com'è adesso sul server.
-    2. BookHashHistory: il server riscrive i file quando incorpora metadati,
-       copertina o conteggio pagine (opf_metadata.py), e questo cambia i byte
-       campionati dall'hash parziale pur senza toccare il contenuto del
-       libro. Un dispositivo che aveva scaricato e hashato la copia
+    2. BookHashHistory: quando il server riscrive un file (l'indice salvato
+       dall'editor; fino al 24/11/2026 anche il conteggio pagine incorporato
+       nell'OPF) cambiano i byte campionati dall'hash parziale pur senza
+       toccare il contenuto del libro. Un dispositivo che aveva scaricato e hashato la copia
        PRECEDENTE resterebbe altrimenti con un hash che il server non
        riconosce più.
     3. Solo se `device_id` è dato: l'hash che abbiamo REGISTRATO di avere
@@ -364,70 +364,34 @@ def record_device_hash(db: Session, library: str, calibre_book_id: int, format: 
 
 def chiudi_i_formati(
     db: Session, library_path: str, library: str, calibre_book_id: int,
-    percorsi_per_formato: dict, pagine: Optional[int] = None,
-    formato_preferito: Optional[str] = None,
+    percorsi_per_formato: dict,
 ) -> dict:
     """
-    L'ultimo atto dell'ingresso di un libro: si finisce di scrivere nei suoi
-    file, e SOLO DOPO si registrano le impronte.
+    L'ultimo atto dopo che si e' finito di scrivere nei file di un libro:
+    si registrano le impronte dei file **cosi' come sono**.
 
     **Perche' esiste, invece di due righe nel chiamante.** L'impronta serve a
     riconoscere un libro quando un lettore ne parla, e descrive i byte del
-    file. Kolibre, pero', scrive dentro gli EPUB: il conteggio pagine finisce
-    nell'OPF, e quella scrittura ricostruisce lo zip da zero
-    (`opf_metadata.embed_custom_column`), quindi cambia tutti i byte.
-    Calcolare l'impronta prima vuol dire registrare quella di un file che un
-    istante dopo non esiste piu' — e il libro non si riconosce piu'.
+    file: va calcolata DOPO ogni scrittura, mai prima. Il 04/11/2026 due
+    impronte su 8251 descrivevano un file che un istante dopo era stato
+    riscritto, e il 17/11 107 righe di consegna su 296: la regola «l'impronta
+    per ultima» viveva in piu' posti, e in alcuni si era persa. Qui sta
+    scritta una volta sola, e ci passano tutti i percorsi che toccano i file
+    (ingresso, trasferimento, scansione, salvataggio dell'indice).
 
-    Non e' un'ipotesi: il 04/11/2026, su 8251 impronte registrate, due non
-    descrivevano il proprio file, ed erano due libri entrati dal percorso che
-    faceva le due cose nell'ordine sbagliato (il caricamento dal plugin
-    Calibre). Nessuna delle due aveva una vecchia impronta archiviata, perche'
-    una riscrittura fatta fuori da `_get_or_create_book_hash` non archivia
-    niente: il valore giusto non era perso, era mai stato scritto.
-
-    **E perche' una funzione e non una riga spostata.** La regola «l'impronta
-    si calcola per ultima» viveva nella testa di chi scriveva, in due punti
-    diversi, e in uno dei due si era persa. Spostare la riga aggiusta oggi;
-    questa funzione impedisce che l'ordine torni a divergere, perche' l'ordine
-    sta scritto una volta sola, qui dentro.
-
-    `pagine` a `None` significa «non c'e' niente da incorporare», non «zero
-    pagine»: si registrano le impronte dei file come stanno. E
-    `formato_preferito` e' quello su cui si scrive — gli altri non si toccano,
-    ma la loro impronta si registra comunque, altrimenti un lettore che avesse
-    scaricato il PDF non lo vedrebbe riconosciuto.
+    **Kolibre non scrive piu' le pagine dentro gli EPUB** (Paolo, 24/11/2026:
+    «basta modifiche ai file dei libri»). Fino a quel giorno questa funzione
+    poteva incorporare il conteggio pagine nell'OPF, dietro un interruttore
+    spento di serie; ora non tocca nessun file. La stima resta nella colonna
+    `pages` di Calibre e arriva al lettore nel manifesto del plugin.
 
     Non fa commit, come `upsert_book_hash`: committa chi chiama, perche' qui
     siamo dentro la transazione che crea il libro e un commit a meta' la
     spezzerebbe.
     """
-    from . import opf_metadata  # locale: opf_metadata carica CalibreLibrary
-    from . import app_settings
-
-    # **Il conteggio si scrive dentro il file solo se l'impostazione e'
-    # accesa, e di default e' SPENTA** (19/11/2026). Il perche' sta per
-    # intero accanto a `INCORPORA_PAGINE_KEY` in `app_settings.py`; qui
-    # basta la conseguenza: a interruttore spento questa funzione **non
-    # tocca nessun file**, e le impronte che registra sotto descrivono i
-    # file come sono arrivati. Resta l'unico posto da cui si passa, quindi
-    # resta l'unico posto che deve saperlo.
-    incorporato = False
-    if pagine is not None and formato_preferito and app_settings.is_incorpora_pagine_enabled(db):
-        percorso = percorsi_per_formato.get(formato_preferito)
-        if percorso:
-            # Best-effort per scelta, come alla sua chiamata precedente: un
-            # OPF strano non deve fermare l'ingresso di un libro. Quello che
-            # NON e' best-effort e' l'ordine — l'impronta viene dopo in
-            # entrambi i casi, riuscito o fallito, perche' «fallito» qui vuol
-            # dire anche «ha riscritto a meta'».
-            incorporato = opf_metadata.embed_page_count(
-                library_path, percorso, formato_preferito, pagine,
-                book_id=calibre_book_id)
-
     impronte = {}
     for formato, percorso in percorsi_per_formato.items():
         impronta = upsert_book_hash(db, library, calibre_book_id, formato, percorso)
         if impronta:
             impronte[formato] = impronta
-    return {"incorporato": incorporato, "impronte": impronte}
+    return {"impronte": impronte}

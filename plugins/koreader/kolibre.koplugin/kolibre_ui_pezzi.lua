@@ -275,10 +275,20 @@ nella colonna, misurandola e non indovinandola.
 -- potrebbe verificare prima di mezzogiorno — il risultato dipende dall'ora
 -- in cui le prove girano, e una prova che passa solo di pomeriggio e' una
 -- prova che un giorno si rompe da sola.
-function Pezzi.quando(istante, corto, adesso)
+--
+-- `solo_giorno` (24/11/2026, ultimi invii): niente minuti e ore, il giorno
+-- di calendario e basta — «today», «yesterday», poi come sempre.
+function Pezzi.quando(istante, corto, adesso, solo_giorno)
     if type(istante) ~= "number" or istante <= 0 then return nil end
     adesso = adesso or os.time()
     local passati = adesso - istante
+    if solo_giorno then
+        local oggi, quel = os.date("*t", adesso), os.date("*t", istante)
+        if passati < 0 or (oggi.year == quel.year and oggi.yday == quel.yday) then
+            return t("koreader.ui.quando_oggi")
+        end
+        passati = math.max(passati, 86400)
+    end
     -- Un istante nel futuro e' un orologio sbagliato da qualche parte (il
     -- server, o il lettore). Si dice «adesso» invece di «-3 ore fa»: una
     -- data che non si capisce e' peggio di una data imprecisa.
@@ -606,15 +616,19 @@ end
 -- Torna un gruppo largo quanto il suo contenuto — **non** quanto lo schermo:
 -- va infilato in un gruppo orizzontale che si misura da se', e un pezzo che
 -- pretende tutta la larghezza spingerebbe le frecce fuori.
+--
+-- **Piu' grande e piu' scura** (Paolo, 24/11/2026: «ora e' davvero
+-- orrenda»): nera e non grigia, e il corpo lo decide chi la chiama (vedi
+-- `Comune.batteriaNellaBarra`). Lo spazio che la separa dalle frecce non sta
+-- piu' qui: lo calcola `Comune.allineaBatteria`, che la porta nell'angolo.
 function Pezzi.batteriaCompatta(altezza_testo)
     local testo = Pezzi.testoBatteria()
     if not testo then return nil end
     return HorizontalGroup:new{
-        HorizontalSpan:new{ width = Size.padding.large },
         TextWidget:new{
             text = testo,
             face = Font:getFace("cfont", corpo(math.max(10, altezza_testo or 24))),
-            fgcolor = MEDIO,
+            fgcolor = NERO,
         },
     }
 end
@@ -675,7 +689,7 @@ function Riga:init()
         local tetto = math.floor(self.dimen.w * Pezzi.QUOTA_COLONNA_QUANDO)
         local minimo = math.floor(self.dimen.w * Pezzi.TESTO_MINIMO)
         for _i, corto in ipairs({ false, true }) do
-            local testo = Pezzi.quando(voce.quando, corto)
+            local testo = Pezzi.quando(voce.quando, corto, nil, voce.solo_giorno)
             if not testo then break end
             local w = TextWidget:new{ text = testo, face = faccia, fgcolor = MEDIO }
             local larga = w:getSize().w
@@ -764,6 +778,10 @@ function Riga:init()
     -- riga vuota e' un guasto.
     local utile_colonna = self.dimen.h - Size.line.thin
     local colonna
+    -- Quanti pezzi il ciclo ha tolto: la prova `le_righe_stanno_su_ogni_
+    -- schermo` lo guarda per dire «su una riga larga non si toglie niente»
+    -- senza dipendere da quanto sono alti i caratteri di questa versione.
+    self.pezzi_tolti = 0
     while true do
         colonna = VerticalGroup:new{ align = "left" }
         for i, pezzo in ipairs(pezzi) do
@@ -780,6 +798,7 @@ function Riga:init()
         end
         if not quale then break end
         table.remove(pezzi, quale)
+        self.pezzi_tolti = self.pezzi_tolti + 1
     end
 
     -- **La riga di separazione sta DENTRO l'altezza della riga.**
@@ -1016,11 +1035,15 @@ function BarraAlta:init()
             dimen = Geom:new{ w = self.larghezza, h = alta_scritta },
             TextWidget:new{
                 text = scritta,
+                -- Il percorso piu' scuro e piu' grande (Paolo, 24/11/2026:
+                -- «troppo chiaro e piccolo»): nero come il titolo e quasi
+                -- dello stesso corpo; resta senza grassetto, ed e' quello
+                -- che lo distingue dal nome di una finestra.
                 face = Font:getFace("cfont",
-                    corpo(math.floor(alta_scritta * (e_titolo and 0.72 or 0.62)))),
+                    corpo(math.floor(alta_scritta * (e_titolo and 0.72 or 0.85)))),
                 bold = e_titolo or nil,
                 max_width = self.larghezza - 4 * Size.padding.default,
-                fgcolor = e_titolo and NERO or MEDIO,
+                fgcolor = NERO,
             },
         }
     end
