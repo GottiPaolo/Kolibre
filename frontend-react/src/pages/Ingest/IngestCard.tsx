@@ -111,6 +111,15 @@ export function IngestCard({
               <span>{t('ingest.card.pagesN', { n: item.pages })}</span>
             </>
           )}
+          {/* Voce da ISBN: titolo, autore e copertina li sta cercando il
+              server in sottofondo (24/11/2026). L'elenco si rinfresca da
+              solo finché ce n'è una (useIngestPage). */}
+          {item.in_ricerca && (
+            <>
+              <span className="text-muted-foreground/60">·</span>
+              <span className="italic">{t('ingest.card.inRicerca')}</span>
+            </>
+          )}
           {/* Proprietario (solo per l'admin): «senza proprietario» sono le
               righe di prima della colonna, o i file messi a mano nella
               radice di ingest — mai attribuiti per deduzione. */}

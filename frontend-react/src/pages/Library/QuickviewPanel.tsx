@@ -391,8 +391,9 @@ export function QuickviewPanel({
               <BookDescriptionHtml html={book.description} />
             </div>
             {/* Un comando che apre e chiude, non un'azione: quindi un
-                link, non un pulsante (linea guida di Paolo, 23/11/2026 —
-                vedi docs/storico/interfaccia-e-stile.md). */}
+                link, non un pulsante (linea guida di Paolo, 23/11/2026:
+                cio' che apre e chiude e' un link, cio' che agisce un
+                pulsante). */}
             {(descrizioneTrabocca || descrizioneEspansa) && (
               <button
                 type="button"

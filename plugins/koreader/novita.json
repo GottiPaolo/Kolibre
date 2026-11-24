@@ -22,6 +22,9 @@
     "e' un'altra, non la versione dichiarata (vedi patch_koreader.py)."
   ],
   "plugin": {
+    "1.0.1": {
+      "en": "A finished book now always reaches the server as finished. Before, the status only travelled when the book was closed with Wi-Fi on: closing it offline, marking it finished from the file browser or the history, or using Sync all positions sent only the percentage. Now the status is kept and sent with the next sync, whichever way you marked it."
+    },
     "1.0.0": {
       "en": "Kolibre for KOReader 1.0.0. Everything from 0.29 to 0.34 in one place: the plugin is in English; a new menu (Sync, Tools, Global, Dev, Library UI, Settings) with a Last sync reminder; the Kolibre library view is always there when it is on, takes you back to the author's folder when you leave a book, and no longer drops you into KOReader's file browser; deleting a book works offline and the book never comes back; closing a book sends that reading session, going to sleep runs a Sync; author photos arrive by themselves; automations start again from the 1.0 defaults (on startup and wake Sync, new books and updates; opening a book downloads its position; closing it sends the position and that reading session; going to sleep runs a Sync); Kolibre no longer writes anything inside your books; and Initialize library pairs identical files, sends the others to the server as they are, and tidies the device into Author/Title folders without losing reading progress, highlights, history or collections."
     },

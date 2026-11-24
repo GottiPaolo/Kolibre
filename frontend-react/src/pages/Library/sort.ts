@@ -57,7 +57,7 @@ export function getSortValue(
     case 'qualita':
       // Stessa famiglia di 'progress': un giudizio di Kolibre sul file
       // (qualita_libri), non un metadato Calibre — arriva da una mappa a
-      // parte (LibraryPage, useQualitaLibri). Mai misurato = vuoto.
+      // parte (LibraryPage, useQualitaPunteggi). Mai misurato = vuoto.
       return qualitaByBookId?.[book.id] ?? null
     default: {
       if (colId.startsWith('device-')) {

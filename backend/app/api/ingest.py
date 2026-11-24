@@ -17,7 +17,7 @@ from ..schemas_risposte import (
     ImportazioneDaFermare, LibroImportato, LibroInArretrato, ModoPaginazione,
     PaginaDiArretrati, SchedeDaIsbn, StatoImportazione,
 )
-from ..services import duplicates, ingest_folders, ingest_pages, metadata_scraper, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
+from ..services import duplicates, ingest_folders, ingest_isbn, ingest_pages, metadata_scraper, page_counter, app_settings, book_hash_service, author_ingest_hook, author_stats_service, stats_service, ingest_import_job, qualita_job
 from ..services.library_scanner import EBOOK_EXTENSIONS, formato_ammesso
 from ..services.watcher import ACTIVE_INGEST_STATUSES, stage_ingest_file
 from ..calibre import calibre_naming
@@ -108,6 +108,10 @@ def _serialize_ingest_item(item: models.IngestedBook, usernames: dict = None) ->
         # Calibre per un libro solo-record. All'importazione diventa una
         # scheda Calibre senza formati.
         "record_only": item.record_only,
+        # Una voce da ISBN i cui metadati si stanno ancora cercando in
+        # sottofondo (services/ingest_isbn.py, 24/11/2026): il sito la mostra
+        # «sto cercando» e rinfresca l'elenco finche' ce n'e' una.
+        "in_ricerca": ingest_isbn.in_ricerca(item.id),
         # Il formato e' fra quelli che Kolibre accetta? (scelta di Paolo,
         # 23/11/2026): un file fuori lista COMPARE in arretrato — cosi' lo
         # si vede e lo si scarta dal sito — ma non si puo' importare. Una
@@ -514,51 +518,30 @@ def stage_books_by_isbn(
                      "existing_title": occupante["title"] if occupante else None})
         da_mettere.append((isbn, rows[-1]))
 
-    trovati = metadata_scraper.fetch_metadata_by_isbn(
-        [i for i, _ in da_mettere]) if da_mettere else {}
-
+    # Le voci nascono SUBITO, col titolo uguale all'ISBN, e la risposta parte
+    # adesso: metadati e copertina li cerca un thread (services/
+    # ingest_isbn.py, 24/11/2026). Prima la richiesta aspettava le fonti per
+    # ogni ISBN, e il dialogo restava bloccato per tutto quel tempo.
+    da_cercare = {}
     for isbn, riga in da_mettere:
-        meta = trovati.get(isbn)
-        title = (meta or {}).get("title") or isbn
         item = models.IngestedBook(
-            # La voce e' di chi la crea, come un file caricato dal web.
             user_id=current_user.id,
-            # Nessun file: file_path vuoto e' lo stato dichiarato da
-            # record_only — tutto cio' che presuppone un file salta.
             record_only=True,
-            file_path="", filename=title, file_format="", file_size_bytes=0,
-            title=title,
-            author=(meta or {}).get("author"),
-            description=(meta or {}).get("description") or "",
-            pubdate=(meta or {}).get("pubdate"),
+            file_path="", filename=isbn, file_format="", file_size_bytes=0,
+            title=isbn,
+            author=None,
+            description="",
             isbn=isbn,
             status="pending",
         )
         db.add(item)
         db.flush()
-        # La copertina vera delle fonti va nella stessa cache delle
-        # copertine di staging (il nome e' l'id della riga, come per gli
-        # EPUB): all'importazione diventera' la copertina della scheda.
-        cover_ok = False
-        if meta and meta.get("cover_url"):
-            immagine = metadata_scraper.download_cover(meta["cover_url"])
-            if immagine:
-                os.makedirs(config.INGEST_COVERS_DIR, exist_ok=True)
-                cover_path = os.path.join(config.INGEST_COVERS_DIR, f"{item.id}.jpg")
-                try:
-                    with open(cover_path, "wb") as f:
-                        f.write(immagine)
-                    item.cover_path = cover_path
-                    cover_ok = True
-                except OSError as e:
-                    log_message("warning", "ingest", f"Saving the cover failed for ISBN {isbn}: {e}")
-        riga.update({"esito": "in_attesa" if meta else "in_attesa_vuota",
-                     "staged_id": item.id, "title": title,
-                     "author": item.author, "cover": cover_ok})
-        log_message("info", "ingest",
-                    f"Entry from ISBN {isbn} pending: "
-                    + ("metadata from the sources" if meta else "empty, to be filled in by hand"))
+        da_cercare[isbn] = item.id
+        riga.update({"esito": "in_ricerca", "staged_id": item.id, "title": isbn,
+                     "author": None, "cover": False})
+        log_message("info", "ingest", f"Entry from ISBN {isbn} pending, looking it up in the background")
     db.commit()
+    ingest_isbn.avvia(da_cercare)
 
     return {"library": library_name, "rows": rows}
 

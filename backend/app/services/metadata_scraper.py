@@ -271,8 +271,8 @@ def _search_google_books(title: str, author: str) -> list:
             # permanenza, quindi sul 429 si ripiega sul vecchio endpoint
             # feeds, che la quota non la conosce. Vedi _FEEDS_URL. (La
             # chiave API personale e' stata provata e poi tolta lo stesso
-            # 23/11 su scelta di Paolo: il ripiego basta; «da rivalutare
-            # in futuro» sta nella ROADMAP.)
+            # 23/11 su scelta di Paolo: il ripiego basta, da rivalutare
+            # in futuro.)
             ripiego = _search_google_feeds(title, author)
             if ripiego:
                 _segna("Google Books", "ok", "via the legacy feeds endpoint (no API key)")

@@ -59,8 +59,9 @@ export function IsbnImportDialog({ destLibrary, onClose }: IsbnImportDialogProps
 
   function descriviEsito(r: SchedaDaIsbn): string {
     switch (r.esito) {
-      case 'in_attesa': return t('ingest.isbn.esito.inAttesa')
-      case 'in_attesa_vuota': return t('ingest.isbn.esito.inAttesaVuota')
+      // Dal 24/11/2026 la voce nasce subito e i metadati li cerca il
+      // server in sottofondo: il dialogo non aspetta le fonti.
+      case 'in_ricerca': return t('ingest.isbn.esito.inRicerca')
       case 'non_valido': return t('ingest.isbn.esito.nonValido')
       case 'ripetuto': return t('ingest.isbn.esito.ripetuto')
       default: return r.esito

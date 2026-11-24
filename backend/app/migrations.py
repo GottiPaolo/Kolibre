@@ -821,7 +821,7 @@ def drop_google_books_api_key_setting() -> None:
     chiave risponde 429 in permanenza); Paolo ha deciso di toglierla —
     basta il ripiego sul vecchio feeds di Google, il trucco di Calibre —
     e una chiave eventualmente gia' incollata e' un segreto che non deve
-    restare orfano nel database. «Da rivalutare in futuro» (ROADMAP).
+    restare orfano nel database. Da rivalutare in futuro.
 
     **Idempotente per natura**: un DELETE su una riga che non c'e' e' un
     no-op, e su un database nuovo la tabella e' vuota — fresh == migrated.

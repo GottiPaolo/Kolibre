@@ -657,7 +657,7 @@ local KolibreAccoppiamento = require("kolibre_accoppiamento")
 -- calcoli il server e non noi.
 local KolibreLetture = require("kolibre_letture")
 
-local VERSION = "1.0.0"
+local VERSION = "1.0.1"
 
 -- La versione la dichiara questo file (la legge anche il server, vedi
 -- backend/app/api/tools.py); i moduli che la usano la ricevono qui.
@@ -4642,12 +4642,17 @@ function Kolibre:pushProgress(interactive)
     end
     if not self:_requireReachable(interactive) then return end
     local now = os.time()
-    if not interactive and now - (self.push_timestamp or 0) < PROGRESS_PUSH_DEBOUNCE_SECONDS then
+    local stato, stato_modificato = self:_statoDelLibro()
+    -- Un cambio di stato passa sempre l'antirimbalzo (24/11/2026): segnare
+    -- un libro finito e chiuderlo entro 25 secondi dall'ultimo invio lo
+    -- perdeva, perche' la coda salta il libro aperto («ci pensa
+    -- pushProgress»).
+    if not interactive and now - (self.push_timestamp or 0) < PROGRESS_PUSH_DEBOUNCE_SECONDS
+            and stato == self.last_pushed_stato then
         return
     end
 
     local percent = self:_getLastPercent()
-    local stato, stato_modificato = self:_statoDelLibro()
     -- Not dirty: nothing moved since our last successful push (e.g. closing
     -- a book right after opening it, or a suspend right after a resume,
     -- with no page turns in between) — skip the request outright. Manual/
@@ -4680,6 +4685,7 @@ function Kolibre:pushProgress(interactive)
     if ok then
         self.last_pushed_percent = percent
         self.last_pushed_stato = stato
+        self:_statoInviato(self.ui.document.file, stato)
     end
     if interactive then
         if ok then
@@ -4776,7 +4782,64 @@ function Kolibre:_readLocalProgress(file_path, is_paged)
     if type(percent) ~= "number" then return nil end
     local progress = is_paged and doc_settings:readSetting("last_page") or doc_settings:readSetting("last_xpointer")
     if not progress then return nil end
-    return { percent = percent, progress = progress }
+    -- Lo stato del libro («finito», «in pausa»), come `_statoDelLibro` per il
+    -- libro aperto (24/11/2026). Senza, le strade che leggono il sidecar — la
+    -- coda delle posizioni, «Sync all positions» — mandavano solo la
+    -- percentuale: un libro finito e chiuso senza rete non diventava mai
+    -- «finito» sul server.
+    local summary = doc_settings:readSetting("summary")
+    local stato, stato_modificato = nil, nil
+    if type(summary) == "table" and type(summary.status) == "string" and summary.status ~= "" then
+        stato = summary.status
+        stato_modificato = type(summary.modified) == "string" and summary.modified or nil
+    end
+    return { percent = percent, progress = progress, stato = stato, stato_modificato = stato_modificato }
+end
+
+--- I libri il cui stato e' cambiato fuori da un libro aperto finiscono in
+--- coda (24/11/2026).
+--
+-- Un libro si puo' segnare «finito» anche dal file browser o dalla
+-- cronologia di KOReader, senza aprirlo: nessun evento ci avvisa, e il
+-- libro non entra nella coda delle posizioni. Qui, prima di mandare la
+-- coda, si guardano i sidecar dei libri del manifesto: solo quelli il cui
+-- file e' cambiato dall'ultima volta (la data di modifica, che costa un
+-- `stat`), e fra quelli si mettono in coda i libri il cui stato non e'
+-- quello gia' mandato. Cosi' anche la scelta fatta senza rete parte alla
+-- prima coda utile, come ha chiesto Paolo.
+function Kolibre:_statiDaMandare()
+    local visti = self.manifest:getMeta("sidecar_visti")
+    if type(visti) ~= "table" then visti = {} end
+    local inviati = self.manifest:getMeta("stati_inviati")
+    if type(inviati) ~= "table" then inviati = {} end
+    local cambiati = false
+    for _k, e in pairs(self.manifest:all()) do
+        local path = e.path
+        local sidecar = path and DocSettings:findSidecarFile(path)
+        local quando = sidecar and lfs.attributes(sidecar, "modification")
+        if quando and visti[path] ~= quando then
+            visti[path] = quando
+            cambiati = true
+            local ok, ds = pcall(function() return DocSettings:open(path) end)
+            local summary = ok and ds and ds:readSetting("summary")
+            local stato = type(summary) == "table" and summary.status or nil
+            if type(stato) == "string" and stato ~= "" and inviati[path] ~= stato then
+                self.manifest:markPositionDirty(path)
+            end
+        end
+    end
+    if cambiati then self.manifest:setMeta("sidecar_visti", visti) end
+end
+
+--- Ricorda lo stato mandato, cosi' `_statiDaMandare` non lo rimanda.
+function Kolibre:_statoInviato(path, stato)
+    if not path or not stato then return end
+    local inviati = self.manifest:getMeta("stati_inviati")
+    if type(inviati) ~= "table" then inviati = {} end
+    if inviati[path] ~= stato then
+        inviati[path] = stato
+        self.manifest:setMeta("stati_inviati", inviati)
+    end
 end
 
 -- DocSettings:open() on a book with no sidecar yet returns a fresh, empty
@@ -5032,6 +5095,7 @@ local POSITION_PUSH_MAX_FAILURES = 5
 
 function Kolibre:_pushQueuedPositions(interactive)
     if not self:_requireReachable(interactive) then return end
+    pcall(function() self:_statiDaMandare() end)
     local paths = self.manifest:positionDirtyPaths()
     if #paths == 0 then return end
     local current_path = self.ui.document and self.ui.document.file or nil
@@ -5049,9 +5113,11 @@ function Kolibre:_pushQueuedPositions(interactive)
             if local_pos then
                 local ok = self.api:request("PUT", "/api/kolibre/devices/progress", self:_withIdentity({
                     hash = hash, format = format, percentage = local_pos.percent, progress = local_pos.progress,
+                    stato = local_pos.stato, stato_modificato = local_pos.stato_modificato,
                 }, path))
                 if ok then
                     pushed = pushed + 1
+                    self:_statoInviato(path, local_pos.stato)
                     self.manifest:clearPositionDirty(path)
                 else
                     -- Fallito: resta in coda, ma NON per sempre (23/11/2026,
@@ -5093,10 +5159,12 @@ function Kolibre:_confirmPushAllProgress(to_push, to_pull)
         cancel_text = t("koreader.common.ignore"),
         ok_callback = function()
             for _idx, e in ipairs(to_push) do
-                self.api:request("PUT", "/api/kolibre/devices/progress", self:_withIdentity({
+                local ok_s = self.api:request("PUT", "/api/kolibre/devices/progress", self:_withIdentity({
                     hash = e.book.hash, format = e.book.format,
                     percentage = e.local_pos.percent, progress = e.local_pos.progress,
+                    stato = e.local_pos.stato, stato_modificato = e.local_pos.stato_modificato,
                 }, e.book.path))
+                if ok_s then self:_statoInviato(e.book.path, e.local_pos.stato) end
             end
             UIManager:show(InfoMessage:new{ text = t("koreader.position.push_all_done", { count = #to_push }), timeout = 3 })
             self:_confirmPullAllProgress(to_pull)

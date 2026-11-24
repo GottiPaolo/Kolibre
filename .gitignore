@@ -76,6 +76,9 @@ ImmaginiRiferimento/
 # pesano centinaia di kB a giro. La prima e' prove-aspetto/ui-koreader/,
 # la UI del plugin KOReader (14/11/2026).
 prove-aspetto/
+# Le due cartelle qui sopra, archiviate (24/11/2026): stesso materiale di
+# lavoro, non sorgente.
+docs/storico/immagini/
 
 # Ad-hoc scratch notes/task briefs dropped at the repo root during a work
 # session — not documentation, belongs in chat history instead.

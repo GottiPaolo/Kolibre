@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from .. import auth, config, database, models
 from ..calibre.library import CalibreLibrary
 from ..logging_utils import log_message
-from ..schemas_risposte import (Esito, QualitaDettaglio, QualitaElenco,
+from ..schemas_risposte import (Esito, QualitaDettaglio, QualitaElenco, QualitaPunteggi,
                                 QualitaImpostazioni, QualitaStato)
 from ..services import app_settings, qualita_job
 from .libraries import biblioteca_scrivibile, default_library_param
@@ -118,6 +118,29 @@ def analizza(payload: dict = None, library: str = Depends(biblioteca_scrivibile)
                 f"'{_chi(chi)}' started a quality pass on '{library}'"
                 f"{', redoing the books that already have a score' if forza else ''}.")
     return {"status": "ok"}
+
+
+@router.get("/punteggi", response_model=QualitaPunteggi)
+def punteggi(library: str = Depends(default_library_param), db: Session = Depends(database.get_db)):
+    """
+    Tutti i punteggi di una biblioteca, per la colonna «Qualita'» della
+    tabella dei libri.
+
+    **Perche' non `/libri`** (24/11/2026, segnalato da Paolo: «la colonna
+    qualita' non mostra tutti i valori»). La colonna usava `/libri`, che e'
+    fatta per la tabella di «Interventi»: risponde di serie con 200 righe,
+    ordinate dal punteggio piu' basso, e al massimo 2.000. Nella biblioteca
+    grande di Paolo i libri misurati sono 5.840: la colonna ne mostrava
+    200, e tutti gli altri sembravano mai misurati. Qui non si legge
+    nemmeno la biblioteca di Calibre: un id di un libro cancellato non fa
+    danni, la tabella semplicemente non lo cerca.
+    """
+    righe = db.query(models.QualitaLibro.calibre_book_id, models.QualitaLibro.punteggio).filter(
+        models.QualitaLibro.library == library,
+        models.QualitaLibro.stato == "ok",
+        models.QualitaLibro.punteggio.isnot(None),
+    ).all()
+    return {"punteggi": {libro: int(round(p)) for libro, p in righe}}
 
 
 @router.get("/libri", response_model=QualitaElenco)

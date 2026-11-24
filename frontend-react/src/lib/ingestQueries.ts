@@ -24,6 +24,11 @@ export function useIngestBooks(abilitata = true) {
       return Array.isArray(data) ? data : data.items
     },
     enabled: abilitata,
+    // Come useIngestPage: si rilegge da solo finché una voce da ISBN è «in
+    // ricerca» (24/11/2026).
+    refetchInterval: (q) => (
+      (q.state.data as { in_ricerca?: boolean }[] | undefined)?.some((i) => i.in_ricerca) ? 2000 : false
+    ),
   })
 }
 
@@ -78,6 +83,12 @@ export function useIngestPage(opts: { offset: number; limit: number }, abilitata
       return data
     },
     enabled: abilitata,
+    // Finché una voce da ISBN è «in ricerca» (il server sta chiedendo
+    // metadati e copertina in sottofondo, 24/11/2026) l'elenco si rilegge da
+    // solo: la voce si completa sotto gli occhi, senza ricaricare la pagina.
+    refetchInterval: (q) => (
+      (q.state.data as IngestPage | undefined)?.items?.some((i) => i.in_ricerca) ? 2000 : false
+    ),
     placeholderData: (precedente) => precedente,
   })
 }

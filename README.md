@@ -493,8 +493,9 @@ not cost you your place in the list. Eight sections, in four groups:
   read or write permission, full-text indexing per library
 - **People** — accounts and what each one may do: create libraries, register devices,
   manage others
-- **Appearance** — the interface language, English or Italian; the plugins you download
-  from here are packaged in that language too. And **ten themes** chosen as a *pair*: one
+- **Appearance** — the interface language, English or Italian; the Calibre and Obsidian
+  plugins you download from here are packaged in that language too (the KOReader plugin
+  is in English). And **ten themes** chosen as a *pair*: one
   light, one dark, plus the rule that decides which is active — follow the operating
   system, or pick one and stay there. Then cover size, table density, date format, and a
   drag-and-drop builder for the sidebar
@@ -515,30 +516,39 @@ not cost you your place in the list. Eight sections, in four groups:
 
 This is the piece that makes the whole idea work. The plugin is installed once over USB,
 then **updates itself over Wi-Fi** from your own server — on demand, or automatically at
-startup if you turn that on.
+startup if you turn that on. Its menu is in English.
 
 - **Send and remove books.** You choose on the server; the device applies it at the next
   sync. Removals can be automatic, confirmed on the device, or never — your choice, per
   device.
-- **Sync back everything the device knows**: reading positions, reading statistics,
-  highlights and notes, and the words you looked up.
+- **Sync back everything the device knows**: reading positions, whether a book is
+  finished, reading statistics, highlights and notes, and the words you looked up.
+  Closing a book sends that reading session on its own; whatever happens without Wi-Fi
+  waits in a queue for the next sync.
 - **Back up KOReader itself** — its settings, its reading history, its statistics database.
   This was the thing missing everywhere else: the e-reader was the only device with no
   backup.
 - **Quick check** — a fast sync that only looks at new and removed books, skipping the full
-  round of statistics and annotations. It is the default on startup, because that is the
-  moment you want your new book to be there.
-- **Automations** — what should happen on startup, on wake, when a book is opened or
-  closed.
+  round of statistics and annotations: for when the only question is whether something new
+  has arrived.
+- **Automations** — what should happen on startup and wake, when a book is opened or
+  closed, and when the device goes to sleep.
+- **Delete from the device, even offline** — the file goes at once, the server is told at
+  the next sync, and the book is never sent back.
 - **Browse the library from the device** — the catalogue, with covers, on the e-reader.
   *(Honestly: against the philosophy above. It is there because sometimes you want it.)*
-- **Initialize library** — the command for a device you have been using for years. It walks
-  every book already on the e-reader, finds the ones Kolibre does not know about yet, and
-  proposes a match against your library. On a device with hundreds of books it takes a few
-  minutes, and it is the first thing to run after installing the plugin on a reader with a
-  life of its own. Nothing is paired without you saying so.
-- **Folder layout for [Project Title](https://github.com/joshuacant/ProjectTitle)** — the file tree is written as an
-  author list with portraits, so the cover browser shows a real shelf.
+- **Initialize library** — the command for a device you have been using for years, in
+  three steps that each ask first. Books identical to one in your library are paired with
+  it. The others are sent to the server exactly as they are, and become new books there —
+  nothing on the device is overwritten. Then the books are moved into `Author/Title`
+  folders, keeping their reading progress, highlights, history and collections. It is the
+  first thing to run after installing the plugin on a reader with a life of its own.
+- **A library view of its own** — instead of KOReader's file browser: author folders with
+  portraits, covers, a bar as long as the book filled as far as you have read, the latest
+  books sent from the server and the history. Turn it on and it is always there; turn it
+  off and KOReader is back as it was. Kolibre never writes inside your books, so
+  [Project Title](https://github.com/joshuacant/ProjectTitle) no longer gets a page count
+  from them; the plugin says so once, if you use it.
 
 Statistics are sent **incrementally**: a device that has been reading for two years has a
 statistics database of several hundred kilobytes, and uploading all of it at every sync was
@@ -740,13 +750,10 @@ is a number and a switch, not a disclaimer.
 
 ## Roadmap
 
-Where this is heading next. Three things, no dates:
+Where this is heading next. Two things, no dates:
 
 - **A web reader worth reading in.** Today it is for checking a passage; it should be able
   to hold a novel, with the same position sync and the same highlights as a device.
-- **A real interface on KOReader.** The plugin works through KOReader's own menus, which is
-  the cheap way in. A purpose-built screen for the library, the sync and the queue would make
-  the device side feel like one piece with the server instead of a settings tree.
 - **A client that is not a browser.** The backend already serves nothing but JSON, files and
   OPDS, so a native application — macOS, Windows, Linux, Android — could talk to it with no
   web app in front of it. That is the reason for the split, and it is the point at which it

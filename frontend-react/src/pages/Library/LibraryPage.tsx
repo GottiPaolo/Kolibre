@@ -24,7 +24,7 @@ import {
   type LibraryViewMode,
 } from '@/lib/libraryColumns'
 import { applySortClick, compareBooks, type SortCriterion } from './sort'
-import { useQualitaLibri } from '@/lib/qualitaActions'
+import { useQualitaPunteggi } from '@/lib/qualitaActions'
 import { useRowSelection } from '@/lib/useRowSelection'
 import { LibraryTable, type SelectModifiers } from './LibraryTable'
 import { LibraryCards } from './LibraryCards'
@@ -94,14 +94,13 @@ export function LibraryPage() {
   // l'avanzamento qui sopra: non e' un campo di Book, e' un giudizio di
   // Kolibre sul file, e viaggia in una mappa a parte. Solo i misurati con
   // esito buono hanno una voce — un errore d'analisi non e' uno zero.
-  const { data: qualitaElenco } = useQualitaLibri(activeLibrary?.folder_name)
+  // Tutti, non i primi 200 (24/11/2026): vedi useQualitaPunteggi.
+  const { data: qualitaPunteggi } = useQualitaPunteggi(activeLibrary?.folder_name)
   const qualitaByBookId = useMemo(
     () => Object.fromEntries(
-      (qualitaElenco?.libri ?? [])
-        .filter((r) => r.stato === 'ok' && r.punteggio != null)
-        .map((r) => [r.id, r.punteggio as number])
-    ),
-    [qualitaElenco]
+      Object.entries(qualitaPunteggi?.punteggi ?? {}).map(([id, p]) => [Number(id), p])
+    ) as Record<number, number>,
+    [qualitaPunteggi]
   )
 
   // Colonna dinamica per dispositivo ("Su: <nome>") — porting delle

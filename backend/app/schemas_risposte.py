@@ -165,6 +165,17 @@ class QualitaElenco(Permissivo):
     totale: int
 
 
+class QualitaPunteggi(Permissivo):
+    """
+    Il punteggio di OGNI libro misurato di una biblioteca, id → 0-100, per la
+    colonna «Qualita'» della tabella (24/11/2026). Solo i libri misurati
+    senza errori: un libro che manca qui e' «mai misurato», e la colonna lo
+    lascia vuoto. Niente titoli ne' paginazione: e' un dizionario di numeri,
+    e serve intero.
+    """
+    punteggi: dict[int, int]
+
+
 class QualitaDettaglio(Permissivo):
     """
     Il risultato intero della misura, cosi' come l'ha scritto la funzione.
@@ -3232,6 +3243,8 @@ class LibroInArretrato(Permissivo):
     #: aprire/scaricare non esistono, e all'importazione diventa una
     #: scheda Calibre senza formati.
     record_only: bool = False
+    #: Si stanno ancora cercando metadati e copertina (voce da ISBN).
+    in_ricerca: bool = False
     # Formato fra quelli ammessi? False = la voce compare solo per essere
     # vista e scartata: non si puo' importare (scelta di Paolo, 23/11/2026).
     supported: bool = True
@@ -3353,13 +3366,14 @@ class SchedaDaIsbn(Permissivo):
     #: L'ISBN normalizzato (solo cifre); per un `non_valido`, la stringa
     #: com'era arrivata, cosi' chi legge la ritrova.
     isbn: str
-    #: `in_attesa` (voce creata coi metadati delle fonti),
-    #: `in_attesa_vuota` (nessuna fonte lo conosce: voce col solo ISBN,
-    #: titolo = ISBN, da compilare a mano), `non_valido` (la cifra di
-    #: controllo non torna: NON creata), `ripetuto` (stesso ISBN due
-    #: volte nella stessa richiesta).
+    #: `in_ricerca` (voce creata col titolo = ISBN; metadati e copertina
+    #: li cerca un thread, dal 24/11/2026 — vedi services/ingest_isbn.py),
+    #: `non_valido` (la cifra di controllo non torna: NON creata),
+    #: `ripetuto` (stesso ISBN due volte nella stessa richiesta). Fino al
+    #: 24/11 la ricerca era dentro la richiesta e gli esiti erano
+    #: `in_attesa` / `in_attesa_vuota`.
     esito: str
-    #: La voce di Ingest creata, per `in_attesa` e `in_attesa_vuota`.
+    #: La voce di Ingest creata, per `in_ricerca`.
     staged_id: Optional[int]
     title: Optional[str]
     author: Optional[str]

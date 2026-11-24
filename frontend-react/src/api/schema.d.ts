@@ -4852,6 +4852,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/kolibre/qualita/punteggi": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Punteggi
+         * @description Tutti i punteggi di una biblioteca, per la colonna «Qualita'» della
+         *     tabella dei libri.
+         *
+         *     **Perche' non `/libri`** (24/11/2026, segnalato da Paolo: «la colonna
+         *     qualita' non mostra tutti i valori»). La colonna usava `/libri`, che e'
+         *     fatta per la tabella di «Interventi»: risponde di serie con 200 righe,
+         *     ordinate dal punteggio piu' basso, e al massimo 2.000. Nella biblioteca
+         *     grande di Paolo i libri misurati sono 5.840: la colonna ne mostrava
+         *     200, e tutti gli altri sembravano mai misurati. Qui non si legge
+         *     nemmeno la biblioteca di Calibre: un id di un libro cancellato non fa
+         *     danni, la tabella semplicemente non lo cerca.
+         */
+        get: operations["punteggi_api_kolibre_qualita_punteggi_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/kolibre/qualita/libri": {
         parameters: {
             query?: never;
@@ -9430,6 +9460,11 @@ export interface components {
              */
             record_only: boolean;
             /**
+             * In Ricerca
+             * @default false
+             */
+            in_ricerca: boolean;
+            /**
              * Supported
              * @default true
              */
@@ -10683,6 +10718,22 @@ export interface components {
         QualitaImpostazioni: {
             /** Enabled */
             enabled: boolean;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * QualitaPunteggi
+         * @description Il punteggio di OGNI libro misurato di una biblioteca, id → 0-100, per la
+         *     colonna «Qualita'» della tabella (24/11/2026). Solo i libri misurati
+         *     senza errori: un libro che manca qui e' «mai misurato», e la colonna lo
+         *     lascia vuoto. Niente titoli ne' paginazione: e' un dizionario di numeri,
+         *     e serve intero.
+         */
+        QualitaPunteggi: {
+            /** Punteggi */
+            punteggi: {
+                [key: string]: number;
+            };
         } & {
             [key: string]: unknown;
         };
@@ -19643,6 +19694,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Esito"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    punteggi_api_kolibre_qualita_punteggi_get: {
+        parameters: {
+            query?: {
+                token?: string | null;
+                library?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QualitaPunteggi"];
                 };
             };
             /** @description Validation Error */

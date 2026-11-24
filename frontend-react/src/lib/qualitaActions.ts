@@ -83,6 +83,29 @@ export function useQualitaLibri(
   })
 }
 
+/**
+ * Tutti i punteggi di una biblioteca, id → 0-100: per la colonna «Qualita'»
+ * della tabella dei libri (24/11/2026). Non `useQualitaLibri`, che e' la
+ * tabella di Interventi: risponde a pagine da 200, e la colonna mostrava i
+ * 200 punteggi piu' bassi e lasciava vuoti tutti gli altri.
+ *
+ * La chiave comincia come quella dell'elenco, cosi' la stessa invalidazione
+ * (fine di una misura) rinfresca anche questa.
+ */
+export function useQualitaPunteggi(libraryFolder: string | undefined) {
+  return useQuery({
+    queryKey: ['qualita-libri', libraryFolder, 'punteggi'],
+    enabled: !!libraryFolder,
+    queryFn: async () => {
+      const { data, error } = await api.GET('/api/kolibre/qualita/punteggi', {
+        params: { query: { library: libraryFolder! } },
+      })
+      if (error) throw error
+      return data
+    },
+  })
+}
+
 /** Il risultato intero di un libro: si chiede solo quando si apre il dettaglio. */
 export function useQualitaDettaglio(libraryFolder: string | undefined, bookId: number | null) {
   return useQuery({
